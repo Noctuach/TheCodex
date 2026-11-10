@@ -130,6 +130,7 @@ PresetManager::PresetManager (AudioProcessorValueTreeState& s) : apvts (s)
          .clip (1, CD::Diode, 24.0f, -9.0f, 0.1f).band (1, LowCut, 32.0f).band (3, Bell, 450.0f, 5.0f, 1.2f)
          .band (4, Notch, 1500.0f, 0.0f, 3.0f).clip (2, CD::HardClip, 12.0f, -6.0f).character (1, 0.25f));
 
+    refreshUserPresets();
     if (apvts.state.getProperty (presetNameProperty).toString().isEmpty())
         setCurrentName ("Init");
 }
@@ -143,18 +144,34 @@ StringArray PresetManager::getFactoryNames() const
 
 File PresetManager::getUserDirectory() const
 {
-    auto dir = File::getSpecialLocation (File::userDocumentsDirectory).getChildFile ("HardKick").getChildFile ("Presets");
+    auto dir = File::getSpecialLocation (File::userDocumentsDirectory).getChildFile ("Codex").getChildFile ("Presets");
     dir.createDirectory();
     return dir;
 }
 
 StringArray PresetManager::getUserNames() const
 {
+    const ScopedLock sl (userNamesLock);
+    return userNames;
+}
+
+void PresetManager::refreshUserPresets()
+{
     StringArray names;
-    for (const auto& f : getUserDirectory().findChildFiles (File::findFiles, false, "*.hkpreset"))
+    for (const auto& f : getUserDirectory().findChildFiles (File::findFiles, false, "*.cdxpreset"))
         names.add (f.getFileNameWithoutExtension());
     names.sortNatural();
-    return names;
+    const ScopedLock sl (userNamesLock);
+    userNames.swapWith (names);
+}
+
+bool PresetManager::deleteUserPreset (const String& name)
+{
+    const bool ok = getUserDirectory().getChildFile (name + ".cdxpreset").deleteFile();
+    refreshUserPresets();
+    if (ok && getCurrentName() == name)
+        setCurrentName ("Init");
+    return ok;
 }
 
 bool PresetManager::isKeyParameter (const String& id) const
@@ -186,7 +203,7 @@ void PresetManager::resetToDefaults()
 
 void PresetManager::setCurrentName (const String& name)
 {
-    apvts.state.setProperty (presetNameProperty, name, nullptr);
+    apvts.state.setProperty (presetNameProperty, name, apvts.undoManager);
 }
 
 String PresetManager::getCurrentName() const
@@ -205,7 +222,7 @@ void PresetManager::loadFactory (int index)
 
 void PresetManager::loadUser (const String& name)
 {
-    auto xml = parseXML (getUserDirectory().getChildFile (name + ".hkpreset"));
+    auto xml = parseXML (getUserDirectory().getChildFile (name + ".cdxpreset"));
     if (xml == nullptr || ! xml->hasTagName (apvts.state.getType()))
         return;
 
@@ -228,13 +245,17 @@ bool PresetManager::saveUserPreset (const String& rawName)
     if (name.isEmpty()) return false;
     setCurrentName (name);
     auto state = apvts.copyState();
+    bool ok = false;
     if (auto xml = state.createXml())
-        return xml->writeTo (getUserDirectory().getChildFile (name + ".hkpreset"));
-    return false;
+        ok = xml->writeTo (getUserDirectory().getChildFile (name + ".cdxpreset"));
+    refreshUserPresets();
+    return ok;
 }
 
 void PresetManager::loadPreset (int combinedIndex)
 {
+    if (auto* um = apvts.undoManager)
+        um->beginNewTransaction ("Load preset");
     if (combinedIndex < getNumFactory())
         loadFactory (combinedIndex);
     else

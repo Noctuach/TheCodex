@@ -1,7 +1,18 @@
 #pragma once
 #include <juce_audio_processors/juce_audio_processors.h>
 #include "LookAndFeel.h"
+#include "Help.h"
 #include "../DSP/CurveEnvelope.h"
+
+/** Common behaviour for every parameter slider: tooltip, double-click to reset, Shift-drag for fine control. */
+inline void configureParameterSlider (juce::Slider& slider, juce::AudioProcessorValueTreeState& s, const juce::String& id)
+{
+    slider.setTooltip (Help::forParameter (id));
+    if (auto* p = s.getParameter (id))
+        slider.setDoubleClickReturnValue (true, p->convertFrom0to1 (p->getDefaultValue()));
+    slider.setVelocityModeParameters (0.35, 1, 0.0, true, juce::ModifierKeys::shiftModifier);
+    slider.setScrollWheelEnabled (true);
+}
 
 /** Rotary knob with a caption above and value read-out below, bound to a parameter. */
 class Knob : public juce::Component
@@ -10,13 +21,16 @@ public:
     explicit Knob (const juce::String& caption)
     {
         label.setText (caption.toUpperCase(), juce::dontSendNotification);
+        label.getProperties().set ("caption", true);
         label.setJustificationType (juce::Justification::centred);
         label.setColour (juce::Label::textColourId, Colours_::textDim);
+        label.setInterceptsMouseClicks (false, false);
         slider.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
-        slider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 72, 16);
+        slider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 80, 18);
         slider.setColour (juce::Slider::textBoxTextColourId, Colours_::text);
         slider.setColour (juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
         slider.setColour (juce::Slider::textBoxBackgroundColourId, juce::Colours::transparentBlack);
+        slider.setMouseDragSensitivity (220);
         addAndMakeVisible (label);
         addAndMakeVisible (slider);
     }
@@ -25,12 +39,13 @@ public:
     {
         attachment.reset();
         attachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (s, id, slider);
+        configureParameterSlider (slider, s, id);
     }
 
     void resized() override
     {
         auto r = getLocalBounds();
-        label.setBounds (r.removeFromTop (14));
+        label.setBounds (r.removeFromTop (16));
         slider.setBounds (r);
     }
 
@@ -46,8 +61,10 @@ public:
     explicit ChoiceBox (const juce::String& caption)
     {
         label.setText (caption.toUpperCase(), juce::dontSendNotification);
-        label.setJustificationType (juce::Justification::centred);
+        label.getProperties().set ("caption", true);
+        label.setJustificationType (juce::Justification::centredLeft);
         label.setColour (juce::Label::textColourId, Colours_::textDim);
+        label.setInterceptsMouseClicks (false, false);
         addAndMakeVisible (label);
         addAndMakeVisible (box);
     }
@@ -59,13 +76,15 @@ public:
             if (auto* c = dynamic_cast<juce::AudioParameterChoice*> (s.getParameter (id)))
                 box.addItemList (c->choices, 1);
         attachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (s, id, box);
+        box.setTooltip (Help::forParameter (id));
     }
 
     void resized() override
     {
         auto r = getLocalBounds();
-        label.setBounds (r.removeFromTop (14));
-        box.setBounds (r.withSizeKeepingCentre (r.getWidth(), juce::jmin (24, r.getHeight())));
+        label.setBounds (r.removeFromTop (16).withTrimmedLeft (1));
+        r.removeFromTop (2);
+        box.setBounds (r.removeFromTop (juce::jmin (28, r.getHeight())));
     }
 
     juce::Label label;
@@ -90,18 +109,22 @@ public:
     {
         auto area = getLocalBounds().toFloat();
         g.setColour (Colours_::display);
-        g.fillRoundedRectangle (area, 5.0f);
-        g.setColour (Colours_::outline);
-        g.drawRoundedRectangle (area.reduced (0.5f), 5.0f, 1.0f);
+        g.fillRoundedRectangle (area, 6.0f);
 
-        // faint grid
         g.setColour (Colours_::grid);
         for (int i = 1; i < 8; ++i)
             g.drawVerticalLine ((int) (area.getX() + area.getWidth() * (float) i / 8.0f), area.getY() + 1, area.getBottom() - 1);
         for (int i = 1; i < 4; ++i)
             g.drawHorizontalLine ((int) (area.getY() + area.getHeight() * (float) i / 4.0f), area.getX() + 1, area.getRight() - 1);
 
-        area = area.reduced (8.0f, 8.0f);
+        // inner shadow at the top for depth
+        g.setGradientFill (juce::ColourGradient (juce::Colours::black.withAlpha (0.35f), 0, area.getY(),
+                                                 juce::Colours::transparentBlack, 0, area.getY() + 10.0f, false));
+        g.fillRoundedRectangle (area.withHeight (10.0f), 6.0f);
+        g.setColour (Colours_::outline);
+        g.drawRoundedRectangle (area.reduced (0.5f), 6.0f, 1.0f);
+
+        area = area.reduced (9.0f, 9.0f);
 
         const float A = cached[0], D = cached[1], S = cached[2], R = cached[3], C = cached[4];
         // sqrt time scaling keeps short and long stages readable at once
@@ -131,15 +154,17 @@ public:
         juce::Path fill (p);
         fill.lineTo (X (total), Y (0));
         fill.closeSubPath();
-        g.setGradientFill (juce::ColourGradient (colour.withAlpha (0.35f), 0, area.getY(),
+        g.setGradientFill (juce::ColourGradient (colour.withAlpha (0.32f), 0, area.getY(),
                                                  colour.withAlpha (0.02f), 0, area.getBottom(), false));
         g.fillPath (fill);
         Colours_::strokeGlow (g, p, colour, 1.8f);
 
         // Note-off marker
-        g.setColour (Colours_::textDim.withAlpha (0.35f));
         const float noteOffX = X (wa + wd + ws);
+        g.setColour (Colours_::textFaint);
         g.drawVerticalLine ((int) noteOffX, area.getY(), area.getBottom());
+        g.setFont (Fonts::label (10.0f, 0.15f));
+        g.drawText ("NOTE OFF", juce::Rectangle<float> (noteOffX + 4.0f, area.getY() - 3.0f, 60.0f, 12.0f), juce::Justification::centredLeft);
     }
 
 private:
@@ -149,7 +174,7 @@ private:
         for (size_t i = 0; i < params.size(); ++i)
         {
             const float v = params[i]->load();
-            if (v != cached[i]) { cached[i] = v; changed = true; }
+            if (! juce::exactlyEqual (v, cached[i])) { cached[i] = v; changed = true; }
         }
         if (changed) repaint();
     }
@@ -159,7 +184,7 @@ private:
     std::array<float, 5> cached { -1, -1, -1, -1, -1 };
 };
 
-/** Simple vertical peak meter. */
+/** Vertical peak meter with hold marker (red above 0 dBFS). */
 class LevelMeter : public juce::Component
 {
 public:
@@ -177,29 +202,33 @@ public:
         auto r = getLocalBounds().toFloat();
         g.setColour (Colours_::display);
         g.fillRoundedRectangle (r, 3.0f);
+        g.setColour (Colours_::outline);
+        g.drawRoundedRectangle (r.reduced (0.5f), 3.0f, 1.0f);
+        r = r.reduced (2.5f);
         auto toY = [&] (float db) { return juce::jmap (db, -60.0f, 6.0f, r.getBottom(), r.getY()); };
+
+        // tick marks every 12 dB
+        g.setColour (Colours_::grid.brighter (0.3f));
+        for (float db = -48.0f; db <= 0.0f; db += 12.0f)
+            g.drawHorizontalLine ((int) toY (db), r.getX(), r.getRight());
+
         const float y = toY (juce::jmin (level, 6.0f));
-        g.setGradientFill (juce::ColourGradient (juce::Colour (0xffbfe9ff), 0, toY (0.0f), Colours_::accent.darker (0.4f), 0, r.getBottom(), false));
-        g.fillRect (r.withTop (y).reduced (2.0f, 0.0f));
-        g.setColour (hold > 0.0f ? juce::Colour (0xffff4d6d) : Colours_::text);
-        g.fillRect (r.getX() + 2.0f, toY (juce::jmin (hold, 6.0f)), r.getWidth() - 4.0f, 2.0f);
-        g.setColour (Colours_::textDim.withAlpha (0.6f));
-        g.drawHorizontalLine ((int) toY (0.0f), r.getX(), r.getRight());
+        g.setGradientFill (juce::ColourGradient (Colours_::accentHi, 0, toY (0.0f), Colours_::accent.darker (0.5f), 0, r.getBottom(), false));
+        g.fillRoundedRectangle (r.withTop (y), 1.5f);
+        if (level > 0.0f)
+        {
+            g.setColour (Colours_::warn);
+            g.fillRect (r.withTop (y).withBottom (toY (0.0f)));
+        }
+        g.setColour (hold > 0.0f ? Colours_::warn : Colours_::text);
+        g.fillRect (r.getX(), toY (juce::jmin (hold, 6.0f)) - 1.0f, r.getWidth(), 2.0f);
+        g.setColour (Colours_::textDim.withAlpha (0.7f));
+        g.drawHorizontalLine ((int) toY (0.0f), r.getX() - 2.0f, r.getRight() + 2.0f);
     }
 
 private:
     float level = -60.0f, hold = -60.0f;
     int holdTimer = 0;
-};
-
-/** Momentary button: fires onPress(true) on mouse down and onPress(false) on mouse up. */
-class TriggerButton : public juce::TextButton
-{
-public:
-    using juce::TextButton::TextButton;
-    std::function<void (bool)> onPress;
-    void mouseDown (const juce::MouseEvent& e) override { TextButton::mouseDown (e); if (onPress) onPress (true); }
-    void mouseUp (const juce::MouseEvent& e) override   { TextButton::mouseUp (e);   if (onPress) onPress (false); }
 };
 
 /** Round power toggle (section on/off), glowing when enabled. */
@@ -214,24 +243,76 @@ public:
         const float d = juce::jmin (r.getWidth(), r.getHeight()) - 2.0f;
         auto c = r.withSizeKeepingCentre (d, d);
         const bool on = getToggleState();
-        const auto col = on ? Colours_::accent : Colours_::textDim.withAlpha (over ? 0.9f : 0.6f);
+        const auto col = on ? Colours_::accent : Colours_::textDim.withAlpha (over ? 0.95f : 0.6f);
 
         if (on)
         {
-            g.setColour (col.withAlpha (0.18f));
-            g.fillEllipse (c.expanded (1.0f));
+            g.setColour (col.withAlpha (0.16f));
+            g.fillEllipse (c.expanded (1.5f));
         }
         g.setColour (Colours_::display);
         g.fillEllipse (c.reduced (1.5f));
-        g.setColour (col);
+        g.setColour (on ? col : (over ? Colours_::outlineHi : Colours_::outline));
         g.drawEllipse (c.reduced (1.5f), 1.2f);
-
-        const auto ctr = c.getCentre();
-        const float ir = d * 0.24f;
-        juce::Path icon;
-        icon.addCentredArc (ctr.x, ctr.y, ir, ir, 0.0f, 0.7f, juce::MathConstants<float>::twoPi - 0.7f, true);
-        icon.startNewSubPath (ctr.x, ctr.y - ir * 1.35f);
-        icon.lineTo (ctr.x, ctr.y - ir * 0.2f);
-        g.strokePath (icon, juce::PathStrokeType (1.5f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        Icons::draw (g, Icons::power(), c.reduced (d * 0.27f), col, 1.5f);
     }
 };
+
+/** Momentary button: fires onPress(true) on mouse down and onPress(false) on mouse up. */
+class TriggerButton : public juce::TextButton
+{
+public:
+    using juce::TextButton::TextButton;
+    std::function<void (bool)> onPress;
+    void mouseDown (const juce::MouseEvent& e) override { TextButton::mouseDown (e); if (onPress) onPress (true); }
+    void mouseUp (const juce::MouseEvent& e) override   { TextButton::mouseUp (e);   if (onPress) onPress (false); }
+};
+
+/** Rounded section panel with a header strip and soft drop shadow (shared by all views). */
+inline void drawSectionPanel (juce::Graphics& g, juce::Rectangle<int> r, const juce::String& title, juce::Colour dot)
+{
+    using namespace juce;
+    const auto rf = r.toFloat();
+    for (int i = 3; i > 0; --i)
+    {
+        g.setColour (Colours::black.withAlpha (0.09f));
+        g.fillRoundedRectangle (rf.expanded ((float) i * 1.5f).translated (0.0f, (float) i), 10.0f);
+    }
+    g.setGradientFill (ColourGradient (Colours_::panelTop, 0, rf.getY(), Colours_::panel, 0, rf.getBottom(), false));
+    g.fillRoundedRectangle (rf, 8.0f);
+
+    auto strip = rf.withHeight (28.0f);
+    Path headerPath;
+    headerPath.addRoundedRectangle (strip.getX(), strip.getY(), strip.getWidth(), strip.getHeight(), 8.0f, 8.0f, true, true, false, false);
+    g.setGradientFill (ColourGradient (Colours_::header.brighter (0.06f), 0, strip.getY(), Colours_::header, 0, strip.getBottom(), false));
+    g.fillPath (headerPath);
+    g.setColour (Colours_::outline);
+    g.drawHorizontalLine ((int) strip.getBottom(), strip.getX(), strip.getRight());
+    g.setColour (Colours::white.withAlpha (0.05f));
+    g.drawHorizontalLine ((int) strip.getY() + 1, strip.getX() + 8.0f, strip.getRight() - 8.0f);
+    g.setColour (Colours_::outline);
+    g.drawRoundedRectangle (rf.reduced (0.5f), 8.0f, 1.0f);
+
+    g.setColour (dot.withAlpha (0.25f));
+    g.fillRoundedRectangle (rf.getX() + 10.0f, strip.getCentreY() - 6.0f, 3.0f, 12.0f, 1.5f);
+    g.setColour (dot);
+    g.fillRoundedRectangle (rf.getX() + 10.0f, strip.getCentreY() - 4.0f, 3.0f, 8.0f, 1.5f);
+    g.setColour (Colour (0xffc3d0ee));
+    g.setFont (Fonts::label (13.5f, 0.16f));
+    g.drawText (title, strip.withTrimmedLeft (22.0f), Justification::centredLeft);
+}
+
+/** Small caption with a rule, drawn above a group of controls. */
+inline void drawGroupCaption (juce::Graphics& g, juce::Rectangle<int> r, const juce::String& text)
+{
+    using namespace juce;
+    g.setColour (Colours_::textDim);
+    const auto font = Font (Fonts::label (11.5f, 0.18f));
+    g.setFont (font);
+    g.drawText (text, r, Justification::centredLeft);
+    GlyphArrangement ga;
+    ga.addLineOfText (font, text, 0, 0);
+    const float x = (float) r.getX() + ga.getBoundingBox (0, -1, true).getWidth() + 10.0f;
+    g.setColour (Colours_::outline);
+    g.drawHorizontalLine (r.getCentreY(), x, (float) r.getRight());
+}

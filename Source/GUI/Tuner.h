@@ -10,7 +10,7 @@
 class TunerDisplay : public juce::Component, private juce::Timer
 {
 public:
-    explicit TunerDisplay (HardKickProcessor& p) : proc (p)
+    explicit TunerDisplay (CodexProcessor& p) : proc (p)
     {
         pullBuffer.resize (32768);
         ring.assign (ringSize, 0.0f);
@@ -37,7 +37,7 @@ public:
 
         // Bottom line: target
         auto bottom = r.removeFromBottom (14.0f);
-        g.setFont (FontOptions (10.0f, Font::bold).withKerningFactor (0.08f));
+        g.setFont (Fonts::label (11.5f, 0.08f));
         g.setColour (Colours_::textDim);
         const int tn = roundToInt (target);
         g.drawText ("TARGET  " + String (noteNameFor (tn)) + String (octaveFor (tn)) + "  "
@@ -47,13 +47,13 @@ public:
         auto top = r.removeFromTop (r.getHeight() * 0.62f);
         auto noteArea = top.removeFromLeft (64.0f);
         g.setColour (noteColour);
-        g.setFont (FontOptions (30.0f, Font::bold));
+        g.setFont (Fonts::semibold (30.0f));
         g.drawText (String (noteNameFor (nearest)), noteArea.withTrimmedRight (14.0f), Justification::centredRight);
-        g.setFont (FontOptions (13.0f, Font::bold));
+        g.setFont (Fonts::semibold (13.0f));
         g.drawText (String (octaveFor (nearest)), noteArea.removeFromRight (14.0f).withTrimmedTop (14.0f), Justification::centredLeft);
 
         // Hz and cents
-        g.setFont (FontOptions (12.0f));
+        g.setFont (Fonts::regular (13.0f));
         g.setColour (hasReading ? Colours_::text : Colours_::textDim);
         g.drawText (hasReading ? String (measuredHz, 2) + " Hz" : String ("no signal"), top.withTrimmedLeft (8.0f).removeFromTop (top.getHeight() * 0.5f),
                     Justification::bottomLeft);
@@ -139,7 +139,7 @@ private:
         repaint();
     }
 
-    HardKickProcessor& proc;
+    CodexProcessor& proc;
     std::vector<float> pullBuffer, ring;
     int writePos = 0, accCount = 0;
     float acc = 0.0f;

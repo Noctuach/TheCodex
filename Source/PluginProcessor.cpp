@@ -1,9 +1,9 @@
 #include "PluginProcessor.h"
 #include "GUI/PluginEditor.h"
 
-HardKickProcessor::HardKickProcessor()
+CodexProcessor::CodexProcessor()
     : AudioProcessor (BusesProperties().withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
-      apvts (*this, nullptr, "HardKickState", Params::createLayout())
+      apvts (*this, &undoManager, "CodexState", Params::createLayout())
 {
     engine = p (ID::engine); model909 = p (ID::model909); tune909 = p (ID::tune909);
     attack909 = p (ID::attack909); decay909 = p (ID::decay909);
@@ -30,17 +30,21 @@ HardKickProcessor::HardKickProcessor()
     for (int b = 0; b < Params::numBands; ++b)
         bandParams[b] = { p (ID::band (b, "On")), p (ID::band (b, "Type")), p (ID::band (b, "Freq")),
                           p (ID::band (b, "Gain")), p (ID::band (b, "Q")), p (ID::band (b, "Slope")) };
+
+    undoManager.clearUndoHistory(); // start with a clean history
 }
 
-bool HardKickProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
+bool CodexProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
 {
     const auto out = layouts.getMainOutputChannelSet();
     return out == juce::AudioChannelSet::mono() || out == juce::AudioChannelSet::stereo();
 }
 
-void HardKickProcessor::prepareToPlay (double sampleRate, int)
+void CodexProcessor::prepareToPlay (double sampleRate, int)
 {
     mono.assign ((size_t) chunkSize, 0.0f);
+    scopeSamplesPerPoint = juce::jmax (1, juce::roundToInt (sampleRate * scopeSeconds / scopePoints));
+    scopePos = -1;
 
     voice.prepare (sampleRate);
     updateParameters();
@@ -55,12 +59,12 @@ void HardKickProcessor::prepareToPlay (double sampleRate, int)
     setLatencySamples (juce::roundToInt (clip1.getLatencyInSamples() + clip2.getLatencyInSamples()));
 }
 
-int HardKickProcessor::getKeyNote() const
+int CodexProcessor::getKeyNote() const
 {
     return Params::keyBaseNote + (int) key->load() + 12 * ((int) octave->load() - 1);
 }
 
-void HardKickProcessor::updateParameters()
+void CodexProcessor::updateParameters()
 {
     KickVoice::Settings s;
     s.engine           = (int) engine->load();
@@ -126,10 +130,38 @@ void HardKickProcessor::updateParameters()
         setLatencySamples (latency);
 }
 
-void HardKickProcessor::handleMidi (const juce::MidiMessage& m)
+void CodexProcessor::startScope()
+{
+    scopePos = 0;
+    scopeCount = 0;
+    scopeCurMin = 1.0e9f;
+    scopeCurMax = -1.0e9f;
+    scopeWritten.store (0);
+    scopeGeneration.fetch_add (1);
+}
+
+void CodexProcessor::feedScope (float x) noexcept
+{
+    scopeCurMin = std::min (scopeCurMin, x);
+    scopeCurMax = std::max (scopeCurMax, x);
+    if (++scopeCount >= scopeSamplesPerPoint)
+    {
+        scopeMin[(size_t) scopePos] = scopeCurMin;
+        scopeMax[(size_t) scopePos] = scopeCurMax;
+        scopeWritten.store (scopePos + 1);
+        scopeCount = 0;
+        scopeCurMin = 1.0e9f;
+        scopeCurMax = -1.0e9f;
+        if (++scopePos >= scopePoints)
+            scopePos = -1;
+    }
+}
+
+void CodexProcessor::handleMidi (const juce::MidiMessage& m, int positionInChunk)
 {
     if (m.isNoteOn())
     {
+        captureArmAt = positionInChunk;
         const bool followMidi = keyMode->load() > 0.5f;
         voice.noteOn (m.getNoteNumber(), (float) (followMidi ? m.getNoteNumber() : getKeyNote()));
     }
@@ -139,14 +171,14 @@ void HardKickProcessor::handleMidi (const juce::MidiMessage& m)
         voice.allNotesOff();
 }
 
-void HardKickProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
+void CodexProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
 {
     juce::ScopedNoDenormals noDenormals;
     updateParameters();
 
     // GUI "KICK" button always plays the selected key (uses an out-of-range note id so MIDI can't cut it)
     constexpr int previewId = 128;
-    if (previewOn.exchange (false))  voice.noteOn (previewId, (float) getKeyNote());
+    if (previewOn.exchange (false))  { voice.noteOn (previewId, (float) getKeyNote()); captureArmAt = 0; }
     if (previewOff.exchange (false)) voice.noteOff (previewId);
 
     const int numSamples  = buffer.getNumSamples();
@@ -168,7 +200,7 @@ void HardKickProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mi
             {
                 const auto meta = *midiIt;
                 const int t = meta.samplePosition - start;
-                if (t <= pos) { handleMidi (meta.getMessage()); ++midiIt; }
+                if (t <= pos) { handleMidi (meta.getMessage(), pos); ++midiIt; }
                 else          { next = std::min (t, n); break; }
             }
             voice.render (x + pos, next - pos);
@@ -184,7 +216,10 @@ void HardKickProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mi
         {
             x[i] *= outGain.getNextValue();
             blockPeak = std::max (blockPeak, std::abs (x[i]));
+            if (i == captureArmAt) startScope();
+            if (scopePos >= 0) feedScope (x[i]);
         }
+        captureArmAt = -1;
 
         for (int ch = 0; ch < numChannels; ++ch)
             buffer.copyFrom (ch, start, x, n);
@@ -197,25 +232,28 @@ void HardKickProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mi
         peak.store (blockPeak);
 }
 
-void HardKickProcessor::getStateInformation (juce::MemoryBlock& destData)
+void CodexProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
     if (auto xml = apvts.copyState().createXml())
         copyXmlToBinary (*xml, destData);
 }
 
-void HardKickProcessor::setStateInformation (const void* data, int sizeInBytes)
+void CodexProcessor::setStateInformation (const void* data, int sizeInBytes)
 {
     if (auto xml = getXmlFromBinary (data, sizeInBytes))
         if (xml->hasTagName (apvts.state.getType()))
+        {
             apvts.replaceState (juce::ValueTree::fromXml (*xml));
+            undoManager.clearUndoHistory(); // restoring a session is not an undoable edit
+        }
 }
 
-juce::AudioProcessorEditor* HardKickProcessor::createEditor()
+juce::AudioProcessorEditor* CodexProcessor::createEditor()
 {
-    return new HardKickEditor (*this);
+    return new CodexEditor (*this);
 }
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
 {
-    return new HardKickProcessor();
+    return new CodexProcessor();
 }

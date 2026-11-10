@@ -4,7 +4,7 @@
 using namespace juce;
 
 //==============================================================================
-EQDisplay::EQDisplay (HardKickProcessor& p) : proc (p), apvts (p.apvts)
+EQDisplay::EQDisplay (CodexProcessor& p) : proc (p), apvts (p.apvts)
 {
     ring.assign ((size_t) fftSize, 0.0f);
     fftData.assign ((size_t) fftSize * 2, 0.0f);
@@ -28,8 +28,8 @@ float EQDisplay::xToFreq (float x) const
     return minFreq * std::pow (maxFreq / minFreq, (x - plot.getX()) / plot.getWidth());
 }
 
-float EQDisplay::gainToY (float db) const { return jmap (db, -maxDb, maxDb, plot.getBottom(), plot.getY()); }
-float EQDisplay::yToGain (float y) const  { return jmap (y, plot.getBottom(), plot.getY(), -maxDb, maxDb); }
+float EQDisplay::gainToY (float db) const { return jmap (db, -rangeDb, rangeDb, plot.getBottom(), plot.getY()); }
+float EQDisplay::yToGain (float y) const  { return jmap (y, plot.getBottom(), plot.getY(), -rangeDb, rangeDb); }
 float EQDisplay::analyzerDbToY (float db) const { return jmap (db, -90.0f, 6.0f, plot.getBottom(), plot.getY()); }
 
 bool EQDisplay::typeUsesGain (eq::BandType t) const
@@ -120,14 +120,14 @@ void EQDisplay::paint (Graphics& g)
     g.drawRoundedRectangle (getLocalBounds().toFloat().reduced (0.5f), 5.0f, 1.0f);
 
     drawGrid (g);
-    drawAnalyzer (g);
+    if (analyzerOn) drawAnalyzer (g);
     drawCurves (g);
     drawNodes (g);
 }
 
 void EQDisplay::drawGrid (Graphics& g)
 {
-    g.setFont (FontOptions (10.0f));
+    g.setFont (Fonts::regular (11.0f));
 
     const float freqs[] = { 20, 30, 40, 50, 60, 80, 100, 200, 300, 400, 500, 800, 1000, 2000, 3000, 4000, 5000, 8000, 10000, 20000 };
     for (float f : freqs)
@@ -147,7 +147,8 @@ void EQDisplay::drawGrid (Graphics& g)
         }
     }
 
-    for (float db = -18.0f; db <= 18.0f; db += 6.0f)
+    const float stepDb = rangeDb <= 12.0f ? 3.0f : 6.0f;
+    for (float db = -rangeDb + stepDb; db <= rangeDb - stepDb + 0.01f; db += stepDb)
     {
         const float y = gainToY (db);
         g.setColour (juce::exactlyEqual (db, 0.0f) ? Colours_::grid.brighter (0.7f) : Colours_::grid);
@@ -252,7 +253,7 @@ void EQDisplay::drawCurves (Graphics& g)
 
 void EQDisplay::drawNodes (Graphics& g)
 {
-    g.setFont (FontOptions (10.0f, Font::bold));
+    g.setFont (Fonts::semibold (10.0f));
 
     for (int b = 0; b < Params::numBands; ++b)
     {
@@ -485,6 +486,7 @@ BandControls::BandControls (AudioProcessorValueTreeState& s) : apvts (s)
     {
         auto& btn = bandButtons[b];
         btn.setButtonText (String (b + 1));
+        btn.setTooltip ("Select EQ band " + String (b + 1));
         btn.setClickingTogglesState (false);
         btn.setColour (TextButton::buttonOnColourId, Colours_::band (b));
         btn.onClick = [this, b]
@@ -496,6 +498,37 @@ BandControls::BandControls (AudioProcessorValueTreeState& s) : apvts (s)
     }
 
     addAndMakeVisible (onButton);
+    onButton.setTooltip (Help::forParameter ("b1On"));
+
+    // Display tools
+    range12.setComponentID ("seg"); range24.setComponentID ("seg");
+    range12.setConnectedEdges (Button::ConnectedOnRight);
+    range24.setConnectedEdges (Button::ConnectedOnLeft);
+    range12.setTooltip ("Display range: zoom the EQ display to +/-12 dB for fine moves");
+    range24.setTooltip ("Display range: show the full +/-24 dB");
+    range24.setToggleState (true, dontSendNotification);
+    range12.onClick = [this] { range12.setToggleState (true, dontSendNotification); range24.setToggleState (false, dontSendNotification); if (onRangeChanged) onRangeChanged (12.0f); };
+    range24.onClick = [this] { range24.setToggleState (true, dontSendNotification); range12.setToggleState (false, dontSendNotification); if (onRangeChanged) onRangeChanged (24.0f); };
+    analyzerButton.setComponentID ("pill");
+    analyzerButton.setClickingTogglesState (true);
+    analyzerButton.setToggleState (true, dontSendNotification);
+    analyzerButton.setTooltip ("Analyzer: show the live spectrum of the output behind the EQ curve");
+    analyzerButton.onClick = [this] { if (onAnalyzerToggled) onAnalyzerToggled (analyzerButton.getToggleState()); };
+    resetButton.setComponentID ("pill");
+    resetButton.setTooltip ("Reset band: return the selected band to its default settings (off, flat)");
+    resetButton.onClick = [this]
+    {
+        for (auto* sfx : { "On", "Type", "Freq", "Gain", "Q", "Slope" })
+            if (auto* p = apvts.getParameter (ID::band (band, sfx)))
+            {
+                p->beginChangeGesture();
+                p->setValueNotifyingHost (p->getDefaultValue());
+                p->endChangeGesture();
+            }
+    };
+    for (Component* c : { (Component*) &range12, (Component*) &range24, (Component*) &analyzerButton, (Component*) &resetButton })
+        addAndMakeVisible (c);
+
     for (Component* c : { (Component*) &type, (Component*) &slope, (Component*) &freq, (Component*) &gain, (Component*) &q })
         addAndMakeVisible (c);
 
@@ -527,28 +560,49 @@ void BandControls::setBand (int b)
 void BandControls::paint (Graphics& g)
 {
     g.setColour (Colours_::textDim);
-    g.setFont (FontOptions (11.0f));
-    g.setFont (FontOptions (10.0f, Font::bold).withKerningFactor (0.08f));
-    g.drawText ("BAND", Rectangle<int> (0, 0, 200, 14), Justification::centredLeft);
-    g.drawText ("ACTIVE", Rectangle<int> (30, 48, 100, 24), Justification::centredLeft);
+    g.setFont (Fonts::label (11.5f, 0.14f));
+    g.drawText ("BAND", Rectangle<int> (1, 0, 200, 16), Justification::centredLeft);
+    g.drawText ("ACTIVE", onButton.getBounds().translated (30, 0).withWidth (80), Justification::centredLeft);
+    g.drawText ("DISPLAY", toolsArea.withHeight (16), Justification::centredLeft);
+
+    // separator between band editing and display tools
+    g.setColour (Colours_::outline);
+    g.drawVerticalLine (toolsArea.getX() - 18, 6.0f, (float) getHeight() - 6.0f);
 }
 
 void BandControls::resized()
 {
     auto r = getLocalBounds();
-    auto left = r.removeFromLeft (200);
-    left.removeFromTop (16);
-    auto buttons = left.removeFromTop (26);
+    auto left = r.removeFromLeft (210);
+    left.removeFromTop (18);
+    auto buttons = left.removeFromTop (28);
     for (auto& btn : bandButtons)
-        btn.setBounds (buttons.removeFromLeft (30).reduced (2, 0));
-    left.removeFromTop (6);
-    onButton.setBounds (left.removeFromTop (24).removeFromLeft (24));
+        btn.setBounds (buttons.removeFromLeft (34).reduced (2, 0));
+    left.removeFromTop (8);
+    onButton.setBounds (left.removeFromTop (26).removeFromLeft (26));
 
-    r.removeFromLeft (10);
-    type.setBounds (r.removeFromLeft (130).withTrimmedTop (10).withHeight (44));
-    r.removeFromLeft (10);
-    slope.setBounds (r.removeFromLeft (130).withTrimmedTop (10).withHeight (44));
-    r.removeFromLeft (20);
+    // Display tools on the far right
+    toolsArea = r.removeFromRight (250);
+    {
+        auto t = toolsArea;
+        t.removeFromTop (18);
+        auto row1 = t.removeFromTop (28);
+        range12.setBounds (row1.removeFromLeft (80));
+        range24.setBounds (row1.removeFromLeft (80));
+        t.removeFromTop (8);
+        auto row2 = t.removeFromTop (26);
+        analyzerButton.setBounds (row2.removeFromLeft (110));
+        row2.removeFromLeft (10);
+        resetButton.setBounds (row2.removeFromLeft (120));
+    }
+    r.removeFromRight (36);
+
+    r.removeFromLeft (14);
+    type.setBounds (r.removeFromLeft (150).withTrimmedTop (8).withHeight (48));
+    r.removeFromLeft (12);
+    slope.setBounds (r.removeFromLeft (130).withTrimmedTop (8).withHeight (48));
+    r.removeFromLeft (16);
+    const int kw = juce::jmin (100, r.getWidth() / 3);
     for (auto* k : { &freq, &gain, &q })
-        k->setBounds (r.removeFromLeft (90));
+        k->setBounds (r.removeFromLeft (kw));
 }

@@ -2,46 +2,6 @@
 #include "Widgets.h"
 #include "../PluginProcessor.h"
 
-/** Draws a rounded section panel with a header strip (shared by the editor and the distortion units). */
-inline void drawSectionPanel (juce::Graphics& g, juce::Rectangle<int> r, const juce::String& title, juce::Colour dot)
-{
-    using namespace juce;
-    const auto rf = r.toFloat();
-    g.setGradientFill (ColourGradient (Colours_::panelTop, 0, rf.getY(), Colours_::panel, 0, rf.getBottom(), false));
-    g.fillRoundedRectangle (rf, 8.0f);
-
-    auto strip = rf.withHeight (26.0f);
-    Path headerPath;
-    headerPath.addRoundedRectangle (strip.getX(), strip.getY(), strip.getWidth(), strip.getHeight(), 8.0f, 8.0f, true, true, false, false);
-    g.setColour (Colours_::header);
-    g.fillPath (headerPath);
-    g.setColour (Colours_::outline);
-    g.drawHorizontalLine ((int) strip.getBottom(), strip.getX(), strip.getRight());
-    g.drawRoundedRectangle (rf.reduced (0.5f), 8.0f, 1.0f);
-
-    g.setColour (dot.withAlpha (0.3f));
-    g.fillEllipse (rf.getX() + 9.0f, strip.getCentreY() - 5.0f, 10.0f, 10.0f);
-    g.setColour (dot);
-    g.fillEllipse (rf.getX() + 11.0f, strip.getCentreY() - 3.0f, 6.0f, 6.0f);
-    g.setColour (Colour (0xffb7c6e6));
-    g.setFont (FontOptions (11.0f, Font::bold).withKerningFactor (0.12f));
-    g.drawText (title, strip.withTrimmedLeft (26.0f), Justification::centredLeft);
-}
-
-/** Small caption drawn above a group of controls. */
-inline void drawGroupCaption (juce::Graphics& g, juce::Rectangle<int> r, const juce::String& text)
-{
-    using namespace juce;
-    g.setColour (Colours_::textDim.withAlpha (0.8f));
-    g.setFont (FontOptions (9.5f, Font::bold).withKerningFactor (0.15f));
-    g.drawText (text, r, Justification::centredLeft);
-    GlyphArrangement ga;
-    ga.addLineOfText (g.getCurrentFont(), text, 0, 0);
-    const float x = (float) r.getX() + ga.getBoundingBox (0, -1, true).getWidth() + 8.0f;
-    g.setColour (Colours_::outline);
-    g.drawHorizontalLine (r.getCentreY(), x, (float) r.getRight());
-}
-
 /** Live transfer curve (input -> output) of one distortion stage, with the current input level marked. */
 class TransferDisplay : public juce::Component
 {
@@ -125,7 +85,7 @@ public:
             }
         }
 
-        g.setFont (FontOptions (9.5f, Font::bold).withKerningFactor (0.15f));
+        g.setFont (Fonts::label (11.0f, 0.15f));
         g.setColour (Colours_::textDim);
         g.drawText ("IN", plot.removeFromBottom (12.0f).removeFromRight (20.0f), Justification::centredRight);
         g.drawText ("OUT", Rectangle<float> (plot.getX() + 4.0f, plot.getY(), 30.0f, 12.0f), Justification::centredLeft);
@@ -140,14 +100,16 @@ private:
 class DistortionUnit : public juce::Component, private juce::Timer
 {
 public:
-    DistortionUnit (HardKickProcessor& p, int stageNumber, const juce::String& panelTitle)
+    DistortionUnit (CodexProcessor& p, int stageNumber, const juce::String& panelTitle)
         : proc (p), stage (stageNumber), title (panelTitle), transfer (p.apvts, stageNumber)
     {
         auto& s = p.apvts;
         onAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (s, ID::clip (stage, "On"), power);
         dcAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (s, ID::clip (stage, "DC"), dcButton);
         dcButton.setClickingTogglesState (true);
-        dcButton.setColour (juce::TextButton::textColourOffId, Colours_::textDim);
+        dcButton.setComponentID ("pill");
+        dcButton.setTooltip (Help::forParameter (ID::clip (stage, "DC")));
+        power.setTooltip (Help::forParameter (ID::clip (stage, "On")));
 
         type.attach (s, ID::clip (stage, "Mode"));
         oversampling.attach (s, ID::clip (stage, "OS"));
@@ -162,7 +124,7 @@ public:
         mix.attach (s, ID::clip (stage, "Mix"));
         output.attach (s, ID::clip (stage, "Out"));
 
-        drive.label.setFont (juce::FontOptions (12.0f, juce::Font::bold).withKerningFactor (0.15f));
+        drive.label.setFont (Fonts::label (13.5f, 0.15f));
         drive.label.setColour (juce::Label::textColourId, Colours_::accent);
 
         for (juce::Component* c : std::initializer_list<juce::Component*> {
@@ -181,8 +143,8 @@ public:
         drawGroupCaption (g, outputCaption, "OUTPUT");
 
         g.setColour (Colours_::textDim);
-        g.setFont (juce::FontOptions (9.5f, juce::Font::bold).withKerningFactor (0.15f));
-        auto labelUnder = [] (juce::Rectangle<int> m) { return m.withSizeKeepingCentre (40, m.getHeight()).translated (0, m.getHeight() + 2).withHeight (12); };
+        g.setFont (Fonts::label (11.0f, 0.15f));
+        auto labelUnder = [] (juce::Rectangle<int> m) { return m.withSizeKeepingCentre (40, m.getHeight()).translated (0, m.getHeight() + 3).withHeight (12); };
         g.drawText ("IN", labelUnder (inMeter.getBounds()), juce::Justification::centred);
         g.drawText ("OUT", labelUnder (outMeter.getBounds()), juce::Justification::centred);
     }
@@ -190,48 +152,46 @@ public:
     void resized() override
     {
         auto r = getLocalBounds();
-        power.setBounds (r.withHeight (26).removeFromRight (30).reduced (4));
+        power.setBounds (r.withHeight (28).removeFromRight (32).reduced (4));
 
-        auto c = r.reduced (12).withTrimmedTop (24);
+        auto c = r.reduced (14).withTrimmedTop (28);
 
         // Top row: type, oversampling, DC filter
-        auto top = c.removeFromTop (46);
-        type.setBounds (top.removeFromLeft (170));
+        auto top = c.removeFromTop (48);
+        type.setBounds (top.removeFromLeft (180));
         top.removeFromLeft (10);
-        oversampling.setBounds (top.removeFromLeft (90));
-        top.removeFromLeft (10);
-        dcButton.setBounds (top.removeFromLeft (64).withTrimmedTop (16).withHeight (26));
-        c.removeFromTop (8);
-
-        // Middle: transfer display | drive + shape knobs
-        auto middle = c.removeFromTop (juce::jmin (250, c.getHeight() - 220));
-        transfer.setBounds (middle.removeFromLeft (middle.getHeight() + 20));
-        middle.removeFromLeft (12);
-        auto driveArea = middle.removeFromTop (middle.getHeight() - 96);
-        drive.setBounds (driveArea.withSizeKeepingCentre (juce::jmin (driveArea.getWidth(), driveArea.getHeight() + 10), driveArea.getHeight()));
-        shapeCaption = middle.removeFromTop (14);
-        const int w3 = middle.getWidth() / 3;
-        boost.setBounds (middle.removeFromLeft (w3));
-        character.setBounds (middle.removeFromLeft (w3));
-        offset.setBounds (middle);
-
+        oversampling.setBounds (top.removeFromLeft (100));
+        top.removeFromLeft (12);
+        dcButton.setBounds (top.removeFromLeft (100).withTrimmedTop (18).withHeight (28));
         c.removeFromTop (12);
-        filterCaption = c.removeFromTop (14);
-        auto filters = c.removeFromTop (92);
-        const int w4 = filters.getWidth() / 4;
-        loFilter.setBounds (filters.removeFromLeft (w4));
-        hiFilter.setBounds (filters.removeFromLeft (w4));
-        shelfFreq.setBounds (filters.removeFromLeft (w4));
-        shelfGain.setBounds (filters);
 
-        c.removeFromTop (12);
-        outputCaption = c.removeFromTop (14);
-        auto out = c.removeFromTop (92);
-        inMeter.setBounds (out.removeFromLeft (14).withTrimmedBottom (16));
-        outMeter.setBounds (out.removeFromRight (14).withTrimmedBottom (16));
-        out.reduce (10, 0);
-        mix.setBounds (out.removeFromLeft (out.getWidth() / 2));
-        output.setBounds (out);
+        // Bottom: one row of six knobs (filters / tone | output)
+        auto bottomRow = c.removeFromBottom (96);
+        auto captions = c.removeFromBottom (16);
+        c.removeFromBottom (8);
+        const int w6 = bottomRow.getWidth() / 6;
+        filterCaption = captions.removeFromLeft (w6 * 4).withTrimmedRight (16);
+        outputCaption = captions;
+        for (auto* k : { &loFilter, &hiFilter, &shelfFreq, &shelfGain, &mix })
+            k->setBounds (bottomRow.removeFromLeft (w6));
+        output.setBounds (bottomRow);
+
+        // Middle: meters around the transfer display | drive + shape knobs
+        auto middle = c;
+        const int displaySize = juce::jmin (middle.getHeight() - 16, middle.getWidth() / 2);
+        auto left = middle.removeFromLeft (displaySize + 44);
+        inMeter.setBounds (left.removeFromLeft (12).withTrimmedBottom (16));
+        outMeter.setBounds (left.removeFromRight (12).withTrimmedBottom (16));
+        transfer.setBounds (left.reduced (8, 0).withTrimmedBottom (16));
+        middle.removeFromLeft (16);
+        auto shapeRow = middle.removeFromBottom (96);
+        shapeCaption = middle.removeFromBottom (16);
+        middle.removeFromBottom (6);
+        drive.setBounds (middle.withSizeKeepingCentre (juce::jmin (middle.getWidth(), middle.getHeight() + 20), middle.getHeight()));
+        const int w3 = shapeRow.getWidth() / 3;
+        boost.setBounds (shapeRow.removeFromLeft (w3));
+        character.setBounds (shapeRow.removeFromLeft (w3));
+        offset.setBounds (shapeRow);
     }
 
 private:
@@ -244,7 +204,7 @@ private:
         transfer.setInputLevel (in);
     }
 
-    HardKickProcessor& proc;
+    CodexProcessor& proc;
     int stage;
     juce::String title;
 

@@ -1,5 +1,5 @@
 // Offline test tool.
-//   HardKickRender <outdir>
+//   CodexRender <outdir>
 // Renders every factory preset (kick.wav per preset), measures the tail pitch with the tuner's
 // detector, checks all 12 keys, round-trips the state and snapshots the editor in both engines.
 #include <juce_audio_utils/juce_audio_utils.h>
@@ -7,7 +7,7 @@
 #include "../Source/DSP/PitchDetector.h"
 #include "../Source/GUI/PluginEditor.h"
 
-static void setParam (HardKickProcessor& p, const juce::String& id, float value)
+static void setParam (CodexProcessor& p, const juce::String& id, float value)
 {
     auto* prm = p.apvts.getParameter (id);
     prm->setValueNotifyingHost (prm->convertTo0to1 (value));
@@ -17,14 +17,17 @@ static constexpr double sr = 48000.0;
 static constexpr int block = 512;
 
 // Renders `hits` kicks (one per 0.4 s, each held 0.35 s)
-static juce::AudioBuffer<float> render (HardKickProcessor& proc, int hits, int midiNote = 60)
+static juce::AudioBuffer<float> render (CodexProcessor& proc, int hits, int midiNote = 60,
+                                        double rate = sr, int blockSize = block, bool randomBlocks = false)
 {
-    proc.prepareToPlay (sr, block);
-    const int beat = (int) (0.4 * sr), hold = (int) (0.35 * sr), total = beat * hits + (int) (0.2 * sr);
-    juce::AudioBuffer<float> out (2, total), buf (2, block);
-    for (int pos = 0; pos < total; pos += block)
+    proc.setRateAndBufferSizeDetails (rate, blockSize);
+    proc.prepareToPlay (rate, blockSize);
+    const int beat = (int) (0.4 * rate), hold = (int) (0.35 * rate), total = beat * hits + (int) (0.2 * rate);
+    juce::AudioBuffer<float> out (2, total), buf (2, blockSize);
+    juce::Random rng (42);
+    for (int pos = 0; pos < total;)
     {
-        const int n = std::min (block, total - pos);
+        const int n = std::min (randomBlocks ? 1 + rng.nextInt (blockSize) : blockSize, total - pos);
         buf.setSize (2, n, false, false, true);
         juce::MidiBuffer midi;
         for (int k = 0; k < hits; ++k)
@@ -35,23 +38,24 @@ static juce::AudioBuffer<float> render (HardKickProcessor& proc, int hits, int m
         }
         proc.processBlock (buf, midi);
         for (int ch = 0; ch < 2; ++ch) out.copyFrom (ch, pos, buf, ch, 0, n);
+        pos += n;
     }
     return out;
 }
 
 // Same approach as the GUI tuner: decimate to ~6 kHz and run the detector on the tail.
-static float measurePitch (const juce::AudioBuffer<float>& b, double startSec, double lenSec)
+static float measurePitch (const juce::AudioBuffer<float>& b, double startSec, double lenSec, double rate = sr)
 {
-    const int decim = 8;
+    const int decim = juce::roundToInt (rate / 6000.0);
     std::vector<float> d;
-    const int s0 = (int) (startSec * sr), s1 = std::min (b.getNumSamples(), (int) ((startSec + lenSec) * sr));
+    const int s0 = (int) (startSec * rate), s1 = std::min (b.getNumSamples(), (int) ((startSec + lenSec) * rate));
     for (int i = s0; i + decim <= s1; i += decim)
     {
         float acc = 0;
         for (int k = 0; k < decim; ++k) acc += b.getSample (0, i + k);
         d.push_back (acc / decim);
     }
-    return detectPitch (d.data(), (int) d.size(), sr / decim, 25.0f, 400.0f).frequency;
+    return detectPitch (d.data(), (int) d.size(), rate / decim, 25.0f, 400.0f).frequency;
 }
 
 static void writeWav (const juce::AudioBuffer<float>& b, const juce::File& f)
@@ -66,10 +70,16 @@ static void writeWav (const juce::AudioBuffer<float>& b, const juce::File& f)
         }
 }
 
-static void snapshot (HardKickProcessor& proc, const juce::AudioBuffer<float>& audio, const juce::File& png, int tab = 0)
+static void snapshot (CodexProcessor& proc, const juce::AudioBuffer<float>& audio, const juce::File& png, int tab = 0, int overlay = 0)
 {
     std::unique_ptr<juce::AudioProcessorEditor> editor (proc.createEditor());
-    if (auto* hk = dynamic_cast<HardKickEditor*> (editor.get())) hk->showTab (tab);
+    if (auto* hk = dynamic_cast<CodexEditor*> (editor.get()))
+    {
+        hk->setSize (MainView::baseWidth, MainView::baseHeight);
+        hk->showTab (tab);
+        if (overlay == 1) hk->getView().openAbout();
+        if (overlay == 2) hk->getView().openSaveDialog();
+    }
     // feed analyzer + tuner with the tail of a kick
     for (int i = 0; i < 6; ++i)
     {
@@ -85,13 +95,13 @@ static void snapshot (HardKickProcessor& proc, const juce::AudioBuffer<float>& a
 
 int main (int argc, char** argv)
 {
-    if (argc < 2) { std::cerr << "usage: HardKickRender <outdir>\n"; return 1; }
+    if (argc < 2) { std::cerr << "usage: CodexRender <outdir>\n"; return 1; }
     juce::ScopedJuceInitialiser_GUI init;
     const juce::File outDir = juce::File::getCurrentWorkingDirectory().getChildFile (argv[1]);
     outDir.createDirectory();
     int failures = 0;
 
-    HardKickProcessor proc;
+    CodexProcessor proc;
     proc.setPlayConfigDetails (0, 2, sr, block);
     std::cout << "Latency: " << proc.getLatencySamples() << " samples\n\n";
 
@@ -157,11 +167,66 @@ int main (int argc, char** argv)
                   << juce::String (pk, 1) << (finite ? "" : "  NaN!") << "\n";
     }
 
+    // ---- Robustness: sample rates, block sizes, mono layout ----
+    std::cout << "\nSample rate / block size           peak dBFS   pitch Hz\n";
+    struct Case { double rate; int blockSize; bool random; const char* name; };
+    const Case cases[] = { { 44100, 512, false, "44.1 kHz / 512" }, { 96000, 512, false, "96 kHz / 512" },
+                           { 192000, 1024, false, "192 kHz / 1024" }, { 48000, 1, false, "48 kHz / 1 sample" },
+                           { 48000, 17, false, "48 kHz / 17" }, { 48000, 4096, false, "48 kHz / 4096" },
+                           { 48000, 700, true, "48 kHz / random 1..700" } };
+    std::vector<float> reference;
+    for (const auto& c : cases)
+    {
+        proc.presets.loadPreset (8); // 909 Oldskool Hardstyle
+        auto audio = render (proc, 1, 60, c.rate, c.blockSize, c.random);
+        bool finite = true;
+        for (int i = 0; i < audio.getNumSamples(); ++i) finite &= std::isfinite (audio.getSample (0, i));
+        const float pk = juce::Decibels::gainToDecibels (audio.getMagnitude (0, 0, audio.getNumSamples()));
+        const float hz = measurePitch (audio, 0.15, 0.17, c.rate);
+        const bool ok = finite && pk < 1.0f && std::abs (1200.0f * std::log2 (hz / targetHz)) < 25.0f;
+        failures += ok ? 0 : 1;
+        std::cout << juce::String (c.name).paddedRight (' ', 34) << juce::String (pk, 1).paddedLeft (' ', 9)
+                  << juce::String (hz, 2).paddedLeft (' ', 11) << (ok ? "" : "   <-- CHECK") << "\n";
+
+        // Block size must not change the result (sample-accurate MIDI, chunked processing)
+        if (juce::exactlyEqual (c.rate, 48000.0))
+        {
+            std::vector<float> v (audio.getReadPointer (0), audio.getReadPointer (0) + audio.getNumSamples());
+            if (reference.empty()) reference = v;
+            else
+            {
+                float maxDiff = 0.0f;
+                for (size_t i = 0; i < std::min (v.size(), reference.size()); ++i)
+                    maxDiff = std::max (maxDiff, std::abs (v[i] - reference[i]));
+                // noise click is random, so allow a small difference during the first few ms only
+                float tailDiff = 0.0f;
+                for (size_t i = (size_t) (0.05 * 48000); i < std::min (v.size(), reference.size()); ++i)
+                    tailDiff = std::max (tailDiff, std::abs (v[i] - reference[i]));
+                std::cout << "    max difference vs 1-sample blocks after 50 ms: " << tailDiff << "\n";
+                if (tailDiff > 0.02f) ++failures;
+            }
+        }
+    }
+    {
+        CodexProcessor monoProc;
+        juce::AudioProcessor::BusesLayout mono;
+        mono.outputBuses.add (juce::AudioChannelSet::mono());
+        const bool supported = monoProc.setBusesLayout (mono);
+        monoProc.setRateAndBufferSizeDetails (sr, block);
+        monoProc.prepareToPlay (sr, block);
+        juce::AudioBuffer<float> b (1, block);
+        juce::MidiBuffer m;
+        m.addEvent (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100), 0);
+        monoProc.processBlock (b, m);
+        std::cout << "Mono output layout: " << (supported && b.getMagnitude (0, 0, block) > 0.0f ? "OK" : "FAILED") << "\n";
+        if (! supported) ++failures;
+    }
+
     // ---- State round trip ----
     proc.presets.loadPreset (9);
     juce::MemoryBlock state;
     proc.getStateInformation (state);
-    HardKickProcessor proc2;
+    CodexProcessor proc2;
     proc2.setStateInformation (state.getData(), (int) state.getSize());
     std::cout << "\nState round-trip preset name: " << proc2.presets.getCurrentName() << "\n";
 
@@ -172,6 +237,19 @@ int main (int argc, char** argv)
     snapshot (proc, render (proc, 1), outDir.getChildFile ("ui_909.png"));
     proc.presets.loadPreset (10); // 909 Rawstyle
     snapshot (proc, render (proc, 1), outDir.getChildFile ("ui_distortion.png"), 1);
+    snapshot (proc, render (proc, 1), outDir.getChildFile ("ui_about.png"), 0, 1);
+    snapshot (proc, render (proc, 1), outDir.getChildFile ("ui_save.png"), 0, 2);
+    {
+        // Resized window (75 %)
+        std::unique_ptr<juce::AudioProcessorEditor> editor (proc.createEditor());
+        editor->setSize (MainView::baseWidth * 3 / 4, MainView::baseHeight * 3 / 4);
+        auto img = editor->createComponentSnapshot (editor->getLocalBounds(), true, 1.0f);
+        auto png = outDir.getChildFile ("ui_scaled75.png");
+        png.deleteFile();
+        juce::FileOutputStream os (png);
+        juce::PNGImageFormat().writeImageToStream (img, os);
+        editor->setSize (MainView::baseWidth, MainView::baseHeight); // restore the saved UI scale
+    }
 
     std::cout << "\n" << (failures == 0 ? "ALL CHECKS PASSED" : juce::String (failures) + " CHECK(S) FAILED") << "\n";
     return failures == 0 ? 0 : 2;

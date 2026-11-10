@@ -35,11 +35,11 @@ private:
     std::array<float, size> buffer {};
 };
 
-class HardKickProcessor : public juce::AudioProcessor
+class CodexProcessor : public juce::AudioProcessor
 {
 public:
-    HardKickProcessor();
-    ~HardKickProcessor() override = default;
+    CodexProcessor();
+    ~CodexProcessor() override = default;
 
     void prepareToPlay (double sampleRate, int samplesPerBlock) override;
     void releaseResources() override {}
@@ -50,7 +50,7 @@ public:
     juce::AudioProcessorEditor* createEditor() override;
     bool hasEditor() const override { return true; }
 
-    const juce::String getName() const override { return "HardKick"; }
+    const juce::String getName() const override { return "Codex"; }
     bool acceptsMidi() const override { return true; }
     bool producesMidi() const override { return false; }
     bool isMidiEffect() const override { return false; }
@@ -73,8 +73,16 @@ public:
     /** Peak since last read (for the GUI meter). */
     float getAndResetPeak() { return peak.exchange (0.0f); }
 
+    juce::UndoManager undoManager;
     juce::AudioProcessorValueTreeState apvts;
     PresetManager presets { apvts };
+
+    //==========================================================================
+    // Kick scope: min/max waveform of the most recent hit (written by the audio thread, read by the GUI)
+    static constexpr int scopePoints = 600;
+    static constexpr double scopeSeconds = 0.5;
+    std::array<float, scopePoints> scopeMin {}, scopeMax {};
+    std::atomic<int> scopeWritten { 0 }, scopeGeneration { 0 };
     AnalyzerFifo analyzer, tunerFeed;
 
     /** MIDI note of the selected key (F1..E2, shifted by the octave setting). */
@@ -84,7 +92,9 @@ public:
 
 private:
     void updateParameters();
-    void handleMidi (const juce::MidiMessage&);
+    void handleMidi (const juce::MidiMessage&, int positionInChunk);
+    void startScope();
+    void feedScope (float sample) noexcept;
 
     static constexpr int chunkSize = 256;
 
@@ -95,6 +105,8 @@ private:
     juce::SmoothedValue<float> outGain;
 
     std::atomic<bool> previewOn { false }, previewOff { false };
+    int captureArmAt = -1, scopePos = -1, scopeCount = 0, scopeSamplesPerPoint = 40;
+    float scopeCurMin = 0.0f, scopeCurMax = 0.0f;
     std::atomic<float> peak { 0.0f };
 
     struct BandParams { std::atomic<float>* on, * type, * freq, * gain, * q, * slope; };
@@ -110,5 +122,5 @@ private:
     ClipParams clipParams[2];
     BandParams bandParams[Params::numBands];
 
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (HardKickProcessor)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (CodexProcessor)
 };

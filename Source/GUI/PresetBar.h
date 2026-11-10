@@ -6,24 +6,26 @@
 class PresetBar : public juce::Component, private juce::Timer
 {
 public:
+    std::function<void()> onSaveRequested;
+
     explicit PresetBar (PresetManager& pm) : presets (pm)
     {
-        for (auto* b : { &prev, &next, &save })
-        {
-            b->setColour (juce::TextButton::textColourOffId, Colours_::text);
-            addAndMakeVisible (b);
-        }
+        prev.setTooltip ("Previous preset");
+        next.setTooltip ("Next preset");
+        save.setTooltip ("Save preset: stores the current sound as a user preset");
+        box.setTooltip ("Presets: factory presets first, then your own. Selecting the current preset again reverts your edits.");
         prev.onClick = [this] { presets.previous(); refresh(); };
         next.onClick = [this] { presets.next(); refresh(); };
-        save.onClick = [this] { askForName(); };
+        save.onClick = [this] { if (onSaveRequested) onSaveRequested(); };
 
         box.setTextWhenNothingSelected ("Init");
         box.onChange = [this]
         {
             if (const int id = box.getSelectedId(); id > 0)
-                presets.loadPreset (id - 1); // selecting the current preset again reverts your edits
+                presets.loadPreset (id - 1);
         };
-        addAndMakeVisible (box);
+        for (auto* c : std::initializer_list<juce::Component*> { &prev, &next, &save, &box })
+            addAndMakeVisible (c);
         refresh();
         startTimerHz (4);
     }
@@ -32,12 +34,12 @@ public:
     {
         box.clear (juce::dontSendNotification);
         int id = 1;
-        box.addSectionHeading ("FACTORY");
+        box.addSectionHeading ("Factory");
         for (const auto& n : presets.getFactoryNames()) box.addItem (n, id++);
         const auto users = presets.getUserNames();
         if (! users.isEmpty())
         {
-            box.addSectionHeading ("USER");
+            box.addSectionHeading ("User");
             for (const auto& n : users) box.addItem (n, id++);
         }
         lastName = presets.getCurrentName();
@@ -49,36 +51,23 @@ public:
     void resized() override
     {
         auto r = getLocalBounds();
-        save.setBounds (r.removeFromRight (56));
+        save.setBounds (r.removeFromRight (r.getHeight()));
         r.removeFromRight (6);
-        next.setBounds (r.removeFromRight (28));
-        prev.setBounds (r.removeFromLeft (28));
-        box.setBounds (r.reduced (4, 0));
+        next.setBounds (r.removeFromRight (r.getHeight()));
+        r.removeFromRight (4);
+        prev.setBounds (r.removeFromLeft (r.getHeight()));
+        r.removeFromLeft (4);
+        box.setBounds (r);
     }
 
 private:
     void timerCallback() override
     {
-        if (presets.getCurrentName() != lastName) refresh();   // e.g. host program change
-    }
-
-    void askForName()
-    {
-        auto* w = new juce::AlertWindow ("Save Preset", "Preset name:", juce::MessageBoxIconType::NoIcon, this);
-        w->addTextEditor ("name", presets.getCurrentName());
-        w->addButton ("Save", 1, juce::KeyPress (juce::KeyPress::returnKey));
-        w->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
-        juce::Component::SafePointer<PresetBar> safe (this);
-        w->enterModalState (true, juce::ModalCallbackFunction::create ([safe, w] (int result)
-        {
-            if (safe == nullptr || result != 1) return;
-            safe->presets.saveUserPreset (w->getTextEditorContents ("name"));
-            safe->refresh();
-        }), true);
+        if (presets.getCurrentName() != lastName) refresh();   // host program change, undo, ...
     }
 
     PresetManager& presets;
-    juce::TextButton prev { "<" }, next { ">" }, save { "SAVE" };
+    IconButton prev { "prev", Icons::chevronLeft() }, next { "next", Icons::chevronRight() }, save { "save", Icons::save() };
     juce::ComboBox box;
     juce::String lastName;
 };
@@ -87,13 +76,18 @@ private:
 class SegmentedChoice : public juce::Component
 {
 public:
-    SegmentedChoice (juce::RangedAudioParameter& p, const juce::StringArray& labels)
+    SegmentedChoice (juce::RangedAudioParameter& p, const juce::StringArray& labels, const juce::String& tooltip)
         : attachment (p, [this] (float v) { setIndex (juce::roundToInt (v)); })
     {
         for (int i = 0; i < labels.size(); ++i)
         {
             auto* b = buttons.add (new juce::TextButton (labels[i]));
-            b->setColour (juce::TextButton::textColourOffId, Colours_::textDim);
+            b->setComponentID ("seg");
+            b->setTooltip (tooltip);
+            int edges = 0;
+            if (i > 0) edges |= juce::Button::ConnectedOnLeft;
+            if (i < labels.size() - 1) edges |= juce::Button::ConnectedOnRight;
+            b->setConnectedEdges (edges);
             b->onClick = [this, i] { attachment.setValueAsCompleteGesture ((float) i); };
             addAndMakeVisible (b);
         }

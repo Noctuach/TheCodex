@@ -1,0 +1,91 @@
+name: Build
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            os: windows-latest
+            pluginval: pluginval_Windows.zip
+            pluginval_bin: ./pluginval.exe
+          - name: macOS
+            os: macos-14
+            pluginval: pluginval_macOS.zip
+            pluginval_bin: ./pluginval.app/Contents/MacOS/pluginval
+          - name: Linux
+            os: ubuntu-22.04
+            pluginval: pluginval_Linux.zip
+            pluginval_bin: ./pluginval
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build xvfb libasound2-dev libfreetype-dev libx11-dev libxext-dev \
+            libxinerama-dev libxrandr-dev libxcursor-dev libfontconfig1-dev libgl1-mesa-dev
+
+      - name: Configure
+        shell: bash
+        run: |
+          EXTRA=""
+          if [ "$RUNNER_OS" == "macOS" ]; then
+            EXTRA="-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64 -DCMAKE_OSX_DEPLOYMENT_TARGET=10.13"
+          fi
+          if [ "$RUNNER_OS" == "Linux" ]; then
+            EXTRA="-G Ninja -DHK_BUILD_TOOLS=ON"
+          fi
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release $EXTRA
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Offline tests (renders presets, checks tuning in all keys, sample rates and block sizes)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a ./build/CodexRender_artefacts/Release/CodexRender test-output
+
+      - name: Ad-hoc code sign (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          codesign --force --deep -s - build/Codex_artefacts/Release/VST3/Codex.vst3
+          codesign --force --deep -s - build/Codex_artefacts/Release/AU/Codex.component
+
+      - name: Validate with pluginval
+        shell: bash
+        run: |
+          curl -sSfL -o pluginval.zip https://github.com/Tracktion/pluginval/releases/latest/download/${{ matrix.pluginval }}
+          unzip -q pluginval.zip
+          if [ "$RUNNER_OS" == "Linux" ]; then
+            xvfb-run -a ${{ matrix.pluginval_bin }} --strictness-level 7 --validate-in-process --skip-gui-tests \
+              --validate build/Codex_artefacts/Release/VST3/Codex.vst3
+          else
+            ${{ matrix.pluginval_bin }} --strictness-level 7 --validate-in-process --skip-gui-tests \
+              --validate build/Codex_artefacts/Release/VST3/Codex.vst3
+          fi
+
+      - name: Package
+        shell: bash
+        run: |
+          mkdir -p dist/Codex
+          cp -R build/Codex_artefacts/Release/VST3/Codex.vst3 dist/Codex/
+          if [ "$RUNNER_OS" == "macOS" ]; then cp -R build/Codex_artefacts/Release/AU/Codex.component dist/Codex/; fi
+          cp -R build/Codex_artefacts/Release/Standalone/* dist/Codex/
+          cp README.md Resources/Fonts/OFL-Barlow.txt dist/Codex/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Codex-${{ matrix.name }}
+          path: dist/Codex

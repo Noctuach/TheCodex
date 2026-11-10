@@ -1,80 +1,123 @@
-# HardKick
+# Codex
 
-An oldskool hardstyle kick synthesizer (VST3 / AU / Standalone), built the way kicks were made
-before sample packs: a swept oscillator, envelopes, and a **distort → EQ → distort** chain.
-No samples anywhere.
+**A free hardstyle kick synthesizer.** Codex builds kicks the way they were made before sample packs: a swept oscillator
+(or a synthesized 909), distortion, EQ, and distortion again. There are no samples; every kick is generated in real time,
+in the key of your track.
 
-![HardKick, synth engine](docs/screenshot.png)
-![HardKick, 909 engine](docs/screenshot-909.png)
-![HardKick, distortion tab](docs/screenshot-distortion.png)
+![Codex: kick page](docs/screenshot.png)
 
-Background research (909 circuit, oldskool method, other kick synths): [docs/RESEARCH.md](docs/RESEARCH.md)
-
-## Signal flow
-
-```
-OSC + PITCH ENV + CLICK  →  CLIP 1 (pre-EQ)  →  6-band EQ  →  CLIP 2 (post-EQ)  →  OUTPUT
-```
-
-| Section | What it does |
+| 909 engine | Distortion page |
 |---|---|
-| **Source: SYNTH** | Sine / Triangle / Warm Sine. Phase resets on every hit (identical punch every time), adjustable start phase. Noise **click** layer with decay and tone. |
-| **Source: 909** | Synthesized 909-style bass drum (no samples) with 10 models (Classic, Long Tail, Punch, Deep, Hard Attack, Gabber, Early Hardstyle, Boom, Driven, Short Tok) and the original's **Tune / Attack / Decay** controls. In this mode the amp ADSR only gates the sound (attack and release). |
-| **Key** | **F to E** (F1 43.65 Hz … E2 82.41 Hz), octave shift, and *Fixed Key* (any MIDI note plays the key) or *Follow MIDI*. |
-| **Tuner** | Measures the actual root of the output (after distortion and EQ) and shows note, Hz and cents against the target key. |
-| **Presets** | 17 factory presets (7 synth, 10 909) plus your own. Presets never change the key. |
-| **Pitch envelope (ADSR)** | The classic pitch sweep. *Amount* (up to 96 semitones) above the played note, A/D/S/R and a *Curve* control (1 = linear, higher = snappier exponential drop). |
-| **Amp envelope (ADSR)** | Volume shape with its own curve. Hold the MIDI note longer for a longer tail. |
-| **Distortion 1 / 2** (DISTORTION tab) | Two full distortion units inspired by the layout of Cubase's Distroyer. Each has a live **transfer-curve display** that marks the current input level, plus IN/OUT meters. **Type**: 12 base curves (Hard Clip, Soft Clip, Tanh, Overdrive, Tube, Diode, Fuzz, Sine Fold, Tri Fold, Rectify, Bitcrush, Asym Clip). **Shape**: Drive, Boost (input gain on dry + wet), *Characteristic* (morphs any curve from smooth towards a rectangle), *Offset* (asymmetry). **Wet filters / tone**: Lo Filter (low-pass before the distortion), Hi Filter (high-pass after it), Shelf Freq / Gain. **Output**: Mix and Output. Also Oversampling (Off / 2x / 4x / 8x) and a DC Filter. The bottom row of the KICK tab has quick controls for both stages; EDIT opens the full unit. |
-| **EQ** | 6 bands: Low Cut, Low Shelf, Bell, Notch, High Shelf, High Cut (cuts at 12/24/48 dB/oct), with a live spectrum analyzer. |
+| ![909 engine](docs/screenshot-909.png) | ![Distortion page](docs/screenshot-distortion.png) |
 
-The pitch comes from the *Key* setting, or from the MIDI note in *Follow MIDI* mode. *Fine Tune* shifts it in semitones.
-The **KICK** button always plays the selected key.
+Formats: **VST3** (Windows, macOS, Linux), **AU** (macOS) and a **Standalone** app.
 
-User presets are saved as `.hkpreset` files in `Documents/HardKick/Presets`.
+---
 
-### EQ mouse controls
-- **Drag a node**: frequency / gain (**Shift** for fine adjustments)
-- **Mouse wheel** over a node: Q
-- **Double-click a node**: band on/off
-- **Double-click empty space**: adds a bell band there
-- **Right-click a node**: filter type, slope, reset
+## Quick start
+1. Load Codex on an instrument track and play any note (or press **KICK** in the top bar).
+2. Set **KEY** to the key of your track. With *Fixed Key* mode, every MIDI note plays the kick in that key.
+3. Browse the presets with the arrows next to the preset name.
+4. Hover over any control to see what it does.
 
-## Building
+The **tuner** (bottom right) measures the actual root note coming out of the plugin, after all distortion,
+so you can see your kick is in key.
 
-Requires CMake ≥ 3.22 and a C++17 compiler (Visual Studio 2022 on Windows, Xcode on macOS).
-JUCE 8 is downloaded automatically. You can point to your own copy with `-DJUCE_DIR=/path/to/JUCE`.
+## Your first hardstyle kick, step by step
+1. Start from **Init** (or **909 Clean** for the 909 engine).
+2. **Punch:** in *Pitch Envelope*, set *Amount* to 40–60 st and *Decay* to 60–150 ms. Lower *Curve* gives a longer "zap",
+   higher gives a snappier hit.
+3. **Length:** in *Amp Envelope*, set *Decay*/*Sustain* for the body; the note length controls the tail.
+4. **First distortion:** *Dist 1* with *Overdrive* or *Hard Clip* and 18–30 dB of drive.
+5. **EQ between the distortions:** this is the classic trick. Cut a narrow band around the low-mids (100–200 Hz) and boost
+   around 300–500 Hz; whatever you boost here gets pushed hardest by the second distortion.
+6. **Second distortion:** *Dist 2* with *Hard Clip* or *Diode* and a lower drive (6–14 dB). Use its *Hi Filter* (40–80 Hz)
+   to keep the sub clean.
+7. Check the tuner and the output meter (keep the peak marker out of the red).
+
+## Controls
+
+### Top bar
+| Control | What it does |
+|---|---|
+| Undo / Redo | Undo parameter changes and preset loads. |
+| Preset | Factory presets first, then your own. Selecting the current preset again reverts your edits. |
+| Save | Saves a user preset (`Documents/Codex/Presets/*.cdxpreset`). |
+| Key / Oct | Root note, **F to E** (F1 = 43.65 Hz … E2 = 82.41 Hz), plus an octave shift. Presets never change the key. |
+| Key Mode | *Fixed Key* plays the selected key from any MIDI note; *Follow MIDI* plays the note you press. |
+| KICK | Plays the kick in the selected key. |
+| Menu | Save/delete presets, open the preset folder, interface size (75–200 %), tooltips on/off, About. |
+
+### Kick page
+| Section | Controls |
+|---|---|
+| **Source: Synth** | *Wave* (Sine, Triangle, Warm Sine), *Fine Tune*, *Phase* (start phase), *Click* (noise transient: level, decay, tone). |
+| **Source: 909** | Synthesized 909-style bass drum. *909 Model* (Classic, Long Tail, Punch, Deep, Hard Attack, Gabber, Early Hardstyle, Boom, Driven, Short Tok) plus the original's *Tune* (sweep depth), *Attack* (click) and *Decay*. |
+| **Pitch Envelope** | ADSR for the pitch sweep, with *Amount* (semitones above the root) and *Curve*. Inactive in 909 mode. |
+| **Amp Envelope** | ADSR for volume with *Curve*. In 909 mode it acts as a gate (attack and release only). |
+| **Equalizer** | 6 bands: Low/High Cut (12/24/48 dB/oct), Low/High Shelf, Bell, Notch. Live spectrum analyzer, ±12/±24 dB view. |
+
+**EQ mouse controls:** drag a node to set frequency/gain · mouse wheel for Q · double-click a node to turn it on/off ·
+double-click empty space to add a band · right-click a node for type and slope · Shift for fine moves.
+
+### Distortion page
+Two full distortion units, one **before** and one **after** the EQ:
+
+| Group | Controls |
+|---|---|
+| Type | 12 curves: Hard Clip, Soft Clip, Tanh, Overdrive, Tube, Diode, Fuzz, Sine Fold, Tri Fold, Rectify, Bitcrush, Asym Clip. The display shows the live transfer curve and the current input level. |
+| Shape | *Drive*, *Boost* (input gain on dry and wet), *Characteristic* (morphs any curve towards a square wave), *Offset* (asymmetry). |
+| Wet filters / tone | *Lo Filter* (low-pass before the distortion), *Hi Filter* (high-pass after it), *Shelf Freq/Gain*. |
+| Output | *Mix* (dry/wet), *Output*. |
+| Options | *Oversampling* (Off/2x/4x/8x) and *DC Filter*. |
+
+The bottom row of the kick page has quick controls for both stages; **EDIT** opens the full unit.
+
+### Output
+**Scope** (the first 500 ms of every hit), **tuner**, output level and meter.
+
+### Mouse and keyboard
+Double-click any knob to reset it · Shift-drag for fine control · click a value to type it in · drag the bottom-right
+corner to resize the window.
+
+---
+
+## Building from source
+Requires CMake ≥ 3.22 and a C++17 compiler (Visual Studio 2022, Xcode 14+, or GCC/Clang). JUCE 8 is downloaded
+automatically (or use `-DJUCE_DIR=/path/to/JUCE`).
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --config Release
 ```
 
-Plugins end up in `build/HardKick_artefacts/Release/` (`VST3/HardKick.vst3`, `Standalone/`, and `AU/` on macOS).
-Copy the `.vst3` to your plugin folder:
-- Windows: `C:\Program Files\Common Files\VST3`
-- macOS: `~/Library/Audio/Plug-Ins/VST3` (AU: `~/Library/Audio/Plug-Ins/Components`)
+Plugins are written to `build/Codex_artefacts/Release/`. On Linux, install the JUCE dependencies first:
+`libasound2-dev libfreetype-dev libx11-dev libxext-dev libxinerama-dev libxrandr-dev libxcursor-dev libfontconfig1-dev libgl1-mesa-dev`.
 
-On Linux, install the JUCE dependencies first (e.g. `libasound2-dev libfreetype-dev libx11-dev libxext-dev libxinerama-dev libxrandr-dev libxcursor-dev libfontconfig1-dev libgl1-mesa-dev`).
+**Continuous integration:** `.github/workflows/build.yml` builds Windows, macOS (universal) and Linux, runs the offline
+tests, validates the VST3 with [pluginval](https://github.com/Tracktion/pluginval) and uploads ready-to-use zips.
 
-### Offline test tool
-`-DHK_BUILD_TOOLS=ON` builds `HardKickRender`. It renders every factory preset to WAV and measures each tail's pitch
-with the tuner's detector. It also checks all 12 keys in both engines, tests state save/restore and saves GUI snapshots:
-```bash
-HardKickRender out/
-```
+**Tests:** configure with `-DHK_BUILD_TOOLS=ON` and run `CodexRender out/`. It renders every factory preset,
+checks the tuning of every key in both engines, every oversampling setting, several sample rates and block sizes, the mono
+layout and state save/restore, and saves GUI screenshots.
 
-## Source layout
+## Project layout
 ```
 Source/
   Parameters.*          all parameters (IDs, ranges, defaults)
-  PluginProcessor.*     MIDI handling and the processing chain
-  DSP/CurveEnvelope.h   ADSR with curve
-  PresetManager.*       factory + user presets
-  DSP/KickVoice.h       synth and 909 engines
-  DSP/Kick909.h         909 model definitions
-  DSP/PitchDetector.h   tuner pitch detection (McLeod / NSDF)
-  DSP/ClipDistortion.h  oversampled clipper
-  DSP/ParametricEQ.h    biquad EQ (shared by the DSP and the GUI curve)
-  GUI/                  look and feel, widgets, EQ display, editor
+  PresetManager.*       factory and user presets
+  PluginProcessor.*     MIDI, the processing chain, scope capture
+  DSP/                  KickVoice (synth + 909 engines), Kick909 models, CurveEnvelope,
+                        ClipDistortion, ParametricEQ, PitchDetector
+  GUI/                  look-and-feel, widgets, EQ, distortion units, tuner, scope, overlays, editor
+Resources/Fonts/        Barlow (SIL Open Font License)
+docs/                   screenshots, research notes, release checklist
+tools/Render.cpp        offline test tool
 ```
+
+## Credits and licences
+- Built with [JUCE](https://juce.com).
+- Fonts: [Barlow](https://github.com/jpt/barlow) by The Barlow Project Authors, SIL Open Font License 1.1
+  (`Resources/Fonts/OFL-Barlow.txt`, included with every build).
+- VST is a registered trademark of Steinberg Media Technologies GmbH.
+- Background research: [docs/RESEARCH.md](docs/RESEARCH.md).

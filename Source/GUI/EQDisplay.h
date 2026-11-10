@@ -3,7 +3,7 @@
 #include "Widgets.h"
 #include "../DSP/ParametricEQ.h"
 
-class HardKickProcessor;
+class CodexProcessor;
 
 /**
     Interactive EQ curve with a real-time spectrum analyzer.
@@ -17,10 +17,12 @@ class HardKickProcessor;
 class EQDisplay : public juce::Component, private juce::Timer
 {
 public:
-    explicit EQDisplay (HardKickProcessor&);
+    explicit EQDisplay (CodexProcessor&);
 
     std::function<void (int)> onBandSelected;
     void setSelectedBand (int b) { selected = b; repaint(); }
+    void setDisplayRange (float db) { rangeDb = db; repaint(); }
+    void setAnalyzerEnabled (bool on) { analyzerOn = on; repaint(); }
 
     void paint (juce::Graphics&) override;
     void resized() override;
@@ -57,14 +59,16 @@ private:
     void drawCurves (juce::Graphics&);
     void drawNodes (juce::Graphics&);
 
-    HardKickProcessor& proc;
+    CodexProcessor& proc;
     juce::AudioProcessorValueTreeState& apvts;
     juce::Rectangle<float> plot;
 
     int selected = 0, dragging = -1, hover = -1;
     juce::Point<float> lastDragPos;
 
-    static constexpr float maxDb = 24.0f, minFreq = 20.0f, maxFreq = 20000.0f;
+    static constexpr float maxDb = 24.0f, minFreq = 20.0f, maxFreq = 20000.0f;  // maxDb = parameter range
+    float rangeDb = 24.0f;      // visible gain range
+    bool analyzerOn = true;
 
     // Analyzer
     static constexpr int fftOrder = 12, fftSize = 1 << fftOrder;
@@ -80,6 +84,8 @@ public:
     explicit BandControls (juce::AudioProcessorValueTreeState&);
 
     std::function<void (int)> onBandSelected;
+    std::function<void (float)> onRangeChanged;
+    std::function<void (bool)> onAnalyzerToggled;
     void setBand (int b);
     void resized() override;
     void paint (juce::Graphics&) override;
@@ -93,4 +99,7 @@ private:
     ChoiceBox type { "Type" }, slope { "Slope" };
     Knob freq { "Freq" }, gain { "Gain" }, q { "Q" };
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> onAttachment;
+    juce::TextButton range12 { juce::String (juce::CharPointer_UTF8 ("\xc2\xb1" "12 dB")) }, range24 { juce::String (juce::CharPointer_UTF8 ("\xc2\xb1" "24 dB")) };
+    juce::TextButton analyzerButton { "ANALYZER" }, resetButton { "RESET BAND" };
+    juce::Rectangle<int> toolsArea;
 };

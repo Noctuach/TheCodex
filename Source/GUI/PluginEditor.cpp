@@ -3,29 +3,64 @@
 
 using namespace juce;
 
-HardKickEditor::HardKickEditor (HardKickProcessor& p)
-    : AudioProcessorEditor (p), proc (p),
+namespace
+{
+    String utf8 (const char* s) { return String (CharPointer_UTF8 (s)); }
+    const String dot = utf8 ("\xc2\xb7");
+
+    constexpr const char* scaleKey = "uiScale";
+    constexpr const char* tooltipsKey = "tooltips";
+}
+
+//==============================================================================
+MainView::MainView (CodexProcessor& p, PropertiesFile* settingsFile)
+    : proc (p), settings (settingsFile),
       presetBar (p.presets),
-      engineSwitch (*p.apvts.getParameter (ID::engine), { "SYNTH", "909" }),
+      engineSwitch (*p.apvts.getParameter (ID::engine), { "SYNTH", "909" }, Help::forParameter (ID::engine)),
       pitchEnvDisplay (p.apvts, ID::pAttack, ID::pDecay, ID::pSustain, ID::pRelease, ID::pCurve, Colours_::accent2),
       ampEnvDisplay (p.apvts, ID::aAttack, ID::aDecay, ID::aSustain, ID::aRelease, ID::aCurve, Colours_::accent),
       eqDisplay (p), bandControls (p.apvts),
-      unit1 (p, 1, String (CharPointer_UTF8 ("DISTORTION 1  \xc2\xb7  PRE-EQ"))),
-      unit2 (p, 2, String (CharPointer_UTF8 ("DISTORTION 2  \xc2\xb7  POST-EQ"))),
-      tuner (p)
+      unit1 (p, 1, "DISTORTION 1  " + dot + "  PRE-EQ"),
+      unit2 (p, 2, "DISTORTION 2  " + dot + "  POST-EQ"),
+      scope (p), tuner (p),
+      aboutOverlay (JucePlugin_VersionString)
 {
-    setLookAndFeel (&lnf);
     auto& s = p.apvts;
 
+    // ---- Header ----
     kickButton.setComponentID ("kick");
-    kickButton.setColour (TextButton::textColourOffId, Colour (0xff04101e));
-    kickButton.setColour (TextButton::textColourOnId, Colour (0xff04101e));
+    kickButton.setTooltip ("KICK: Plays the kick in the selected key (hold to hear the full tail).");
     kickButton.onPress = [this] (bool down) { proc.triggerPreview (down); };
+
+    undoButton.setTooltip ("Undo");
+    redoButton.setTooltip ("Redo");
+    menuButton.setTooltip ("Menu: presets, UI size, tooltips and About");
+    undoButton.onClick = [this] { proc.undoManager.undo(); };
+    redoButton.onClick = [this] { proc.undoManager.redo(); };
+    menuButton.onClick = [this] { showMainMenu(); };
+
+    presetBar.onSaveRequested = [this]
+    {
+        saveOverlay.setInitialName (proc.presets.getCurrentName());
+        saveOverlay.open();
+    };
+    saveOverlay.exists = [this] (const String& n) { return proc.presets.userPresetExists (n); };
+    saveOverlay.onSave = [this] (const String& n)
+    {
+        proc.presets.saveUserPreset (n);
+        presetBar.refresh();
+    };
 
     keyBox.attach (s, ID::key);
     octaveBox.attach (s, ID::octave);
     keyModeBox.attach (s, ID::keyMode);
 
+    for (auto* tab : { &kickTabButton, &distTabButton })
+        tab->setComponentID ("tab");
+    kickTabButton.onClick = [this] { showTab (0); };
+    distTabButton.onClick = [this] { showTab (1); };
+
+    // ---- Source ----
     wave.attach (s, ID::wave);
     model.attach (s, ID::model909);
     tune.attach (s, ID::tune);
@@ -36,71 +71,130 @@ HardKickEditor::HardKickEditor (HardKickProcessor& p)
     tune909.attach (s, ID::tune909);
     attack909.attach (s, ID::attack909);
     decay909.attach (s, ID::decay909);
+    engineSwitch.onChange = [this] (int) { updateEngineView(); };
 
+    // ---- Envelopes ----
     pAmount.attach (s, ID::pAmount);
     pAttack.attach (s, ID::pAttack);
     pDecay.attach (s, ID::pDecay);
     pSustain.attach (s, ID::pSustain);
     pRelease.attach (s, ID::pRelease);
     pCurve.attach (s, ID::pCurve);
-
     aAttack.attach (s, ID::aAttack);
     aDecay.attach (s, ID::aDecay);
     aSustain.attach (s, ID::aSustain);
     aRelease.attach (s, ID::aRelease);
     aCurve.attach (s, ID::aCurve);
 
-    for (Component* c : std::initializer_list<Component*> {
-             &presetBar, &keyBox, &octaveBox, &keyModeBox, &kickButton,
-             &engineSwitch, &wave, &model, &tune, &phase, &clickLevel, &clickDecay, &clickTone,
-             &tune909, &attack909, &decay909,
-             &pitchEnvDisplay, &pAmount, &pAttack, &pDecay, &pSustain, &pRelease, &pCurve,
-             &ampEnvDisplay, &aAttack, &aDecay, &aSustain, &aRelease, &aCurve,
-             &eqDisplay, &bandControls, &tuner, &outGain, &meter, &unit1, &unit2,
-             &kickTabButton, &distTabButton })
-        addAndMakeVisible (c);
-
-    kickTabButton.onClick = [this] { showTab (0); };
-    distTabButton.onClick = [this] { showTab (1); };
-
+    // ---- EQ ----
     eqDisplay.onBandSelected = [this] (int b) { bandControls.setBand (b); };
     bandControls.onBandSelected = [this] (int b) { eqDisplay.setSelectedBand (b); };
-    engineSwitch.onChange = [this] (int) { updateEngineView(); };
+    bandControls.onRangeChanged = [this] (float db) { eqDisplay.setDisplayRange (db); };
+    bandControls.onAnalyzerToggled = [this] (bool on) { eqDisplay.setAnalyzerEnabled (on); };
 
+    // ---- Distortion quick controls ----
     for (int i = 0; i < 2; ++i)
     {
-        auto& c = clips[i];
+        auto& q = quick[i];
         const int stage = i + 1;
-        c.onAttachment = std::make_unique<AudioProcessorValueTreeState::ButtonAttachment> (s, ID::clip (stage, "On"), c.on);
-        c.mode.attach (s, ID::clip (stage, "Mode"));
-        c.drive.attach (s, ID::clip (stage, "Drive"));
-        c.character.attach (s, ID::clip (stage, "Char"));
-        c.mix.attach (s, ID::clip (stage, "Mix"));
-        c.out.attach (s, ID::clip (stage, "Out"));
-        c.edit.setColour (TextButton::textColourOffId, Colours_::accent);
-        c.edit.onClick = [this] { showTab (1); };
-        for (Component* comp : std::initializer_list<Component*> { &c.on, &c.edit, &c.mode, &c.drive, &c.character, &c.mix, &c.out })
-            addAndMakeVisible (comp);
+        q.onAttachment = std::make_unique<AudioProcessorValueTreeState::ButtonAttachment> (s, ID::clip (stage, "On"), q.on);
+        q.on.setTooltip (Help::forParameter (ID::clip (stage, "On")));
+        q.mode.attach (s, ID::clip (stage, "Mode"));
+        q.drive.attach (s, ID::clip (stage, "Drive"));
+        q.character.attach (s, ID::clip (stage, "Char"));
+        q.mix.attach (s, ID::clip (stage, "Mix"));
+        q.edit.setComponentID ("pill");
+        q.edit.setTooltip ("Open the full distortion unit (filters, offset, oversampling, transfer curve)");
+        q.edit.onClick = [this] { showTab (1); };
+        for (Component* c : std::initializer_list<Component*> { &q.on, &q.edit, &q.mode, &q.drive, &q.character, &q.mix })
+            addAndMakeVisible (c);
     }
 
     outGain.attach (s, ID::outGain);
 
-    setSize (1180, 836);
+    for (Component* c : std::initializer_list<Component*> {
+             &undoButton, &redoButton, &menuButton, &presetBar, &keyBox, &octaveBox, &keyModeBox, &kickButton,
+             &kickTabButton, &distTabButton,
+             &engineSwitch, &wave, &model, &tune, &phase, &clickLevel, &clickDecay, &clickTone, &tune909, &attack909, &decay909,
+             &pitchEnvDisplay, &pAmount, &pAttack, &pDecay, &pSustain, &pRelease, &pCurve,
+             &ampEnvDisplay, &aAttack, &aDecay, &aSustain, &aRelease, &aCurve,
+             &eqDisplay, &bandControls, &unit1, &unit2, &scope, &tuner, &outGain, &meter })
+        addAndMakeVisible (c);
+    addChildComponent (engineNotice);
+
+    addChildComponent (saveOverlay);
+    addChildComponent (aboutOverlay);
+
+    setTooltipsEnabled (settings == nullptr || settings->getBoolValue (tooltipsKey, true));
+    setSize (baseWidth, baseHeight);
     showTab (0);
     startTimerHz (30);
 }
 
-HardKickEditor::~HardKickEditor()
+void MainView::setTooltipsEnabled (bool enabled)
 {
-    setLookAndFeel (nullptr);
+    if (enabled && tooltipWindow == nullptr)
+        tooltipWindow = std::make_unique<TooltipWindow> (this, 650);
+    else if (! enabled)
+        tooltipWindow.reset();
+    if (settings != nullptr)
+        settings->setValue (tooltipsKey, enabled);
 }
 
-void HardKickEditor::timerCallback()
+void MainView::timerCallback()
 {
     meter.setLevel (proc.getAndResetPeak());
+    undoButton.setEnabled (proc.undoManager.canUndo());
+    redoButton.setEnabled (proc.undoManager.canRedo());
 }
 
-void HardKickEditor::updateEngineView()
+void MainView::showMainMenu()
+{
+    PopupMenu menu, sizes;
+    const float current = settings != nullptr ? (float) settings->getDoubleValue (scaleKey, 1.0) : 1.0f;
+    const float scales[] = { 0.75f, 0.9f, 1.0f, 1.25f, 1.5f, 1.75f, 2.0f };
+    for (int i = 0; i < 7; ++i)
+        sizes.addItem (100 + i, String (roundToInt (scales[i] * 100.0f)) + " %", true, std::abs (current - scales[i]) < 0.01f);
+
+    const auto presetName = proc.presets.getCurrentName();
+    menu.addSectionHeader ("Presets");
+    menu.addItem (1, "Save preset...");
+    menu.addItem (2, "Delete \"" + presetName + "\"", proc.presets.isCurrentUserPreset());
+    menu.addItem (3, "Open preset folder");
+    menu.addItem (4, "Rescan preset folder");
+    menu.addSectionHeader ("Edit");
+    menu.addItem (5, "Undo", proc.undoManager.canUndo());
+    menu.addItem (6, "Redo", proc.undoManager.canRedo());
+    menu.addSectionHeader ("View");
+    menu.addSubMenu ("Interface size", sizes);
+    menu.addItem (7, "Show tooltips", true, tooltipWindow != nullptr);
+    menu.addSeparator();
+    menu.addItem (8, "About Codex");
+
+    SafePointer<MainView> safe (this);
+    menu.showMenuAsync (PopupMenu::Options().withTargetComponent (&menuButton).withMinimumWidth (220),
+        [safe, scales] (int r)
+        {
+            if (safe == nullptr || r == 0) return;
+            auto& v = *safe;
+            switch (r)
+            {
+                case 1: v.presetBar.onSaveRequested(); break;
+                case 2: v.proc.presets.deleteUserPreset (v.proc.presets.getCurrentName()); v.presetBar.refresh(); break;
+                case 3: v.proc.presets.getUserDirectory().startAsProcess(); break;
+                case 4: v.proc.presets.refreshUserPresets(); v.presetBar.refresh(); break;
+                case 5: v.proc.undoManager.undo(); break;
+                case 6: v.proc.undoManager.redo(); break;
+                case 7: v.setTooltipsEnabled (v.tooltipWindow == nullptr); break;
+                case 8: v.aboutOverlay.open(); break;
+                default:
+                    if (r >= 100 && r < 107 && v.onScaleRequested) v.onScaleRequested (scales[r - 100]);
+                    break;
+            }
+        });
+}
+
+void MainView::updateEngineView()
 {
     const bool is909 = engineSwitch.getIndex() == 1;
     const bool kickTab = currentTab == 0;
@@ -112,40 +206,36 @@ void HardKickEditor::updateEngineView()
 
     // Grid:  [combo] [a] [b] / [c] [d] [e]
     auto& cell = sourceCells;
+    auto comboCell = [] (Rectangle<int> r) { return r.reduced (6, 0).withSizeKeepingCentre (r.getWidth() - 12, 46); };
     if (is909)
     {
-        model.setBounds (cell[0].reduced (4, 12));
-        tune909.setBounds (cell[1]);
-        attack909.setBounds (cell[2]);
-        decay909.setBounds (cell[3]);
-        tune.setBounds (cell[4]);
-        phase.setBounds (cell[5]);
+        model.setBounds (comboCell (cell[0]));
+        tune909.setBounds (cell[1]); attack909.setBounds (cell[2]);
+        decay909.setBounds (cell[3]); tune.setBounds (cell[4]); phase.setBounds (cell[5]);
     }
     else
     {
-        wave.setBounds (cell[0].reduced (4, 12));
-        tune.setBounds (cell[1]);
-        phase.setBounds (cell[2]);
-        clickLevel.setBounds (cell[3]);
-        clickDecay.setBounds (cell[4]);
-        clickTone.setBounds (cell[5]);
+        wave.setBounds (comboCell (cell[0]));
+        tune.setBounds (cell[1]); phase.setBounds (cell[2]);
+        clickLevel.setBounds (cell[3]); clickDecay.setBounds (cell[4]); clickTone.setBounds (cell[5]);
     }
 
     // The 909 has its own pitch sweep; the amp ADSR only gates it (attack + release)
     for (Component* c : std::initializer_list<Component*> { &pitchEnvDisplay, &pAmount, &pAttack, &pDecay, &pSustain, &pRelease, &pCurve })
     {
         c->setEnabled (! is909);
-        c->setAlpha (is909 ? 0.25f : 1.0f);
+        c->setAlpha (is909 ? 0.2f : 1.0f);
     }
     for (Component* c : std::initializer_list<Component*> { &aDecay, &aSustain, &ampEnvDisplay })
     {
         c->setEnabled (! is909);
         c->setAlpha (is909 ? 0.3f : 1.0f);
     }
+    engineNotice.setVisible (is909 && kickTab);
     repaint();
 }
 
-std::vector<Component*> HardKickEditor::kickTabComponents()
+std::vector<Component*> MainView::kickTabComponents()
 {
     return { &engineSwitch, &tune, &phase,
              &pitchEnvDisplay, &pAmount, &pAttack, &pDecay, &pSustain, &pRelease, &pCurve,
@@ -153,7 +243,7 @@ std::vector<Component*> HardKickEditor::kickTabComponents()
              &eqDisplay, &bandControls };
 }
 
-void HardKickEditor::showTab (int tab)
+void MainView::showTab (int tab)
 {
     currentTab = tab;
     for (auto* c : kickTabComponents())
@@ -162,42 +252,78 @@ void HardKickEditor::showTab (int tab)
     unit2.setVisible (tab == 1);
     kickTabButton.setToggleState (tab == 0, dontSendNotification);
     distTabButton.setToggleState (tab == 1, dontSendNotification);
-    for (auto& c : clips)
-        c.edit.setVisible (tab == 0);
+    for (auto& q : quick)
+        q.edit.setVisible (tab == 0);
     updateEngineView();
     repaint();
 }
 
-void HardKickEditor::paint (Graphics& g)
+//==============================================================================
+void MainView::paint (Graphics& g)
 {
-    g.setGradientFill (ColourGradient (Colour (0xff0d1426), 0, 0, Colour (0xff070b15), 0, (float) getHeight(), false));
+    // Background: vertical gradient, soft blue glow at the top, film grain
+    g.setGradientFill (ColourGradient (Colour (0xff0c1324), 0, 0, Colour (0xff060910), 0, (float) getHeight(), false));
+    g.fillAll();
+    g.setGradientFill (ColourGradient (Colours_::accent.withAlpha (0.07f), (float) getWidth() * 0.5f, 0.0f,
+                                       Colours::transparentBlack, (float) getWidth() * 0.5f, (float) getHeight() * 0.6f, true));
+    g.fillAll();
+    g.setTiledImageFill (noiseTile(), 0, 0, 1.0f);
     g.fillAll();
 
-    // Top bar
-    const auto bar = getLocalBounds().removeFromTop (header.getBottom() + 6).toFloat();
-    g.setGradientFill (ColourGradient (Colour (0xff18233f), 0, 0, Colour (0xff0f1629), 0, bar.getBottom(), false));
+    // Header bar
+    const auto bar = getLocalBounds().removeFromTop (header.getBottom() + 8).toFloat();
+    g.setGradientFill (ColourGradient (Colour (0xff17223f), 0, 0, Colour (0xff0e1528), 0, bar.getBottom(), false));
     g.fillRect (bar);
-    g.setColour (Colours_::outline);
+    g.setColour (Colours::black.withAlpha (0.4f));
     g.drawHorizontalLine ((int) bar.getBottom(), 0, (float) getWidth());
+    g.setColour (Colours_::outline);
+    g.drawHorizontalLine ((int) bar.getBottom() - 1, 0, (float) getWidth());
 
-    // Logo
-    auto logo = header.withTrimmedLeft (6).toFloat();
-    g.setFont (FontOptions (24.0f, Font::bold).withKerningFactor (0.06f));
-    GlyphArrangement ga;
-    ga.addLineOfText (g.getCurrentFont(), "HARD", 0, 0);
-    const float hardW = ga.getBoundingBox (0, -1, true).getWidth();
-    g.setColour (Colours_::text);
-    g.drawText ("HARD", logo, Justification::centredLeft);
-    g.setColour (Colours_::accent);
-    g.drawText ("KICK", logo.withTrimmedLeft (hardW + 2.0f), Justification::centredLeft);
+    // Logo: mark + wordmark + subtitle
+    {
+        auto r = logoArea.toFloat();
+        auto mark = r.removeFromLeft (40.0f).withSizeKeepingCentre (38.0f, 38.0f);
+        g.setColour (Colours_::accent.withAlpha (0.15f));
+        g.fillEllipse (mark.expanded (3.0f));
+        Icons::draw (g, Icons::kickMark(), mark, Colours_::accent, 2.0f);
+        r.removeFromLeft (12.0f);
+        g.setColour (Colours_::text);
+        g.setFont (Fonts::display (31.0f, 0.28f));
+        g.drawText ("CODEX", r.removeFromTop (r.getHeight() * 0.64f), Justification::bottomLeft);
+        g.setColour (Colours_::accent);
+        g.setFont (Fonts::label (11.0f, 0.24f));
+        g.drawText ("HARDSTYLE KICK SYNTH", r.translated (1.0f, 0.0f), Justification::topLeft);
+    }
 
-    // Tab bar underline
+    g.setColour (Colours_::textDim);
+    g.setFont (Fonts::label (11.5f, 0.14f));
+    g.drawText ("PRESET", presetArea.withHeight (16).translated (1, 0), Justification::centredLeft);
+
+    // Tab bar
     g.setColour (Colours_::outline);
     g.drawHorizontalLine (tabBar.getBottom() - 1, (float) tabBar.getX(), (float) tabBar.getRight());
-    g.setColour (Colours_::textDim);
-    g.setFont (FontOptions (10.0f, Font::bold).withKerningFactor (0.15f));
-    g.drawText (String (CharPointer_UTF8 ("OSC  \xe2\x96\xb8  DIST 1  \xe2\x96\xb8  EQ  \xe2\x96\xb8  DIST 2  \xe2\x96\xb8  OUT")),
-                tabBar.withTrimmedBottom (4), Justification::centredRight);
+    {
+        // signal-flow breadcrumb, current stage highlighted per tab
+        const StringArray steps { "OSC", "DIST 1", "EQ", "DIST 2", "OUT" };
+        const auto font = Font (Fonts::label (12.0f, 0.16f));
+        g.setFont (font);
+        float x = (float) tabBar.getRight();
+        for (int i = steps.size() - 1; i >= 0; --i)
+        {
+            GlyphArrangement ga;
+            ga.addLineOfText (font, steps[i], 0, 0);
+            const float w = ga.getBoundingBox (0, -1, true).getWidth();
+            x -= w;
+            const bool hi = currentTab == 0 ? (i == 0 || i == 2) : (i == 1 || i == 3);
+            g.setColour (hi ? Colours_::accent : Colours_::textFaint);
+            g.drawText (steps[i], Rectangle<float> (x, (float) tabBar.getY(), w + 2.0f, (float) tabBar.getHeight() - 2.0f), Justification::centredLeft);
+            if (i > 0)
+            {
+                x -= 22.0f;
+                Icons::draw (g, Icons::chevronRight(), Rectangle<float> (x + 6.0f, (float) tabBar.getCentreY() - 6.0f, 10.0f, 10.0f), Colours_::textFaint, 1.3f);
+            }
+        }
+    }
 
     if (currentTab == 0)
     {
@@ -206,131 +332,200 @@ void HardKickEditor::paint (Graphics& g)
         drawSectionPanel (g, ampArea, engineSwitch.getIndex() == 1 ? "AMP GATE" : "AMP ENVELOPE", Colours_::accent);
         drawSectionPanel (g, eqArea, "EQUALIZER", Colours_::accent);
     }
-    drawSectionPanel (g, clip1Area, String (CharPointer_UTF8 ("DIST 1  \xc2\xb7  QUICK")), Colours_::accent);
-    drawSectionPanel (g, clip2Area, String (CharPointer_UTF8 ("DIST 2  \xc2\xb7  QUICK")), Colours_::accent);
-    drawSectionPanel (g, outArea, String (CharPointer_UTF8 ("TUNER  \xc2\xb7  MASTER")), Colours_::accent);
+    drawSectionPanel (g, quickAreas[0], "DIST 1", Colours_::accent);
+    drawSectionPanel (g, quickAreas[1], "DIST 2", Colours_::accent);
+    drawSectionPanel (g, outArea, "OUTPUT", Colours_::accent);
 }
 
-void HardKickEditor::paintOverChildren (Graphics& g)
+void MainView::EngineNotice::paint (Graphics& g)
 {
-    if (engineSwitch.getIndex() != 1 || currentTab != 0)
-        return;
-
-    auto r = pitchArea.toFloat().withTrimmedTop (27.0f).reduced (1.0f);
-    g.setColour (Colours_::panel.withAlpha (0.55f));
-    g.fillRect (r);
+    auto r = getLocalBounds().toFloat();
+    g.setColour (Colours_::panel.withAlpha (0.6f));
+    g.fillRoundedRectangle (r, 7.0f);
+    auto card = r.withSizeKeepingCentre (jmin (380.0f, r.getWidth() - 40.0f), 64.0f);
+    g.setColour (Colours_::display.withAlpha (0.92f));
+    g.fillRoundedRectangle (card, 8.0f);
+    g.setColour (Colours_::outlineHi);
+    g.drawRoundedRectangle (card, 8.0f, 1.0f);
     g.setColour (Colours_::text);
-    g.setFont (FontOptions (12.0f, Font::bold).withKerningFactor (0.1f));
-    g.drawText ("909 ENGINE", r.withTrimmedBottom (r.getHeight() * 0.5f), Justification::centredBottom);
+    g.setFont (Fonts::label (14.0f, 0.18f));
+    g.drawText ("909 ENGINE ACTIVE", card.removeFromTop (34.0f), Justification::centredBottom);
     g.setColour (Colours_::textDim);
-    g.setFont (FontOptions (11.0f));
-    g.drawText ("Pitch sweep is built into the 909 model: use its TUNE knob",
-                r.withTrimmedTop (r.getHeight() * 0.5f + 4.0f), Justification::centredTop);
+    g.setFont (Fonts::regular (13.0f));
+    g.drawText ("The pitch sweep is built into the 909 model. Shape it with TUNE.", card.withTrimmedTop (2.0f), Justification::centredTop);
 }
 
-void HardKickEditor::resized()
+void MainView::resized()
 {
-    auto r = getLocalBounds().reduced (10);
-    header = r.removeFromTop (42);
+    auto r = getLocalBounds().reduced (12);
 
+    // ---- Header ----
+    header = r.removeFromTop (52);
     {
         auto h = header;
-        h.removeFromLeft (190);
-        kickButton.setBounds (h.removeFromRight (120).reduced (0, 3));
-        h.removeFromRight (14);
-        keyModeBox.setBounds (h.removeFromRight (110));
-        h.removeFromRight (6);
+        logoArea = h.removeFromLeft (240);
+        h.removeFromLeft (10);
+        auto lower = [] (Rectangle<int> a) { return a.withTrimmedTop (18).withHeight (30); };
+        undoButton.setBounds (lower (h.removeFromLeft (30)));
+        h.removeFromLeft (4);
+        redoButton.setBounds (lower (h.removeFromLeft (30)));
+        h.removeFromLeft (22);
+
+        menuButton.setBounds (lower (h.removeFromRight (34)));
+        h.removeFromRight (10);
+        kickButton.setBounds (h.removeFromRight (116).withTrimmedTop (4).withTrimmedBottom (2));
+        h.removeFromRight (18);
+        keyModeBox.setBounds (h.removeFromRight (112));
+        h.removeFromRight (8);
         octaveBox.setBounds (h.removeFromRight (64));
-        h.removeFromRight (6);
-        keyBox.setBounds (h.removeFromRight (70));
-        h.removeFromRight (30);
-        presetBar.setBounds (h.removeFromRight (420).withSizeKeepingCentre (420, 28).translated (0, 6));
+        h.removeFromRight (8);
+        keyBox.setBounds (h.removeFromRight (72));
+        h.removeFromRight (24);
+        presetArea = h;
+        presetBar.setBounds (lower (h));
     }
 
-    r.removeFromTop (8);
-    tabBar = r.removeFromTop (30);
-    kickTabButton.setBounds (tabBar.withWidth (110).withTrimmedBottom (6));
-    distTabButton.setBounds (tabBar.withTrimmedLeft (116).withWidth (130).withTrimmedBottom (6));
-    r.removeFromTop (8);
-    upperArea = r.withTrimmedBottom (160);
+    r.removeFromTop (14);
+    tabBar = r.removeFromTop (32);
+    kickTabButton.setBounds (tabBar.withWidth (90));
+    distTabButton.setBounds (tabBar.withTrimmedLeft (98).withWidth (140));
+    r.removeFromTop (12);
+
+    // ---- Bottom row (always visible) ----
+    auto bottom = r.removeFromBottom (156);
+    r.removeFromBottom (12);
+    quickAreas[0] = bottom.removeFromLeft (350);
+    bottom.removeFromLeft (12);
+    quickAreas[1] = bottom.removeFromLeft (350);
+    bottom.removeFromLeft (12);
+    outArea = bottom;
+
+    // ---- Distortion tab ----
     {
-        auto u = upperArea;
-        unit1.setBounds (u.removeFromLeft ((u.getWidth() - 10) / 2));
-        u.removeFromLeft (10);
+        auto u = r;
+        unit1.setBounds (u.removeFromLeft ((u.getWidth() - 12) / 2));
+        u.removeFromLeft (12);
         unit2.setBounds (u);
     }
-    auto rowA = r.removeFromTop (200);
-    sourceArea = rowA.removeFromLeft (330);
-    rowA.removeFromLeft (10);
-    pitchArea = rowA.removeFromLeft ((rowA.getWidth() - 10) / 2);
-    rowA.removeFromLeft (10);
-    ampArea = rowA;
 
-    r.removeFromTop (10);
-    auto rowC = r.removeFromBottom (150);
-    r.removeFromBottom (10);
+    // ---- Kick tab ----
+    auto rowA = r.removeFromTop (222);
+    sourceArea = rowA.removeFromLeft (344);
+    rowA.removeFromLeft (12);
+    pitchArea = rowA.removeFromLeft ((rowA.getWidth() - 12) / 2);
+    rowA.removeFromLeft (12);
+    ampArea = rowA;
+    r.removeFromTop (12);
     eqArea = r;
 
-    clip1Area = rowC.removeFromLeft (420);
-    rowC.removeFromLeft (10);
-    clip2Area = rowC.removeFromLeft (420);
-    rowC.removeFromLeft (10);
-    outArea = rowC;
-
-    // Source: engine switch in the header strip, 2 x 3 grid below
-    engineSwitch.setBounds (sourceArea.withHeight (26).removeFromRight (110).reduced (4, 3));
+    engineSwitch.setBounds (sourceArea.withHeight (28).removeFromRight (116).reduced (5, 4));
     {
-        auto c = sourceArea.reduced (8).withTrimmedTop (24);
-        auto row1 = c.removeFromTop (c.getHeight() / 2 - 3);
-        c.removeFromTop (6);
+        auto c = sourceArea.reduced (10).withTrimmedTop (30);
+        auto row1 = c.removeFromTop (c.getHeight() / 2 - 2);
+        c.removeFromTop (4);
         const int w = c.getWidth() / 3;
-        for (int i = 0; i < 3; ++i) sourceCells[(size_t) i] = row1.removeFromLeft (w);
-        for (int i = 3; i < 6; ++i) sourceCells[(size_t) i] = c.removeFromLeft (w);
-        sourceCells[2] = sourceCells[2].withRight (row1.getRight());   // absorb rounding
-        sourceCells[5] = sourceCells[5].withRight (c.getRight());
+        for (int i = 0; i < 3; ++i) sourceCells[(size_t) i] = row1.removeFromLeft (i == 2 ? row1.getWidth() : w);
+        for (int i = 3; i < 6; ++i) sourceCells[(size_t) i] = c.removeFromLeft (i == 5 ? c.getWidth() : w);
     }
     updateEngineView();
 
     auto layoutEnv = [] (Rectangle<int> area, EnvelopeDisplay& display, std::initializer_list<Knob*> knobs)
     {
-        auto c = area.reduced (8).withTrimmedTop (24);
-        display.setBounds (c.removeFromTop (62));
-        c.removeFromTop (4);
+        auto c = area.reduced (10).withTrimmedTop (30);
+        display.setBounds (c.removeFromTop (64));
+        c.removeFromTop (6);
         const int w = c.getWidth() / (int) knobs.size();
         for (auto* k : knobs)
             k->setBounds (c.removeFromLeft (w));
     };
+    engineNotice.setBounds (pitchArea.withTrimmedTop (29).reduced (1));
     layoutEnv (pitchArea, pitchEnvDisplay, { &pAmount, &pAttack, &pDecay, &pSustain, &pRelease, &pCurve });
     layoutEnv (ampArea, ampEnvDisplay, { &aAttack, &aDecay, &aSustain, &aRelease, &aCurve });
 
     {
-        auto c = eqArea.reduced (8).withTrimmedTop (24);
-        bandControls.setBounds (c.removeFromBottom (78));
-        c.removeFromBottom (6);
+        auto c = eqArea.reduced (10).withTrimmedTop (30);
+        bandControls.setBounds (c.removeFromBottom (82));
+        c.removeFromBottom (8);
         eqDisplay.setBounds (c);
     }
 
-    Rectangle<int> clipAreas[] = { clip1Area, clip2Area };
+    // ---- Quick distortion panels ----
     for (int i = 0; i < 2; ++i)
     {
-        clips[i].on.setBounds (clipAreas[i].withHeight (26).removeFromRight (30).reduced (4));
-        clips[i].edit.setBounds (clipAreas[i].withHeight (26).withTrimmedRight (32).removeFromRight (52).reduced (2, 4));
-        auto c = clipAreas[i].reduced (8).withTrimmedTop (24);
-        auto left = c.removeFromLeft (118);
-        clips[i].mode.setBounds (left.withSizeKeepingCentre (left.getWidth() - 6, 44));
-        const int w = c.getWidth() / 4;
-        clips[i].drive.setBounds (c.removeFromLeft (w));
-        clips[i].character.setBounds (c.removeFromLeft (w));
-        clips[i].mix.setBounds (c.removeFromLeft (w));
-        clips[i].out.setBounds (c);
+        auto& q = quick[i];
+        const auto area = quickAreas[i];
+        q.on.setBounds (area.withHeight (28).removeFromRight (32).reduced (4));
+        q.edit.setBounds (area.withHeight (28).withTrimmedRight (36).removeFromRight (54).reduced (2, 5));
+        auto c = area.reduced (10).withTrimmedTop (30);
+        auto left = c.removeFromLeft (112);
+        q.mode.setBounds (left.withSizeKeepingCentre (left.getWidth(), 46));
+        c.removeFromLeft (4);
+        const int w = c.getWidth() / 3;
+        q.drive.setBounds (c.removeFromLeft (w));
+        q.character.setBounds (c.removeFromLeft (w));
+        q.mix.setBounds (c);
     }
 
+    // ---- Output: scope, tuner, level ----
     {
-        auto c = outArea.reduced (8).withTrimmedTop (24);
-        meter.setBounds (c.removeFromRight (16));
+        auto c = outArea.reduced (10).withTrimmedTop (30);
+        meter.setBounds (c.removeFromRight (14));
         c.removeFromRight (6);
-        tuner.setBounds (c.removeFromLeft (180).withSizeKeepingCentre (180, 88));
-        c.removeFromLeft (4);
-        outGain.setBounds (c);
+        outGain.setBounds (c.removeFromRight (74));
+        c.removeFromRight (6);
+        tuner.setBounds (c.removeFromRight (164));
+        c.removeFromRight (8);
+        scope.setBounds (c);
     }
+
+    saveOverlay.setBounds (getLocalBounds());
+    aboutOverlay.setBounds (getLocalBounds());
+}
+
+//==============================================================================
+CodexEditor::CodexEditor (CodexProcessor& p)
+    : AudioProcessorEditor (p),
+      view (p, [this]
+      {
+          PropertiesFile::Options o;
+          o.applicationName = "Codex";
+          o.filenameSuffix = ".settings";
+          o.folderName = "Codex";
+          o.osxLibrarySubFolder = "Application Support";
+          o.millisecondsBeforeSaving = 500;
+          appProperties.setStorageParameters (o);
+          return appProperties.getUserSettings();
+      }())
+{
+    setLookAndFeel (&lnf);
+    addAndMakeVisible (view);
+    view.onScaleRequested = [this] (float s) { applyScale (s); };
+
+    const auto w = MainView::baseWidth, h = MainView::baseHeight;
+    setResizable (true, true);
+    setResizeLimits (roundToInt (w * 0.6), roundToInt (h * 0.6), w * 2, h * 2);
+    getConstrainer()->setFixedAspectRatio ((double) w / (double) h);
+
+    auto* s = appProperties.getUserSettings();
+    applyScale (s != nullptr ? (float) s->getDoubleValue (scaleKey, 1.0) : 1.0f);
+}
+
+CodexEditor::~CodexEditor()
+{
+    setLookAndFeel (nullptr);
+}
+
+void CodexEditor::applyScale (float scale)
+{
+    scale = jlimit (0.6f, 2.0f, scale);
+    setSize (roundToInt (MainView::baseWidth * scale), roundToInt (MainView::baseHeight * scale));
+}
+
+void CodexEditor::resized()
+{
+    const float scale = (float) getWidth() / (float) MainView::baseWidth;
+    view.setTransform (AffineTransform::scale (scale));
+    view.setBounds (0, 0, MainView::baseWidth, MainView::baseHeight);
+    if (auto* s = appProperties.getUserSettings())
+        s->setValue (scaleKey, scale);
 }

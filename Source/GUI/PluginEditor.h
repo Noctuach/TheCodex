@@ -4,46 +4,58 @@
 #include "Widgets.h"
 #include "EQDisplay.h"
 #include "Tuner.h"
+#include "Scope.h"
 #include "PresetBar.h"
 #include "DistortionView.h"
+#include "Overlays.h"
 
-class HardKickProcessor;
+class CodexProcessor;
 
-class HardKickEditor : public juce::AudioProcessorEditor, private juce::Timer
+/** The complete UI at its design size. The editor scales this view to the window size. */
+class MainView : public juce::Component, private juce::Timer
 {
 public:
-    explicit HardKickEditor (HardKickProcessor&);
-    ~HardKickEditor() override;
+    static constexpr int baseWidth = 1200, baseHeight = 850;
+
+    MainView (CodexProcessor&, juce::PropertiesFile* settings);
 
     void paint (juce::Graphics&) override;
-    void paintOverChildren (juce::Graphics&) override;
     void resized() override;
+
     void showTab (int tab);   // 0 = KICK, 1 = DISTORTION
+    void openAbout() { aboutOverlay.open(); }
+    void openSaveDialog() { presetBar.onSaveRequested(); }
+    std::function<void (float)> onScaleRequested;
 
 private:
     void timerCallback() override;
     void updateEngineView();
+    void showMainMenu();
+    void setTooltipsEnabled (bool);
     std::vector<juce::Component*> kickTabComponents();
 
-    struct ClipSection
+    struct QuickDistortion
     {
         PowerButton on;
         juce::TextButton edit { "EDIT" };
         ChoiceBox mode { "Type" };
-        Knob drive { "Drive" }, character { "Character" }, mix { "Mix" }, out { "Output" };
+        Knob drive { "Drive" }, character { "Character" }, mix { "Mix" };
         std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> onAttachment;
     };
 
-    HKLookAndFeel lnf;
-    HardKickProcessor& proc;
+    CodexProcessor& proc;
+    juce::PropertiesFile* settings;
+    std::unique_ptr<juce::TooltipWindow> tooltipWindow;
 
     int currentTab = 0;
-    juce::Rectangle<int> header, tabBar, upperArea, sourceArea, pitchArea, ampArea, eqArea, clip1Area, clip2Area, outArea;
+    juce::Rectangle<int> header, logoArea, presetArea, tabBar, sourceArea, pitchArea, ampArea, eqArea,
+                         quickAreas[2], outArea;
     std::array<juce::Rectangle<int>, 6> sourceCells;
 
     // Header
+    IconButton undoButton { "undo", Icons::undo() }, redoButton { "redo", Icons::redo() }, menuButton { "menu", Icons::menu() };
     PresetBar presetBar;
-    ChoiceBox keyBox { "Key" }, octaveBox { "Oct" }, keyModeBox { "Mode" };
+    ChoiceBox keyBox { "Key" }, octaveBox { "Oct" }, keyModeBox { "Key Mode" };
     TriggerButton kickButton { "KICK" };
     juce::TextButton kickTabButton { "KICK" }, distTabButton { "DISTORTION" };
 
@@ -62,14 +74,44 @@ private:
     EQDisplay eqDisplay;
     BandControls bandControls;
 
-    // Clip stages: compact quick controls (bottom row) + full units (distortion tab)
-    ClipSection clips[2];
+    // Distortion
+    QuickDistortion quick[2];
     DistortionUnit unit1, unit2;
 
-    // Master
+    // Output
+    KickScope scope;
     TunerDisplay tuner;
     Knob outGain { "Output" };
     LevelMeter meter;
 
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (HardKickEditor)
+    /** Shown over the pitch-envelope panel while the 909 engine is active. */
+    struct EngineNotice : public juce::Component
+    {
+        EngineNotice() { setInterceptsMouseClicks (false, false); }
+        void paint (juce::Graphics&) override;
+    } engineNotice;
+
+    // Overlays
+    SavePresetOverlay saveOverlay;
+    AboutOverlay aboutOverlay;
+};
+
+class CodexEditor : public juce::AudioProcessorEditor
+{
+public:
+    explicit CodexEditor (CodexProcessor&);
+    ~CodexEditor() override;
+
+    void resized() override;
+    void showTab (int tab) { view.showTab (tab); }
+    MainView& getView() { return view; }
+
+private:
+    void applyScale (float scale);
+
+    CodexLookAndFeel lnf;
+    juce::ApplicationProperties appProperties;
+    MainView view;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (CodexEditor)
 };

@@ -24,6 +24,10 @@ public:
     void previous() { step (-1); }
 
     bool saveUserPreset (const juce::String& name);
+    bool deleteUserPreset (const juce::String& name);
+    bool userPresetExists (const juce::String& name) const { return getUserNames().contains (name); }
+    bool isCurrentUserPreset() const { return getUserNames().contains (getCurrentName()); }
+    void refreshUserPresets();
     juce::File getUserDirectory() const;
 
     static const juce::Identifier presetNameProperty;
@@ -45,4 +49,6 @@ private:
 
     juce::AudioProcessorValueTreeState& apvts;
     std::vector<FactoryPreset> factory;
+    juce::StringArray userNames;
+    juce::CriticalSection userNamesLock;   // hosts may query programs from another thread
 };
