@@ -120,15 +120,19 @@ AudioProcessorValueTreeState::ParameterLayout Params::createLayout()
     StringArray bandTypes, slopes;
     for (int t = 0; t < eq::numBandTypes; ++t) bandTypes.add (eq::bandTypeNames()[t]);
     for (int i = 0; i < eq::numSlopes; ++i) slopes.add (String (eq::slopeDb[i]) + " dB/oct");
-    const int   defTypes[Params::numBands] = { 0, 1, 2, 2, 2, 5 };
-    const float defFreqs[Params::numBands] = { 30.0f, 60.0f, 200.0f, 1000.0f, 4000.0f, 16000.0f };
+    // Bands 1-6 keep their classic defaults; bands 7-24 start as bells
+    const int   defTypes[] = { 0, 1, 2, 2, 2, 5 };
+    const float defFreqs[] = { 30.0f, 60.0f, 200.0f, 1000.0f, 4000.0f, 16000.0f };
 
     for (int b = 0; b < Params::numBands; ++b)
     {
         const String n = "Band " + String (b + 1) + " ";
+        // "Used": the band exists on the display (it can still be bypassed with "On").
+        // A band counts as present when Used or On is set, so older states without Used still load.
+        addBool (l, ID::band (b, "Used"), n + "Used", false);
         addBool (l, ID::band (b, "On"), n + "On", false);
-        addChoice (l, ID::band (b, "Type"), n + "Type", bandTypes, defTypes[b]);
-        addFloat (l, ID::band (b, "Freq"), n + "Freq", skewed (20.0f, 20000.0f, 640.0f), defFreqs[b], hzText);
+        addChoice (l, ID::band (b, "Type"), n + "Type", bandTypes, b < 6 ? defTypes[b] : 2);
+        addFloat (l, ID::band (b, "Freq"), n + "Freq", skewed (20.0f, 20000.0f, 640.0f), b < 6 ? defFreqs[b] : 1000.0f, hzText);
         addFloat (l, ID::band (b, "Gain"), n + "Gain", { -30.0f, 30.0f, 0.01f }, 0.0f, dbText);
         addFloat (l, ID::band (b, "Q"), n + "Q", skewed (0.1f, 18.0f, 1.0f), 0.707f, [] (float v) { return String (v, 2); });
         addChoice (l, ID::band (b, "Slope"), n + "Slope", slopes, eq::defaultSlope);

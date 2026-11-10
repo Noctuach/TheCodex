@@ -10,9 +10,10 @@ class CodexProcessor;
       - Drag a node: frequency and gain. Shift: fine. Ctrl/Cmd + drag vertically: Q.
       - Mouse wheel over a node: Q (cut / band-pass filters: slope). Ctrl/Cmd + wheel: gain.
       - Alt-click a node: band on/off (bypass). Double-click a node: on/off.
-      - Double-click empty space: new band; the shape depends on where you click
+      - Double-click empty space: new band (up to 24); the shape depends on where you click
         (far left: low cut, far right: high cut, bottom: notch, elsewhere: bell).
-      - Right-click a node: shape, slope, stereo placement, split into L/R or M/S, reset.
+      - Right-click a node: shape, slope, stereo placement, split into L/R or M/S, reset, delete.
+      - Delete / Backspace: delete the selected band.
 */
 class EQDisplay : public juce::Component, private juce::Timer
 {
@@ -34,7 +35,18 @@ public:
 
     /** Copies band `from` into the first free band and gives the pair complementary placements. */
     static void splitBand (juce::AudioProcessorValueTreeState&, int from, bool midSide);
+    /** Returns a band to its defaults, which removes it from the display. */
     static void resetBand (juce::AudioProcessorValueTreeState&, int b);
+    static void deleteBand (juce::AudioProcessorValueTreeState& s, int b) { resetBand (s, b); }
+    /** A band is present on the display when it is in use or switched on (older states have no "Used"). */
+    static bool isPresent (juce::AudioProcessorValueTreeState&, int b);
+    static int  numPresent (juce::AudioProcessorValueTreeState&);
+    static int  firstFreeBand (juce::AudioProcessorValueTreeState&, int exclude = -1);
+    /** Creates a band in the first free slot; returns its index or -1 when all 24 are in use. */
+    static int  addBand (juce::AudioProcessorValueTreeState&, eq::BandType, float freq, float gain = 0.0f, float q = 1.0f);
+    /** Bypass / enable while keeping the band on the display. */
+    static void setBandOn (juce::AudioProcessorValueTreeState&, int b, bool on);
+    bool keyPressed (const juce::KeyPress&) override;
 
 private:
     void timerCallback() override;
@@ -50,6 +62,7 @@ private:
     juce::Point<float> nodePosition (int b) const;
     int hitTestNode (juce::Point<float>) const;
 
+    bool present (int b) const { return isPresent (apvts, b); }
     juce::RangedAudioParameter* param (int b, const char* suffix) const;
     void setParam (int b, const char* suffix, float value);
     void setParamGesture (int b, const char* suffix, float value);
@@ -112,12 +125,17 @@ private:
     juce::AudioProcessorValueTreeState& apvts;
     int band = -1;
 
-    juce::TextButton bandButtons[6];
+    IconButton prevButton { "prev", Icons::chevronLeft() }, nextButton { "next", Icons::chevronRight() };
+    juce::TextButton addButton { "+ ADD" }, deleteButton { "DELETE" };
     PowerButton onButton;
     juce::TextButton resetButton { "RESET" };
+    void step (int direction);
+    void select (int b) { setBand (b); if (onBandSelected) onBandSelected (b); }
+    juce::Rectangle<int> bandLabelArea;
+    bool hasBand = true;
     ChoiceBox type { "Shape" }, slope { "Slope" }, placement { "Stereo" };
     Knob freq { "Freq" }, gain { "Gain" }, q { "Q" };
     HeaderKnob gainScale { "Gain Scale" };
-    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> onAttachment;
+    int lastCount = -1;
     juce::Rectangle<int> toolsArea;
 };

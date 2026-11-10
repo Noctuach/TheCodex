@@ -63,7 +63,7 @@ namespace
         Builder& band (int n, int type, float freq, float gain = 0.0f, float q = 0.707f, int slopeDbPerOct = 24)
         {
             const int b = n - 1;
-            return set (ID::band (b, "On"), 1).set (ID::band (b, "Type"), (float) type).set (ID::band (b, "Freq"), freq)
+            return set (ID::band (b, "Used"), 1).set (ID::band (b, "On"), 1).set (ID::band (b, "Type"), (float) type).set (ID::band (b, "Freq"), freq)
                   .set (ID::band (b, "Gain"), gain).set (ID::band (b, "Q"), q).set (ID::band (b, "Slope"), (float) slopeIndex (slopeDbPerOct));
         }
         Builder& out (float db) { return set (ID::outGain, db); }

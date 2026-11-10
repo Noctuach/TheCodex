@@ -54,7 +54,7 @@ namespace ID
 
 namespace Params
 {
-    constexpr int numBands = 6;
+    constexpr int numBands = 24;   // same limit as Pro-Q 4
     constexpr int keyBaseNote = 29;  // F1: key index 0 (F) .. 11 (E) -> F1 .. E2
     juce::StringArray keyNames();     // "F", "F#" ... "E"
     juce::AudioProcessorValueTreeState::ParameterLayout createLayout();

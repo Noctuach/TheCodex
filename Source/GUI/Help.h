@@ -68,7 +68,8 @@ namespace Help
         {
             const auto sfx = id.substring (2);
             static const std::map<juce::String, juce::String> band {
-                { "On",    "Band On/Off: Enable this EQ band. Tip: double-click on the EQ display to add a band." },
+                { "Used",  "Band Used: whether this band exists on the EQ display (up to 24 bands). Add bands by double-clicking the display, delete them with the band menu or the Delete key." },
+                { "On",    "Band On/Off: bypass this EQ band without deleting it (Alt-click its node). Tip: double-click on the EQ display to add a band." },
                 { "Type",  "Shape: Bell, Low/High Shelf, Low/High Cut, Notch, Band Pass (isolate a range), Tilt Shelf (tilt around the frequency), Flat Tilt (tilt the whole spectrum) or All Pass (phase only, no level change)." },
                 { "Freq",  "Frequency: Centre / corner frequency of the band. Drag the node on the display horizontally." },
                 { "Gain",  "Gain: boost or cut (+/-30 dB). Drag the node vertically, or Ctrl/Cmd + mouse wheel." },

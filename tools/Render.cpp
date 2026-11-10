@@ -143,6 +143,34 @@ int main (int argc, char** argv)
         failures += bad;
     }
 
+    // ---- EQ: up to 24 bands (Pro-Q 4 limit), add / bypass / delete, older states ----
+    {
+        int bad = 0;
+        proc.presets.loadPreset (0);
+        auto& st = proc.apvts;
+        for (int b = 0; b < Params::numBands; ++b) EQDisplay::deleteBand (st, b);
+        int added = 0;
+        for (int i = 0; i < Params::numBands; ++i)
+            added += EQDisplay::addBand (st, eq::BandType::Bell, 30.0f * std::pow (2.0f, (float) i * 0.4f), i % 2 ? 1.5f : -1.5f, 2.0f) >= 0 ? 1 : 0;
+        if (added != 24 || EQDisplay::numPresent (st) != 24) ++bad;
+        if (EQDisplay::addBand (st, eq::BandType::Bell, 1000.0f) != -1) ++bad;            // 25th band refused
+        const auto full = render (proc, 1);
+        const float peak = full.getMagnitude (0, 0, full.getNumSamples());
+        if (! std::isfinite (peak) || peak > 4.0f) ++bad;
+        EQDisplay::setBandOn (st, 3, false);                                                // bypass keeps it
+        if (! EQDisplay::isPresent (st, 3) || EQDisplay::numPresent (st) != 24) ++bad;
+        EQDisplay::deleteBand (st, 3);                                                      // delete frees the slot
+        if (EQDisplay::isPresent (st, 3) || EQDisplay::firstFreeBand (st) != 3) ++bad;
+        // State from before "Used" existed: a band that is only switched On must still be present
+        for (int b = 0; b < Params::numBands; ++b) EQDisplay::deleteBand (st, b);
+        setParam (proc, ID::band (2, "On"), 1.0f);
+        if (! EQDisplay::isPresent (st, 2) || EQDisplay::numPresent (st) != 1) ++bad;
+        std::cout << "\nEQ 24 bands (add, limit, bypass, delete, legacy state): " << (bad == 0 ? "OK" : "FAILED")
+                  << "  (24-band peak " << juce::String (juce::Decibels::gainToDecibels (peak), 1) << " dBFS)\n";
+        failures += bad;
+        proc.presets.loadPreset (0);
+    }
+
     // ---- Every key, both engines ----
     std::cout << "\nKey   target Hz   synth Hz   909 Hz\n";
     for (int k = 0; k < 12; ++k)
