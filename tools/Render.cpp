@@ -485,6 +485,49 @@ int main (int argc, char** argv)
         failures += bad;
     }
 
+    // ---- CPU: realtime factor for a typical and a worst-case setup ----
+    {
+        auto bench = [&] (const char* name)
+        {
+            const int n = (int) (sr * 4.0);
+            juce::AudioBuffer<float> buf (2, block);
+            juce::MidiBuffer midi;
+            proc.prepareToPlay (sr, block);
+            const auto t0 = juce::Time::getMillisecondCounterHiRes();
+            for (int pos = 0; pos < n; pos += block)
+            {
+                midi.clear();
+                if (pos % (int) (sr * 0.4) < block) midi.addEvent (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100), 0);
+                buf.clear();
+                proc.processBlock (buf, midi);
+            }
+            const double ms = juce::Time::getMillisecondCounterHiRes() - t0;
+            const double load = ms / 4000.0 * 100.0;
+            std::cout << "  " << juce::String (name).paddedRight (' ', 46) << juce::String (load, 1).paddedLeft (' ', 6) << " % of one core\n";
+            return load;
+        };
+        std::cout << "\nCPU (4 s of kicks at 48 kHz, this machine)\n";
+        proc.presets.loadPreset (8);
+        bench ("909 Oldskool Hardstyle (default settings)");
+        proc.presets.loadPreset (19);   // Screech Rawstyle
+        bench ("Screech Rawstyle (filters, compressor)");
+        for (int st = 1; st <= 2; ++st) { setParam (proc, ID::clip (st, "OS"), 4.0f); setParam (proc, ID::clip (st, "FltPos"), 1.0f); }
+        for (int e = 0; e < 2; ++e)
+        {
+            for (int b = 0; b < Params::numBands; ++b) EQDisplay::addBand (proc.apvts, e, eq::BandType::Bell, 40.0f * std::pow (1.3f, (float) b), 1.0f, 2.0f);
+            setParam (proc, ID::eqMode (e), 2.0f);
+            setParam (proc, ID::eqRes (e), 2.0f);
+        }
+        setParam (proc, ID::sat ("On"), 1.0f); setParam (proc, ID::sat ("Bands"), 6.0f); setParam (proc, ID::sat ("OS"), 3.0f);
+        setParam (proc, ID::cmp ("On"), 1.0f); setParam (proc, ID::cmp ("Bands"), 4.0f); setParam (proc, ID::cmp ("Look"), 4.0f);
+        setParam (proc, ID::spc ("On"), 1.0f);
+        render (proc, 1);   // let the linear-phase filters build
+        juce::Thread::sleep (300);
+        const double worst = bench ("Worst case (everything on, 16x, 2 x 24-band LP EQ)");
+        if (worst > 400.0) { ++failures; std::cout << "   worst case far too slow\n"; }
+        proc.presets.loadPreset (0);
+    }
+
     // ---- Every key, both engines ----
     std::cout << "\nKey   target Hz   synth Hz   909 Hz\n";
     for (int k = 0; k < 12; ++k)
