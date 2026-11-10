@@ -106,8 +106,9 @@ public:
             }
             g.setFont (Fonts::label (10.5f, 0.08f));
             g.setColour (Colours_::textFaint);
-            g.drawText (isAsym() ? "DRAW BOTH HALVES" : "DRAW CURVE  (MIRRORED)", plot.withHeight (14.0f).reduced (4.0f, 0.0f),
-                        Justification::centredRight);
+            // upper-left quadrant: the one area a drawn curve never reaches
+            g.drawText (isAsym() ? "DRAW BOTH HALVES" : "DRAW CURVE  (MIRRORED)",
+                        Rectangle<float> (plot.getX() + 4.0f, plot.getY() + 16.0f, plot.getWidth() * 0.45f, 14.0f), Justification::centredLeft);
         }
 
         // current input level (pre-drive, with boost) marked on both sides of the curve

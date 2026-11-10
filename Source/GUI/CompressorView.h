@@ -279,7 +279,8 @@ public:
             g.setColour (b == selected ? Colours_::text : Colours_::textDim);
             g.setFont (Fonts::label (11.0f, 0.14f));
             const juce::String name = nb == 1 ? "FULL BAND" : "BAND " + juce::String (b + 1);
-            g.drawText (name + "   " + juce::String (smoothed[(size_t) b], 1) + " dB", seg.reduced (10.0f, 0.0f), juce::Justification::centredLeft);
+            const float shown = std::abs (smoothed[(size_t) b]) < 0.05f ? 0.0f : smoothed[(size_t) b];   // no "-0.0"
+            g.drawText (name + "   " + juce::String (shown, 1) + " dB", seg.reduced (10.0f, 0.0f), juce::Justification::centredLeft);
         }
         for (int j = 0; j < nb - 1; ++j)
         {
@@ -288,7 +289,9 @@ public:
             g.fillRect (x - 1.0f, r.getY() + 3.0f, 2.0f, r.getHeight() - 6.0f);
             g.setFont (Fonts::regular (10.5f));
             const float f = xover (j);
-            g.drawText (f < 1000 ? juce::String (f, 0) + " Hz" : juce::String (f / 1000.0f, 2) + " k", juce::Rectangle<float> (x + 4, r.getY(), 60, 14), juce::Justification::centredLeft);
+            // frequency right-aligned against its divider (inside the lower band), clear of the band names
+            g.drawText (f < 1000 ? juce::String (f, 0) + " Hz" : juce::String (f / 1000.0f, 2) + " kHz",
+                        juce::Rectangle<float> (x - 72.0f, r.getY(), 66.0f, r.getHeight()), juce::Justification::centredRight);
         }
     }
 
