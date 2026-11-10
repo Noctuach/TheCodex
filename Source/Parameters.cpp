@@ -1,4 +1,6 @@
 #include "Parameters.h"
+#include "DSP/ClipDistortion.h"
+#include "DSP/Kick909.h"
 
 using namespace juce;
 
@@ -41,9 +43,28 @@ namespace
     }
 }
 
+StringArray Params::keyNames()
+{
+    return { "F", "F#", "G", "G#", "A", "A#", "B", "C", "C#", "D", "D#", "E" };
+}
+
 AudioProcessorValueTreeState::ParameterLayout Params::createLayout()
 {
     Layout l;
+
+    // ---------------- Key ----------------
+    addChoice (l, ID::key, "Key", keyNames(), 0);
+    addChoice (l, ID::octave, "Octave", { "-1", "0", "+1" }, 1);
+    addChoice (l, ID::keyMode, "Key Mode", { "Fixed Key", "Follow MIDI" }, 0);
+
+    // ---------------- Engine ----------------
+    addChoice (l, ID::engine, "Engine", { "Synth", "909" }, 0);
+    StringArray models;
+    for (const auto& m : kick909Models()) models.add (m.name);
+    addChoice (l, ID::model909, "909 Model", models, 0);
+    addFloat (l, ID::tune909, "909 Tune", { 0.0f, 1.0f }, 0.5f, pctText);
+    addFloat (l, ID::attack909, "909 Attack", { 0.0f, 1.0f }, 0.5f, pctText);
+    addFloat (l, ID::decay909, "909 Decay", { 0.0f, 1.0f }, 0.5f, pctText);
 
     // ---------------- Oscillator ----------------
     addChoice (l, ID::wave, "Wave", { "Sine", "Triangle", "Warm Sine" }, 0);
@@ -70,7 +91,7 @@ AudioProcessorValueTreeState::ParameterLayout Params::createLayout()
     addFloat (l, ID::aCurve, "Amp Curve", skewed (1.0f, 10.0f, 3.0f), 2.0f, [] (float v) { return String (v, 2); });
 
     // ---------------- Clip distortion stages ----------------
-    const StringArray clipModes { "Hard", "Soft", "Tanh", "Fold" };
+    const StringArray clipModes = ClipDistortion::modeNames();
     for (int stage = 1; stage <= 2; ++stage)
     {
         const String n = "Clip " + String (stage) + " ";

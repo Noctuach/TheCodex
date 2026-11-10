@@ -3,6 +3,8 @@
 #include "LookAndFeel.h"
 #include "Widgets.h"
 #include "EQDisplay.h"
+#include "Tuner.h"
+#include "PresetBar.h"
 
 class HardKickProcessor;
 
@@ -13,16 +15,18 @@ public:
     ~HardKickEditor() override;
 
     void paint (juce::Graphics&) override;
+    void paintOverChildren (juce::Graphics&) override;
     void resized() override;
 
 private:
     void timerCallback() override;
     void drawPanel (juce::Graphics&, juce::Rectangle<int>, const juce::String& title, juce::Colour dot);
+    void updateEngineView();
 
     struct ClipSection
     {
         PowerButton on;
-        ChoiceBox mode { "Mode" };
+        ChoiceBox mode { "Type" };
         Knob drive { "Drive" }, bias { "Bias" }, mix { "Mix" }, out { "Output" };
         std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> onAttachment;
     };
@@ -30,13 +34,19 @@ private:
     HKLookAndFeel lnf;
     HardKickProcessor& proc;
 
-    juce::Rectangle<int> header, screen, oscArea, pitchArea, ampArea, eqArea, clip1Area, clip2Area, outArea;
+    juce::Rectangle<int> header, sourceArea, pitchArea, ampArea, eqArea, clip1Area, clip2Area, outArea;
+    std::array<juce::Rectangle<int>, 6> sourceCells;
 
+    // Header
+    PresetBar presetBar;
+    ChoiceBox keyBox { "Key" }, octaveBox { "Oct" }, keyModeBox { "Mode" };
     TriggerButton kickButton { "KICK" };
 
-    // Oscillator
-    ChoiceBox wave { "Wave" };
-    Knob tune { "Tune" }, phase { "Phase" }, clickLevel { "Click" }, clickDecay { "Click Decay" }, clickTone { "Click Tone" };
+    // Source
+    SegmentedChoice engineSwitch;
+    ChoiceBox wave { "Wave" }, model { "909 Model" };
+    Knob tune { "Fine Tune" }, phase { "Phase" }, clickLevel { "Click" }, clickDecay { "Click Decay" }, clickTone { "Click Tone" };
+    Knob tune909 { "Tune" }, attack909 { "Attack" }, decay909 { "Decay" };
 
     // Envelopes
     EnvelopeDisplay pitchEnvDisplay, ampEnvDisplay;
@@ -50,7 +60,8 @@ private:
     // Clip stages
     ClipSection clips[2];
 
-    // Output
+    // Master
+    TunerDisplay tuner;
     Knob outGain { "Output" };
     LevelMeter meter;
 

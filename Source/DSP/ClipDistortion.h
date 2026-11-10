@@ -9,7 +9,13 @@
 class ClipDistortion
 {
 public:
-    enum Mode { Hard = 0, Soft, Tanh, Fold };
+    enum Mode { HardClip = 0, SoftClip, Tanh, Overdrive, Tube, Diode, Fuzz, SineFold, TriFold, Rectify, Bitcrush, AsymClip };
+
+    static juce::StringArray modeNames()
+    {
+        return { "Hard Clip", "Soft Clip", "Tanh", "Overdrive", "Tube", "Diode",
+                 "Fuzz", "Sine Fold", "Tri Fold", "Rectify", "Bitcrush", "Asym Clip" };
+    }
 
     static constexpr int oversamplingOrder = 2; // 2^2 = 4x
 
@@ -86,18 +92,37 @@ public:
 
     static float shapeFor (int m, float x) noexcept
     {
+        using juce::MathConstants;
         switch (m)
         {
-            case Hard: return juce::jlimit (-1.0f, 1.0f, x);
-            case Soft:
-            {
+            case HardClip:  return juce::jlimit (-1.0f, 1.0f, x);
+            case SoftClip:
                 if (x >= 1.0f)  return 1.0f;
                 if (x <= -1.0f) return -1.0f;
                 return 1.5f * (x - x * x * x / 3.0f);
+            case Tanh:      return std::tanh (x);
+            case Overdrive: return std::atan (x * 1.5f) * (2.0f / MathConstants<float>::pi);
+            case Tube:      // asymmetric: negative half saturates earlier -> even harmonics
+                return x >= 0.0f ? std::tanh (x) : std::tanh (x * 1.6f) * 0.75f;
+            case Diode:     // forward-biased diode curve, strongly asymmetric
+                return x >= 0.0f ? 1.0f - std::exp (-1.5f * x) : -0.6f * (1.0f - std::exp (1.2f * x));
+            case Fuzz:      // very fast saturation towards a square wave
+                return (x >= 0.0f ? 1.0f : -1.0f) * (1.0f - std::exp (-4.0f * std::abs (x)));
+            case SineFold:  return std::sin (x * MathConstants<float>::halfPi);
+            case TriFold:
+            {
+                float t = (x + 1.0f) * 0.25f;
+                t -= std::floor (t);
+                return 1.0f - 4.0f * std::abs (t - 0.5f);
             }
-            case Tanh: return std::tanh (x);
-            case Fold: return std::sin (x * juce::MathConstants<float>::halfPi);
-            default:   return x;
+            case Rectify:   return std::tanh (std::abs (x)); // full-wave: adds an octave-up buzz
+            case Bitcrush:
+            {
+                const float c = juce::jlimit (-1.0f, 1.0f, x);
+                return std::round (c * 8.0f) / 8.0f;
+            }
+            case AsymClip:  return juce::jlimit (-0.55f, 1.0f, x);
+            default:        return x;
         }
     }
 
@@ -105,7 +130,7 @@ private:
     float shape (float x) const noexcept { return shapeFor (mode, x); }
 
     std::unique_ptr<juce::dsp::Oversampling<float>> oversampler;
-    int mode = Hard;
+    int mode = HardClip;
     float targetDrive = 1.0f, targetMix = 1.0f, targetOut = 1.0f, targetBias = 0.0f;
     juce::SmoothedValue<float> drive, mix, outGain, bias;
     float dcR = 0.999f, dcX = 0.0f, dcY = 0.0f;

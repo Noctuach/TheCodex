@@ -3,6 +3,18 @@
 
 namespace ID
 {
+    // Source / engine
+    inline const juce::String engine     { "engine" };
+    inline const juce::String model909   { "model909" };
+    inline const juce::String tune909    { "tune909" };
+    inline const juce::String attack909  { "attack909" };
+    inline const juce::String decay909   { "decay909" };
+
+    // Key
+    inline const juce::String key        { "key" };
+    inline const juce::String octave     { "octave" };
+    inline const juce::String keyMode    { "keyMode" };
+
     // Oscillator
     inline const juce::String wave       { "wave" };
     inline const juce::String tune       { "tune" };
@@ -38,5 +50,7 @@ namespace ID
 namespace Params
 {
     constexpr int numBands = 6;
+    constexpr int keyBaseNote = 29;  // F1: key index 0 (F) .. 11 (E) -> F1 .. E2
+    juce::StringArray keyNames();     // "F", "F#" ... "E"
     juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
 }

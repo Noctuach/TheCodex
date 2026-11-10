@@ -5,6 +5,10 @@ HardKickProcessor::HardKickProcessor()
     : AudioProcessor (BusesProperties().withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
       apvts (*this, nullptr, "HardKickState", Params::createLayout())
 {
+    engine = p (ID::engine); model909 = p (ID::model909); tune909 = p (ID::tune909);
+    attack909 = p (ID::attack909); decay909 = p (ID::decay909);
+    key = p (ID::key); octave = p (ID::octave); keyMode = p (ID::keyMode);
+
     wave = p (ID::wave); tune = p (ID::tune); phase = p (ID::phase);
     clickLevel = p (ID::clickLevel); clickDecay = p (ID::clickDecay); clickTone = p (ID::clickTone);
 
@@ -48,9 +52,19 @@ void HardKickProcessor::prepareToPlay (double sampleRate, int)
     setLatencySamples (juce::roundToInt (clip1.getLatencyInSamples() + clip2.getLatencyInSamples()));
 }
 
+int HardKickProcessor::getKeyNote() const
+{
+    return Params::keyBaseNote + (int) key->load() + 12 * ((int) octave->load() - 1);
+}
+
 void HardKickProcessor::updateParameters()
 {
     KickVoice::Settings s;
+    s.engine           = (int) engine->load();
+    s.model909         = (int) model909->load();
+    s.tune909          = tune909->load();
+    s.attack909        = attack909->load();
+    s.decay909         = decay909->load();
     s.wave             = (int) wave->load();
     s.tuneSemis        = tune->load();
     s.startPhaseDeg    = phase->load();
@@ -61,7 +75,10 @@ void HardKickProcessor::updateParameters()
     voice.setSettings (s);
 
     voice.pitchEnv.setParameters (pAttack->load(), pDecay->load(), pSustain->load(), pRelease->load(), pCurve->load());
-    voice.ampEnv.setParameters (aAttack->load(), aDecay->load(), aSustain->load(), aRelease->load(), aCurve->load());
+    if (s.engine == KickVoice::Engine909) // amp ADSR is a gate: attack + release only
+        voice.ampEnv.setParameters (aAttack->load(), 1.0f, 1.0f, aRelease->load(), aCurve->load());
+    else
+        voice.ampEnv.setParameters (aAttack->load(), aDecay->load(), aSustain->load(), aRelease->load(), aCurve->load());
 
     ClipDistortion* clips[] = { &clip1, &clip2 };
     for (int i = 0; i < 2; ++i)
@@ -90,7 +107,10 @@ void HardKickProcessor::updateParameters()
 void HardKickProcessor::handleMidi (const juce::MidiMessage& m)
 {
     if (m.isNoteOn())
-        voice.noteOn (m.getNoteNumber());
+    {
+        const bool followMidi = keyMode->load() > 0.5f;
+        voice.noteOn (m.getNoteNumber(), (float) (followMidi ? m.getNoteNumber() : getKeyNote()));
+    }
     else if (m.isNoteOff())
         voice.noteOff (m.getNoteNumber());
     else if (m.isAllNotesOff() || m.isAllSoundOff())
@@ -102,8 +122,10 @@ void HardKickProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mi
     juce::ScopedNoDenormals noDenormals;
     updateParameters();
 
-    if (previewOn.exchange (false))  voice.noteOn (previewNote);
-    if (previewOff.exchange (false)) voice.noteOff (previewNote);
+    // GUI "KICK" button always plays the selected key (uses an out-of-range note id so MIDI can't cut it)
+    constexpr int previewId = 128;
+    if (previewOn.exchange (false))  voice.noteOn (previewId, (float) getKeyNote());
+    if (previewOff.exchange (false)) voice.noteOff (previewId);
 
     const int numSamples  = buffer.getNumSamples();
     const int numChannels = buffer.getNumChannels();
@@ -146,6 +168,7 @@ void HardKickProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mi
             buffer.copyFrom (ch, start, x, n);
 
         analyzer.push (x, n);
+        tunerFeed.push (x, n);
     }
 
     if (blockPeak > peak.load())

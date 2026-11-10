@@ -4,6 +4,7 @@
 #include "DSP/KickVoice.h"
 #include "DSP/ClipDistortion.h"
 #include "DSP/ParametricEQ.h"
+#include "PresetManager.h"
 
 /** Lock-free single-producer/single-consumer sample FIFO feeding the spectrum analyzer. */
 class AnalyzerFifo
@@ -55,10 +56,10 @@ public:
     bool isMidiEffect() const override { return false; }
     double getTailLengthSeconds() const override { return 0.0; }
 
-    int getNumPrograms() override { return 1; }
-    int getCurrentProgram() override { return 0; }
-    void setCurrentProgram (int) override {}
-    const juce::String getProgramName (int) override { return "Default"; }
+    int getNumPrograms() override { return presets.getNumFactory(); }
+    int getCurrentProgram() override { return juce::jmax (0, presets.getCurrentIndex()); }
+    void setCurrentProgram (int index) override { presets.loadPreset (index); }
+    const juce::String getProgramName (int index) override { return presets.getFactoryNames()[index]; }
     void changeProgramName (int, const juce::String&) override {}
 
     void getStateInformation (juce::MemoryBlock& destData) override;
@@ -71,9 +72,13 @@ public:
     float getAndResetPeak() { return peak.exchange (0.0f); }
 
     juce::AudioProcessorValueTreeState apvts;
-    AnalyzerFifo analyzer;
+    PresetManager presets { apvts };
+    AnalyzerFifo analyzer, tunerFeed;
 
-    static constexpr int previewNote = 29; // F1, ~43.7 Hz: a typical hardstyle kick root
+    /** MIDI note of the selected key (F1..E2, shifted by the octave setting). */
+    int getKeyNote() const;
+    /** Exact root the kick is tuned to, including the Tune parameter (fractional MIDI note). */
+    float getTargetNote() const { return (float) getKeyNote() + tune->load(); }
 
 private:
     void updateParameters();
@@ -95,6 +100,7 @@ private:
 
     std::atomic<float>* p (const juce::String& id) { return apvts.getRawParameterValue (id); }
 
+    std::atomic<float> *engine, *model909, *tune909, *attack909, *decay909, *key, *octave, *keyMode;
     std::atomic<float> *wave, *tune, *phase, *clickLevel, *clickDecay, *clickTone;
     std::atomic<float> *pAmount, *pAttack, *pDecay, *pSustain, *pRelease, *pCurve;
     std::atomic<float> *aAttack, *aDecay, *aSustain, *aRelease, *aCurve;
