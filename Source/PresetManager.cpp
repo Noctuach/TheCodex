@@ -42,6 +42,14 @@ namespace
                   .set (ID::clip (stage, "Drive"), drive).set (ID::clip (stage, "Out"), out)
                   .set (ID::clip (stage, "Bias"), bias).set (ID::clip (stage, "Mix"), mix);
         }
+        /** Distroyer-style extras: characteristic, boost, wet lo/hi filters and shelf. */
+        Builder& character (int stage, float chr, float boostDb = 0.0f, float loHz = 20000.0f, float hiHz = 20.0f,
+                            float shelfHz = 6000.0f, float shelfDb = 0.0f)
+        {
+            return set (ID::clip (stage, "Char"), chr).set (ID::clip (stage, "Boost"), boostDb)
+                  .set (ID::clip (stage, "LoFilt"), loHz).set (ID::clip (stage, "HiFilt"), hiHz)
+                  .set (ID::clip (stage, "ShelfF"), shelfHz).set (ID::clip (stage, "ShelfG"), shelfDb);
+        }
         Builder& clipOff (int stage) { return set (ID::clip (stage, "On"), 0); }
         Builder& band (int n, int type, float freq, float gain = 0.0f, float q = 0.707f, int slope = 1)
         {
@@ -63,7 +71,7 @@ PresetManager::PresetManager (AudioProcessorValueTreeState& s) : apvts (s)
     add ("Oldskool Raw", Builder().synth (0, 54.0f, 90.0f, 5.0f).amp (800.0f, 0.8f, 120.0f)
          .clip (1, CD::HardClip, 26.0f, -8.0f).band (1, LowCut, 28.0f).band (2, Bell, 90.0f, -6.0f, 2.0f)
          .band (3, Bell, 220.0f, 5.0f, 1.2f).band (4, Bell, 1200.0f, -4.0f, 1.5f)
-         .clip (2, CD::Tanh, 10.0f, -4.0f).out (-2.0f));
+         .clip (2, CD::Tanh, 10.0f, -4.0f).character (2, 0.0f, 0.0f, 20000.0f, 20.0f, 8000.0f, -4.0f).out (-2.0f));
 
     add ("Euphoric Tail", Builder().synth (2, 40.0f, 150.0f, 3.5f).amp (1500.0f, 0.85f, 300.0f)
          .click (0.1f, 4.0f, 3500.0f).clip (1, CD::SoftClip, 14.0f, -4.0f).band (3, Bell, 160.0f, 3.0f, 1.0f)
@@ -98,11 +106,12 @@ PresetManager::PresetManager (AudioProcessorValueTreeState& s) : apvts (s)
 
     add ("909 Rawstyle", Builder().kick909 (2, 0.55f, 0.7f, 0.55f).set (ID::aRelease, 100.0f)
          .clip (1, CD::HardClip, 28.0f, -10.0f).band (2, Bell, 50.0f, -4.0f, 1.5f).band (3, Bell, 383.0f, 6.0f, 1.0f)
-         .band (4, Bell, 1800.0f, -5.0f, 2.0f).clip (2, CD::Diode, 12.0f, -6.0f));
+         .band (4, Bell, 1800.0f, -5.0f, 2.0f).clip (2, CD::Diode, 12.0f, -6.0f)
+         .character (1, 0.35f, 0.0f, 9000.0f).character (2, 0.0f, 0.0f, 20000.0f, 40.0f));
 
     add ("909 Gabber Overdrive", Builder().kick909 (5, 0.7f, 0.5f, 0.5f).set (ID::aRelease, 80.0f)
          .clip (1, CD::Overdrive, 34.0f, -10.0f).band (2, LowShelf, 80.0f, 6.0f, 0.7f).band (3, Bell, 800.0f, -9.0f, 0.7f)
-         .clip (2, CD::HardClip, 14.0f, -7.0f));
+         .clip (2, CD::HardClip, 14.0f, -7.0f).character (1, 0.5f, 6.0f, 12000.0f));
 
     add ("909 Tok", Builder().kick909 (9, 0.5f, 0.8f, 0.5f).set (ID::aRelease, 60.0f)
          .clip (1, CD::HardClip, 18.0f, -7.0f).band (4, Bell, 3000.0f, 5.0f, 1.2f).clip (2, CD::SoftClip, 4.0f, -3.0f));
@@ -119,7 +128,7 @@ PresetManager::PresetManager (AudioProcessorValueTreeState& s) : apvts (s)
 
     add ("909 Hard Attack Raw", Builder().kick909 (4, 0.5f, 0.9f, 0.45f).set (ID::aRelease, 90.0f)
          .clip (1, CD::Diode, 24.0f, -9.0f, 0.1f).band (1, LowCut, 32.0f).band (3, Bell, 450.0f, 5.0f, 1.2f)
-         .band (4, Notch, 1500.0f, 0.0f, 3.0f).clip (2, CD::HardClip, 12.0f, -6.0f));
+         .band (4, Notch, 1500.0f, 0.0f, 3.0f).clip (2, CD::HardClip, 12.0f, -6.0f).character (1, 0.25f));
 
     if (apvts.state.getProperty (presetNameProperty).toString().isEmpty())
         setCurrentName ("Init");

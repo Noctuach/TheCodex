@@ -1,10 +1,18 @@
 #pragma once
 #include <juce_dsp/juce_dsp.h>
+#include "ParametricEQ.h"
 #include <cmath>
 
 /**
-    Oversampled clip distortion stage.
-    drive -> (bias) -> waveshaper -> remove bias offset -> dry/wet mix -> output gain -> DC blocker
+    Distortion stage.
+
+    Signal path (inside the oversampled domain):
+        Boost (dry + wet)
+          ├── dry ─────────────────────────────────────────────────────────┐
+          └── wet: Lo Filter (low-pass) -> Drive -> Type curve (+Offset)    │
+                   -> Characteristic (morph towards a rectangle)           Mix -> Output
+                   -> Hi Filter (high-pass) -> High shelf (tone) ──────────┘
+        -> optional DC filter
 */
 class ClipDistortion
 {
@@ -17,77 +25,107 @@ public:
                  "Fuzz", "Sine Fold", "Tri Fold", "Rectify", "Bitcrush", "Asym Clip" };
     }
 
-    static constexpr int oversamplingOrder = 2; // 2^2 = 4x
+    static juce::StringArray oversamplingNames() { return { "Off", "2x", "4x", "8x" }; }
+
+    struct Settings
+    {
+        bool  enabled = true;
+        int   mode = HardClip;
+        float driveDb = 0.0f, boostDb = 0.0f, offset = 0.0f, character = 0.0f;
+        float mix = 1.0f, outDb = 0.0f;
+        float loFilterHz = 20000.0f, hiFilterHz = 20.0f, shelfHz = 6000.0f, shelfDb = 0.0f;
+        bool  dcFilter = true;
+        int   oversampling = 2; // index into oversamplingNames()
+    };
 
     void prepare (double sr, int maxBlockSize)
     {
-        oversampler = std::make_unique<juce::dsp::Oversampling<float>> (
-            1, oversamplingOrder, juce::dsp::Oversampling<float>::filterHalfBandPolyphaseIIR, true, false);
-        oversampler->initProcessing ((size_t) maxBlockSize);
-
-        const double osRate = sr * (1 << oversamplingOrder);
-        for (auto* s : { &drive, &mix, &outGain, &bias })
-            s->reset (osRate, 0.02);
-
-        drive.setCurrentAndTargetValue (targetDrive);
-        mix.setCurrentAndTargetValue (targetMix);
-        outGain.setCurrentAndTargetValue (targetOut);
-        bias.setCurrentAndTargetValue (targetBias);
-
-        // DC blocker (~10 Hz) at the base rate
+        baseRate = sr;
+        for (int i = 0; i < 3; ++i)
+        {
+            oversamplers[(size_t) i] = std::make_unique<juce::dsp::Oversampling<float>> (
+                1, i + 1, juce::dsp::Oversampling<float>::filterHalfBandPolyphaseIIR, true, false);
+            oversamplers[(size_t) i]->initProcessing ((size_t) maxBlockSize);
+        }
         dcR = (float) std::exp (-juce::MathConstants<double>::twoPi * 10.0 / sr);
+        activeOs = -1;           // force (re)configuration
+        applySettings (true);
         reset();
     }
 
     void reset()
     {
-        if (oversampler != nullptr)
-            oversampler->reset();
+        for (auto& os : oversamplers)
+            if (os != nullptr) os->reset();
+        for (auto* f : { &loFilter, &hiFilter, &shelf }) f->reset();
         dcX = dcY = 0.0f;
     }
 
-    float getLatencyInSamples() const { return oversampler != nullptr ? oversampler->getLatencyInSamples() : 0.0f; }
-
-    void setParameters (bool enabled, int newMode, float driveDb, float newBias, float newMix, float outDb)
+    /** Latency in base-rate samples for the current oversampling setting. */
+    float getLatencyInSamples() const
     {
-        mode = newMode;
-        // Always run through the oversampler so latency stays constant when bypassed.
-        targetDrive = juce::Decibels::decibelsToGain (driveDb);
-        targetMix   = enabled ? newMix : 0.0f;
-        targetOut   = enabled ? juce::Decibels::decibelsToGain (outDb) : 1.0f;
-        targetBias  = newBias;
+        const int i = settings.oversampling - 1;
+        return i >= 0 && oversamplers[(size_t) i] != nullptr ? oversamplers[(size_t) i]->getLatencyInSamples() : 0.0f;
+    }
 
-        drive.setTargetValue (targetDrive);
-        mix.setTargetValue (targetMix);
-        outGain.setTargetValue (targetOut);
-        bias.setTargetValue (targetBias);
+    void setSettings (const Settings& s)
+    {
+        settings = s;
+        applySettings (false);
     }
 
     void process (float* data, int numSamples) noexcept
     {
-        float* channels[] = { data };
-        juce::dsp::AudioBlock<float> block (channels, 1, (size_t) numSamples);
-        auto up = oversampler->processSamplesUp (block);
-        float* p = up.getChannelPointer (0);
-
-        for (size_t i = 0; i < up.getNumSamples(); ++i)
-        {
-            const float dry = p[i];
-            const float b   = bias.getNextValue();
-            const float wet = shape (dry * drive.getNextValue() + b) - shape (b);
-            const float m   = mix.getNextValue();
-            p[i] = (dry + m * (wet - dry)) * outGain.getNextValue();
-        }
-
-        oversampler->processSamplesDown (block);
-
+        float inPk = 0.0f;
         for (int i = 0; i < numSamples; ++i)
         {
-            const float x = data[i];
-            dcY = x - dcX + dcR * dcY;
-            dcX = x;
-            data[i] = dcY;
+            data[i] *= boost.getNextValue();
+            inPk = std::max (inPk, std::abs (data[i]));
         }
+
+        if (activeOs >= 0)
+        {
+            float* channels[] = { data };
+            juce::dsp::AudioBlock<float> block (channels, 1, (size_t) numSamples);
+            auto up = oversamplers[(size_t) activeOs]->processSamplesUp (block);
+            processSamples (up.getChannelPointer (0), (int) up.getNumSamples());
+            oversamplers[(size_t) activeOs]->processSamplesDown (block);
+        }
+        else
+        {
+            processSamples (data, numSamples);
+        }
+
+        float outPk = 0.0f;
+        for (int i = 0; i < numSamples; ++i)
+        {
+            if (settings.dcFilter)
+            {
+                const float x = data[i];
+                dcY = x - dcX + dcR * dcY;
+                dcX = x;
+                data[i] = dcY;
+            }
+            outPk = std::max (outPk, std::abs (data[i]));
+        }
+
+        if (inPk > inPeak.load())   inPeak.store (inPk);
+        if (outPk > outPeak.load()) outPeak.store (outPk);
+    }
+
+    /** Wet transfer curve for one input sample (excluding filters, mix and output); also used by the GUI display. */
+    static float transfer (int mode, float x, float driveGain, float offset, float character) noexcept
+    {
+        const float shaped = shapeFor (mode, x * driveGain + offset) - shapeFor (mode, offset);
+        return harden (shaped, character);
+    }
+
+    /** Characteristic: 0 = curve unchanged ... 1 = pushed towards a rectangle wave. */
+    static float harden (float y, float character) noexcept
+    {
+        if (character <= 0.0f) return y;
+        const float g = 1.0f + 40.0f * character * character;
+        return juce::jlimit (-1.0f, 1.0f, y * g);
     }
 
     static float shapeFor (int m, float x) noexcept
@@ -126,12 +164,87 @@ public:
         }
     }
 
-private:
-    float shape (float x) const noexcept { return shapeFor (mode, x); }
+    /** Peak levels since the last call (for the GUI meters). */
+    float getAndResetInputPeak()  { return inPeak.exchange (0.0f); }
+    float getAndResetOutputPeak() { return outPeak.exchange (0.0f); }
 
-    std::unique_ptr<juce::dsp::Oversampling<float>> oversampler;
+private:
+    void applySettings (bool force)
+    {
+        const int os = settings.oversampling - 1; // -1 = off
+        const bool rateChanged = os != activeOs || force;
+        activeOs = os;
+        const double rate = baseRate * (os >= 0 ? (1 << (os + 1)) : 1);
+
+        if (rateChanged)
+        {
+            if (os >= 0 && oversamplers[(size_t) os] != nullptr)
+                oversamplers[(size_t) os]->reset();
+            for (auto* s : { &drive, &mix, &outGain, &offset, &character })
+                s->reset (rate, 0.02);
+            boost.reset (baseRate, 0.02);
+            for (auto* f : { &loFilter, &hiFilter, &shelf }) f->reset();
+            lastFilterRate = 0.0;
+        }
+
+        // Always run the full path when bypassed so latency stays constant; just mix in 0 % wet at 0 dB.
+        const auto& s = settings;
+        setTarget (drive, juce::Decibels::decibelsToGain (s.driveDb), force || rateChanged);
+        setTarget (boost, s.enabled ? juce::Decibels::decibelsToGain (s.boostDb) : 1.0f, force || rateChanged);
+        setTarget (mix, s.enabled ? s.mix : 0.0f, force || rateChanged);
+        setTarget (outGain, s.enabled ? juce::Decibels::decibelsToGain (s.outDb) : 1.0f, force || rateChanged);
+        setTarget (offset, s.offset, force || rateChanged);
+        setTarget (character, s.character, force || rateChanged);
+
+        // Wet filters (redesigned only when something changed)
+        if (rate != lastFilterRate || s.loFilterHz != lastLo || s.hiFilterHz != lastHi || s.shelfHz != lastShelfHz || s.shelfDb != lastShelfDb)
+        {
+            eq::BandSettings lp; lp.on = true; lp.type = eq::BandType::HighCut; lp.freq = s.loFilterHz; lp.slope = 0;
+            eq::BandSettings hp; hp.on = true; hp.type = eq::BandType::LowCut;  hp.freq = s.hiFilterHz; hp.slope = 0;
+            eq::BandSettings sh; sh.on = true; sh.type = eq::BandType::HighShelf; sh.freq = s.shelfHz; sh.gainDb = s.shelfDb;
+            loFilter.c = eq::design (lp, rate).stages[0];
+            hiFilter.c = eq::design (hp, rate).stages[0];
+            shelf.c    = eq::design (sh, rate).stages[0];
+            loActive = s.loFilterHz < 19900.0f;
+            hiActive = s.hiFilterHz > 20.5f;
+            shelfActive = std::abs (s.shelfDb) > 0.01f;
+            lastFilterRate = rate; lastLo = s.loFilterHz; lastHi = s.hiFilterHz; lastShelfHz = s.shelfHz; lastShelfDb = s.shelfDb;
+        }
+        mode = s.mode;
+    }
+
+    static void setTarget (juce::SmoothedValue<float>& v, float target, bool snap)
+    {
+        if (snap) v.setCurrentAndTargetValue (target);
+        else      v.setTargetValue (target);
+    }
+
+    void processSamples (float* p, int n) noexcept
+    {
+        for (int i = 0; i < n; ++i)
+        {
+            const float dry = p[i];
+            float w = loActive ? loFilter.process (dry) : dry;
+            w = transfer (mode, w, drive.getNextValue(), offset.getNextValue(), character.getNextValue());
+            if (hiActive)    w = hiFilter.process (w);
+            if (shelfActive) w = shelf.process (w);
+            const float m = mix.getNextValue();
+            p[i] = (dry + m * (w - dry)) * outGain.getNextValue();
+        }
+    }
+
+    double baseRate = 44100.0;
+    std::array<std::unique_ptr<juce::dsp::Oversampling<float>>, 3> oversamplers;
+    int activeOs = -1;
     int mode = HardClip;
-    float targetDrive = 1.0f, targetMix = 1.0f, targetOut = 1.0f, targetBias = 0.0f;
-    juce::SmoothedValue<float> drive, mix, outGain, bias;
+    Settings settings;
+
+    juce::SmoothedValue<float> drive, boost, mix, outGain, offset, character;
+    eq::Biquad loFilter, hiFilter, shelf;
+    bool loActive = false, hiActive = false, shelfActive = false;
+    double lastFilterRate = 0.0;
+    float lastLo = -1.0f, lastHi = -1.0f, lastShelfHz = -1.0f, lastShelfDb = -100.0f;
+
     float dcR = 0.999f, dcX = 0.0f, dcY = 0.0f;
+    std::atomic<float> inPeak { 0.0f }, outPeak { 0.0f };
 };

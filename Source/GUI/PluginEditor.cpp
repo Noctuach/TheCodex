@@ -9,7 +9,10 @@ HardKickEditor::HardKickEditor (HardKickProcessor& p)
       engineSwitch (*p.apvts.getParameter (ID::engine), { "SYNTH", "909" }),
       pitchEnvDisplay (p.apvts, ID::pAttack, ID::pDecay, ID::pSustain, ID::pRelease, ID::pCurve, Colours_::accent2),
       ampEnvDisplay (p.apvts, ID::aAttack, ID::aDecay, ID::aSustain, ID::aRelease, ID::aCurve, Colours_::accent),
-      eqDisplay (p), bandControls (p.apvts), tuner (p)
+      eqDisplay (p), bandControls (p.apvts),
+      unit1 (p, 1, String (CharPointer_UTF8 ("DISTORTION 1  \xc2\xb7  PRE-EQ"))),
+      unit2 (p, 2, String (CharPointer_UTF8 ("DISTORTION 2  \xc2\xb7  POST-EQ"))),
+      tuner (p)
 {
     setLookAndFeel (&lnf);
     auto& s = p.apvts;
@@ -53,8 +56,12 @@ HardKickEditor::HardKickEditor (HardKickProcessor& p)
              &tune909, &attack909, &decay909,
              &pitchEnvDisplay, &pAmount, &pAttack, &pDecay, &pSustain, &pRelease, &pCurve,
              &ampEnvDisplay, &aAttack, &aDecay, &aSustain, &aRelease, &aCurve,
-             &eqDisplay, &bandControls, &tuner, &outGain, &meter })
+             &eqDisplay, &bandControls, &tuner, &outGain, &meter, &unit1, &unit2,
+             &kickTabButton, &distTabButton })
         addAndMakeVisible (c);
+
+    kickTabButton.onClick = [this] { showTab (0); };
+    distTabButton.onClick = [this] { showTab (1); };
 
     eqDisplay.onBandSelected = [this] (int b) { bandControls.setBand (b); };
     bandControls.onBandSelected = [this] (int b) { eqDisplay.setSelectedBand (b); };
@@ -67,17 +74,19 @@ HardKickEditor::HardKickEditor (HardKickProcessor& p)
         c.onAttachment = std::make_unique<AudioProcessorValueTreeState::ButtonAttachment> (s, ID::clip (stage, "On"), c.on);
         c.mode.attach (s, ID::clip (stage, "Mode"));
         c.drive.attach (s, ID::clip (stage, "Drive"));
-        c.bias.attach (s, ID::clip (stage, "Bias"));
+        c.character.attach (s, ID::clip (stage, "Char"));
         c.mix.attach (s, ID::clip (stage, "Mix"));
         c.out.attach (s, ID::clip (stage, "Out"));
-        for (Component* comp : std::initializer_list<Component*> { &c.on, &c.mode, &c.drive, &c.bias, &c.mix, &c.out })
+        c.edit.setColour (TextButton::textColourOffId, Colours_::accent);
+        c.edit.onClick = [this] { showTab (1); };
+        for (Component* comp : std::initializer_list<Component*> { &c.on, &c.edit, &c.mode, &c.drive, &c.character, &c.mix, &c.out })
             addAndMakeVisible (comp);
     }
 
     outGain.attach (s, ID::outGain);
 
-    setSize (1180, 800);
-    updateEngineView();
+    setSize (1180, 836);
+    showTab (0);
     startTimerHz (30);
 }
 
@@ -94,11 +103,12 @@ void HardKickEditor::timerCallback()
 void HardKickEditor::updateEngineView()
 {
     const bool is909 = engineSwitch.getIndex() == 1;
+    const bool kickTab = currentTab == 0;
 
     for (Component* c : std::initializer_list<Component*> { &wave, &clickLevel, &clickDecay, &clickTone })
-        c->setVisible (! is909);
+        c->setVisible (kickTab && ! is909);
     for (Component* c : std::initializer_list<Component*> { &model, &tune909, &attack909, &decay909 })
-        c->setVisible (is909);
+        c->setVisible (kickTab && is909);
 
     // Grid:  [combo] [a] [b] / [c] [d] [e]
     auto& cell = sourceCells;
@@ -135,28 +145,27 @@ void HardKickEditor::updateEngineView()
     repaint();
 }
 
-void HardKickEditor::drawPanel (Graphics& g, Rectangle<int> r, const String& title, Colour dot)
+std::vector<Component*> HardKickEditor::kickTabComponents()
 {
-    const auto rf = r.toFloat();
-    g.setGradientFill (ColourGradient (Colours_::panelTop, 0, rf.getY(), Colours_::panel, 0, rf.getBottom(), false));
-    g.fillRoundedRectangle (rf, 8.0f);
+    return { &engineSwitch, &tune, &phase,
+             &pitchEnvDisplay, &pAmount, &pAttack, &pDecay, &pSustain, &pRelease, &pCurve,
+             &ampEnvDisplay, &aAttack, &aDecay, &aSustain, &aRelease, &aCurve,
+             &eqDisplay, &bandControls };
+}
 
-    auto strip = rf.withHeight (26.0f);
-    Path headerPath;
-    headerPath.addRoundedRectangle (strip.getX(), strip.getY(), strip.getWidth(), strip.getHeight(), 8.0f, 8.0f, true, true, false, false);
-    g.setColour (Colours_::header);
-    g.fillPath (headerPath);
-    g.setColour (Colours_::outline);
-    g.drawHorizontalLine ((int) strip.getBottom(), strip.getX(), strip.getRight());
-    g.drawRoundedRectangle (rf.reduced (0.5f), 8.0f, 1.0f);
-
-    g.setColour (dot.withAlpha (0.3f));
-    g.fillEllipse (rf.getX() + 9.0f, strip.getCentreY() - 5.0f, 10.0f, 10.0f);
-    g.setColour (dot);
-    g.fillEllipse (rf.getX() + 11.0f, strip.getCentreY() - 3.0f, 6.0f, 6.0f);
-    g.setColour (Colour (0xffb7c6e6));
-    g.setFont (FontOptions (11.0f, Font::bold).withKerningFactor (0.12f));
-    g.drawText (title, strip.withTrimmedLeft (26.0f), Justification::centredLeft);
+void HardKickEditor::showTab (int tab)
+{
+    currentTab = tab;
+    for (auto* c : kickTabComponents())
+        c->setVisible (tab == 0);
+    unit1.setVisible (tab == 1);
+    unit2.setVisible (tab == 1);
+    kickTabButton.setToggleState (tab == 0, dontSendNotification);
+    distTabButton.setToggleState (tab == 1, dontSendNotification);
+    for (auto& c : clips)
+        c.edit.setVisible (tab == 0);
+    updateEngineView();
+    repaint();
 }
 
 void HardKickEditor::paint (Graphics& g)
@@ -182,18 +191,29 @@ void HardKickEditor::paint (Graphics& g)
     g.setColour (Colours_::accent);
     g.drawText ("KICK", logo.withTrimmedLeft (hardW + 2.0f), Justification::centredLeft);
 
-    drawPanel (g, sourceArea, "SOURCE", Colours_::accent);
-    drawPanel (g, pitchArea, "PITCH ENVELOPE", Colours_::accent2);
-    drawPanel (g, ampArea, engineSwitch.getIndex() == 1 ? "AMP GATE" : "AMP ENVELOPE", Colours_::accent);
-    drawPanel (g, eqArea, "EQUALIZER", Colours_::accent);
-    drawPanel (g, clip1Area, String (CharPointer_UTF8 ("DISTORTION 1  \xc2\xb7  PRE-EQ")), Colours_::accent);
-    drawPanel (g, clip2Area, String (CharPointer_UTF8 ("DISTORTION 2  \xc2\xb7  POST-EQ")), Colours_::accent);
-    drawPanel (g, outArea, String (CharPointer_UTF8 ("TUNER  \xc2\xb7  MASTER")), Colours_::accent);
+    // Tab bar underline
+    g.setColour (Colours_::outline);
+    g.drawHorizontalLine (tabBar.getBottom() - 1, (float) tabBar.getX(), (float) tabBar.getRight());
+    g.setColour (Colours_::textDim);
+    g.setFont (FontOptions (10.0f, Font::bold).withKerningFactor (0.15f));
+    g.drawText (String (CharPointer_UTF8 ("OSC  \xe2\x96\xb8  DIST 1  \xe2\x96\xb8  EQ  \xe2\x96\xb8  DIST 2  \xe2\x96\xb8  OUT")),
+                tabBar.withTrimmedBottom (4), Justification::centredRight);
+
+    if (currentTab == 0)
+    {
+        drawSectionPanel (g, sourceArea, "SOURCE", Colours_::accent);
+        drawSectionPanel (g, pitchArea, "PITCH ENVELOPE", Colours_::accent2);
+        drawSectionPanel (g, ampArea, engineSwitch.getIndex() == 1 ? "AMP GATE" : "AMP ENVELOPE", Colours_::accent);
+        drawSectionPanel (g, eqArea, "EQUALIZER", Colours_::accent);
+    }
+    drawSectionPanel (g, clip1Area, String (CharPointer_UTF8 ("DIST 1  \xc2\xb7  QUICK")), Colours_::accent);
+    drawSectionPanel (g, clip2Area, String (CharPointer_UTF8 ("DIST 2  \xc2\xb7  QUICK")), Colours_::accent);
+    drawSectionPanel (g, outArea, String (CharPointer_UTF8 ("TUNER  \xc2\xb7  MASTER")), Colours_::accent);
 }
 
 void HardKickEditor::paintOverChildren (Graphics& g)
 {
-    if (engineSwitch.getIndex() != 1)
+    if (engineSwitch.getIndex() != 1 || currentTab != 0)
         return;
 
     auto r = pitchArea.toFloat().withTrimmedTop (27.0f).reduced (1.0f);
@@ -227,7 +247,18 @@ void HardKickEditor::resized()
         presetBar.setBounds (h.removeFromRight (420).withSizeKeepingCentre (420, 28).translated (0, 6));
     }
 
-    r.removeFromTop (14);
+    r.removeFromTop (8);
+    tabBar = r.removeFromTop (30);
+    kickTabButton.setBounds (tabBar.withWidth (110).withTrimmedBottom (6));
+    distTabButton.setBounds (tabBar.withTrimmedLeft (116).withWidth (130).withTrimmedBottom (6));
+    r.removeFromTop (8);
+    upperArea = r.withTrimmedBottom (160);
+    {
+        auto u = upperArea;
+        unit1.setBounds (u.removeFromLeft ((u.getWidth() - 10) / 2));
+        u.removeFromLeft (10);
+        unit2.setBounds (u);
+    }
     auto rowA = r.removeFromTop (200);
     sourceArea = rowA.removeFromLeft (330);
     rowA.removeFromLeft (10);
@@ -283,12 +314,13 @@ void HardKickEditor::resized()
     for (int i = 0; i < 2; ++i)
     {
         clips[i].on.setBounds (clipAreas[i].withHeight (26).removeFromRight (30).reduced (4));
+        clips[i].edit.setBounds (clipAreas[i].withHeight (26).withTrimmedRight (32).removeFromRight (52).reduced (2, 4));
         auto c = clipAreas[i].reduced (8).withTrimmedTop (24);
         auto left = c.removeFromLeft (118);
         clips[i].mode.setBounds (left.withSizeKeepingCentre (left.getWidth() - 6, 44));
         const int w = c.getWidth() / 4;
         clips[i].drive.setBounds (c.removeFromLeft (w));
-        clips[i].bias.setBounds (c.removeFromLeft (w));
+        clips[i].character.setBounds (c.removeFromLeft (w));
         clips[i].mix.setBounds (c.removeFromLeft (w));
         clips[i].out.setBounds (c);
     }

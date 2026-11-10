@@ -68,6 +68,8 @@ public:
     /** Called by the GUI "KICK" button: press = note on, release = note off. */
     void triggerPreview (bool down) { (down ? previewOn : previewOff).store (true); }
 
+    ClipDistortion& getClip (int stage) { return stage == 1 ? clip1 : clip2; }
+
     /** Peak since last read (for the GUI meter). */
     float getAndResetPeak() { return peak.exchange (0.0f); }
 
@@ -96,7 +98,7 @@ private:
     std::atomic<float> peak { 0.0f };
 
     struct BandParams { std::atomic<float>* on, * type, * freq, * gain, * q, * slope; };
-    struct ClipParams { std::atomic<float>* on, * mode, * drive, * bias, * mix, * out; };
+    struct ClipParams { std::atomic<float> *on, *mode, *drive, *boost, *chr, *bias, *loFilt, *hiFilt, *shelfF, *shelfG, *mix, *out, *dc, *os; };
 
     std::atomic<float>* p (const juce::String& id) { return apvts.getRawParameterValue (id); }
 

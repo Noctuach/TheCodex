@@ -5,6 +5,7 @@
 #include <juce_audio_utils/juce_audio_utils.h>
 #include "../Source/PluginProcessor.h"
 #include "../Source/DSP/PitchDetector.h"
+#include "../Source/GUI/PluginEditor.h"
 
 static void setParam (HardKickProcessor& p, const juce::String& id, float value)
 {
@@ -65,9 +66,10 @@ static void writeWav (const juce::AudioBuffer<float>& b, const juce::File& f)
         }
 }
 
-static void snapshot (HardKickProcessor& proc, const juce::AudioBuffer<float>& audio, const juce::File& png)
+static void snapshot (HardKickProcessor& proc, const juce::AudioBuffer<float>& audio, const juce::File& png, int tab = 0)
 {
     std::unique_ptr<juce::AudioProcessorEditor> editor (proc.createEditor());
+    if (auto* hk = dynamic_cast<HardKickEditor*> (editor.get())) hk->showTab (tab);
     // feed analyzer + tuner with the tail of a kick
     for (int i = 0; i < 6; ++i)
     {
@@ -132,6 +134,29 @@ int main (int argc, char** argv)
     }
     setParam (proc, ID::key, 0);
 
+    // ---- Distortion: every oversampling setting, extreme characteristic / filters ----
+    std::cout << "\nOversampling   latency   peak dBFS\n";
+    for (int os = 0; os < 4; ++os)
+    {
+        proc.presets.loadPreset (10); // 909 Rawstyle
+        for (int st = 1; st <= 2; ++st)
+        {
+            setParam (proc, ID::clip (st, "OS"), (float) os);
+            setParam (proc, ID::clip (st, "Char"), 1.0f);
+            setParam (proc, ID::clip (st, "Boost"), 18.0f);
+            setParam (proc, ID::clip (st, "LoFilt"), 400.0f);
+            setParam (proc, ID::clip (st, "HiFilt"), 1500.0f);
+            setParam (proc, ID::clip (st, "ShelfG"), 18.0f);
+        }
+        auto audio = render (proc, 1);
+        bool finite = true;
+        for (int i = 0; i < audio.getNumSamples(); ++i) finite &= std::isfinite (audio.getSample (0, i));
+        const float pk = juce::Decibels::gainToDecibels (audio.getMagnitude (0, 0, audio.getNumSamples()));
+        if (! finite || pk > 12.0f) ++failures;
+        std::cout << ClipDistortion::oversamplingNames()[os].paddedRight (' ', 15) << juce::String (proc.getLatencySamples()).paddedRight (' ', 10)
+                  << juce::String (pk, 1) << (finite ? "" : "  NaN!") << "\n";
+    }
+
     // ---- State round trip ----
     proc.presets.loadPreset (9);
     juce::MemoryBlock state;
@@ -145,6 +170,8 @@ int main (int argc, char** argv)
     snapshot (proc, render (proc, 1), outDir.getChildFile ("ui_synth.png"));
     proc.presets.loadPreset (8);  // 909 Oldskool Hardstyle
     snapshot (proc, render (proc, 1), outDir.getChildFile ("ui_909.png"));
+    proc.presets.loadPreset (10); // 909 Rawstyle
+    snapshot (proc, render (proc, 1), outDir.getChildFile ("ui_distortion.png"), 1);
 
     std::cout << "\n" << (failures == 0 ? "ALL CHECKS PASSED" : juce::String (failures) + " CHECK(S) FAILED") << "\n";
     return failures == 0 ? 0 : 2;

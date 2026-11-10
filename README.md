@@ -6,6 +6,7 @@ No samples anywhere.
 
 ![HardKick, synth engine](docs/screenshot.png)
 ![HardKick, 909 engine](docs/screenshot-909.png)
+![HardKick, distortion tab](docs/screenshot-distortion.png)
 
 Background research (909 circuit, oldskool method, other kick synths): [docs/RESEARCH.md](docs/RESEARCH.md)
 
@@ -24,7 +25,7 @@ OSC + PITCH ENV + CLICK  →  CLIP 1 (pre-EQ)  →  6-band EQ  →  CLIP 2 (post
 | **Presets** | 17 factory presets (7 synth, 10 909) plus your own. Presets never change the key. |
 | **Pitch envelope (ADSR)** | The classic pitch sweep. *Amount* (up to 96 semitones) above the played note, A/D/S/R and a *Curve* control (1 = linear, higher = snappier exponential drop). |
 | **Amp envelope (ADSR)** | Volume shape with its own curve. Hold the MIDI note longer for a longer tail. |
-| **Distortion 1 / 2** | 4× oversampled, 12 types: Hard Clip, Soft Clip, Tanh, Overdrive, Tube, Diode, Fuzz, Sine Fold, Tri Fold, Rectify, Bitcrush, Asym Clip. *Bias* adds asymmetry (even harmonics), plus Mix and Output. Each stage has a power button. |
+| **Distortion 1 / 2** (DISTORTION tab) | Two full distortion units inspired by the layout of Cubase's Distroyer. Each has a live **transfer-curve display** that marks the current input level, plus IN/OUT meters. **Type**: 12 base curves (Hard Clip, Soft Clip, Tanh, Overdrive, Tube, Diode, Fuzz, Sine Fold, Tri Fold, Rectify, Bitcrush, Asym Clip). **Shape**: Drive, Boost (input gain on dry + wet), *Characteristic* (morphs any curve from smooth towards a rectangle), *Offset* (asymmetry). **Wet filters / tone**: Lo Filter (low-pass before the distortion), Hi Filter (high-pass after it), Shelf Freq / Gain. **Output**: Mix and Output. Also Oversampling (Off / 2x / 4x / 8x) and a DC Filter. The bottom row of the KICK tab has quick controls for both stages; EDIT opens the full unit. |
 | **EQ** | 6 bands: Low Cut, Low Shelf, Bell, Notch, High Shelf, High Cut (cuts at 12/24/48 dB/oct), with a live spectrum analyzer. |
 
 The pitch comes from the *Key* setting, or from the MIDI note in *Follow MIDI* mode. *Fine Tune* shifts it in semitones.

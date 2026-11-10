@@ -46,3 +46,12 @@ The 10 models are my own starting points, not measured from a real unit. Each on
 - **Hardstyle-specific tools:** Nimble Kick (a sampler for pitching hardstyle kicks, with tail separation) and Lussive Audio's HardKick, a native plugin built for hard-kick production ([MusicTech](https://musictech.com/guides/buyers-guide/best-kick-drum-plugins-2026-tested-reviewed)). ⚠️ The name "HardKick" is already used by an existing product, so this project should get a different name before any public release.
 
 **What HardKick takes from these:** a built-in tuner, keeping the key separate from the sound, and a dedicated chain instead of generic sample layers. Unlike the samplers, nothing here is sample-based.
+
+## Distortion section: Cubase Distroyer as a reference
+Steinberg's Distroyer (introduced in Cubase 10) covers everything from smooth overdrive to extreme clipping ([Steinberg plug-in reference](https://archive.steinberg.help/nuendo_plugin_reference/v13/en/_shared/topics/plug_ref/distroyer_r.html)). Its documented controls:
+- **Characteristic**: low values give a smooth overdrive; higher values push the waveform towards a rectangle for extreme distortion.
+- **Offset**: changes the symmetry by moving the operating point of the curve. **DC Filter** removes the DC offset that large Offset values cause.
+- **Lo Filter**: a low-pass on the wet signal *before* distortion. **Hi Filter**: a high-pass on the distorted wet signal. Sound on Sound calls these the most crucial controls ([Sound on Sound](https://www.soundonsound.com/cubase-distroyer-plugin)).
+- **Boost** (on dry and wet), **Oversampling**, plus **Shelf Freq / Gain**, **Tone**, **Spatial**, **Mix** and **Output** in recent versions ([Cubase 14 reference](https://www.steinberg.help/r/cubase-pro/cubaseplugref/14.0/en/_shared/topics/plug_ref/distroyer_r.html)).
+
+**In HardKick:** each distortion stage follows that signal flow (Boost → Lo Filter → Drive/curve/Offset → Characteristic → Hi Filter → Shelf → Mix → Output → DC Filter) in its own blue-themed design. HardKick adds a selectable base curve (12 types) under the Characteristic morph, and a live transfer-curve display. *Spatial* is left out because the kick is mono. The full Steinberg and Sound on Sound pages were blocked from the build environment, so this section is based on search summaries of those pages.

@@ -5,6 +5,7 @@
 #include "EQDisplay.h"
 #include "Tuner.h"
 #include "PresetBar.h"
+#include "DistortionView.h"
 
 class HardKickProcessor;
 
@@ -17,30 +18,34 @@ public:
     void paint (juce::Graphics&) override;
     void paintOverChildren (juce::Graphics&) override;
     void resized() override;
+    void showTab (int tab);   // 0 = KICK, 1 = DISTORTION
 
 private:
     void timerCallback() override;
-    void drawPanel (juce::Graphics&, juce::Rectangle<int>, const juce::String& title, juce::Colour dot);
     void updateEngineView();
+    std::vector<juce::Component*> kickTabComponents();
 
     struct ClipSection
     {
         PowerButton on;
+        juce::TextButton edit { "EDIT" };
         ChoiceBox mode { "Type" };
-        Knob drive { "Drive" }, bias { "Bias" }, mix { "Mix" }, out { "Output" };
+        Knob drive { "Drive" }, character { "Character" }, mix { "Mix" }, out { "Output" };
         std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> onAttachment;
     };
 
     HKLookAndFeel lnf;
     HardKickProcessor& proc;
 
-    juce::Rectangle<int> header, sourceArea, pitchArea, ampArea, eqArea, clip1Area, clip2Area, outArea;
+    int currentTab = 0;
+    juce::Rectangle<int> header, tabBar, upperArea, sourceArea, pitchArea, ampArea, eqArea, clip1Area, clip2Area, outArea;
     std::array<juce::Rectangle<int>, 6> sourceCells;
 
     // Header
     PresetBar presetBar;
     ChoiceBox keyBox { "Key" }, octaveBox { "Oct" }, keyModeBox { "Mode" };
     TriggerButton kickButton { "KICK" };
+    juce::TextButton kickTabButton { "KICK" }, distTabButton { "DISTORTION" };
 
     // Source
     SegmentedChoice engineSwitch;
@@ -57,8 +62,9 @@ private:
     EQDisplay eqDisplay;
     BandControls bandControls;
 
-    // Clip stages
+    // Clip stages: compact quick controls (bottom row) + full units (distortion tab)
     ClipSection clips[2];
+    DistortionUnit unit1, unit2;
 
     // Master
     TunerDisplay tuner;

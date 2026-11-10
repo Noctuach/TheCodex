@@ -21,8 +21,11 @@ HardKickProcessor::HardKickProcessor()
     outGainParam = p (ID::outGain);
 
     for (int s = 0; s < 2; ++s)
-        clipParams[s] = { p (ID::clip (s + 1, "On")), p (ID::clip (s + 1, "Mode")), p (ID::clip (s + 1, "Drive")),
-                          p (ID::clip (s + 1, "Bias")), p (ID::clip (s + 1, "Mix")), p (ID::clip (s + 1, "Out")) };
+    {
+        auto c = [&] (const char* sfx) { return p (ID::clip (s + 1, sfx)); };
+        clipParams[s] = { c ("On"), c ("Mode"), c ("Drive"), c ("Boost"), c ("Char"), c ("Bias"), c ("LoFilt"), c ("HiFilt"),
+                          c ("ShelfF"), c ("ShelfG"), c ("Mix"), c ("Out"), c ("DC"), c ("OS") };
+    }
 
     for (int b = 0; b < Params::numBands; ++b)
         bandParams[b] = { p (ID::band (b, "On")), p (ID::band (b, "Type")), p (ID::band (b, "Freq")),
@@ -84,8 +87,22 @@ void HardKickProcessor::updateParameters()
     for (int i = 0; i < 2; ++i)
     {
         const auto& c = clipParams[i];
-        clips[i]->setParameters (c.on->load() > 0.5f, (int) c.mode->load(), c.drive->load(),
-                                 c.bias->load(), c.mix->load(), c.out->load());
+        ClipDistortion::Settings cs;
+        cs.enabled      = c.on->load() > 0.5f;
+        cs.mode         = (int) c.mode->load();
+        cs.driveDb      = c.drive->load();
+        cs.boostDb      = c.boost->load();
+        cs.character    = c.chr->load();
+        cs.offset       = c.bias->load();
+        cs.loFilterHz   = c.loFilt->load();
+        cs.hiFilterHz   = c.hiFilt->load();
+        cs.shelfHz      = c.shelfF->load();
+        cs.shelfDb      = c.shelfG->load();
+        cs.mix          = c.mix->load();
+        cs.outDb        = c.out->load();
+        cs.dcFilter     = c.dc->load() > 0.5f;
+        cs.oversampling = (int) c.os->load();
+        clips[i]->setSettings (cs);
     }
 
     for (int b = 0; b < Params::numBands; ++b)
@@ -102,6 +119,11 @@ void HardKickProcessor::updateParameters()
     }
 
     outGain.setTargetValue (juce::Decibels::decibelsToGain (outGainParam->load()));
+
+    // Oversampling changes the latency: report it to the host
+    const int latency = juce::roundToInt (clip1.getLatencyInSamples() + clip2.getLatencyInSamples());
+    if (latency != getLatencySamples())
+        setLatencySamples (latency);
 }
 
 void HardKickProcessor::handleMidi (const juce::MidiMessage& m)

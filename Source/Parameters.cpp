@@ -94,13 +94,23 @@ AudioProcessorValueTreeState::ParameterLayout Params::createLayout()
     const StringArray clipModes = ClipDistortion::modeNames();
     for (int stage = 1; stage <= 2; ++stage)
     {
-        const String n = "Clip " + String (stage) + " ";
+        const String n = "Dist " + String (stage) + " ";
         addBool (l, ID::clip (stage, "On"), n + "On", true);
-        addChoice (l, ID::clip (stage, "Mode"), n + "Mode", clipModes, stage == 1 ? 2 : 0);
+        addChoice (l, ID::clip (stage, "Mode"), n + "Type", clipModes, stage == 1 ? 2 : 0);
         addFloat (l, ID::clip (stage, "Drive"), n + "Drive", { 0.0f, 48.0f, 0.01f }, stage == 1 ? 18.0f : 6.0f, dbText);
-        addFloat (l, ID::clip (stage, "Bias"), n + "Bias", { -1.0f, 1.0f, 0.001f }, 0.0f, [] (float v) { return String (v, 2); });
+        addFloat (l, ID::clip (stage, "Boost"), n + "Boost", { 0.0f, 18.0f, 0.01f }, 0.0f, dbText);
+        addFloat (l, ID::clip (stage, "Char"), n + "Characteristic", { 0.0f, 1.0f }, 0.0f, pctText);
+        addFloat (l, ID::clip (stage, "Bias"), n + "Offset", { -1.0f, 1.0f, 0.001f }, 0.0f, [] (float v) { return String (v, 2); });
+        addFloat (l, ID::clip (stage, "LoFilt"), n + "Lo Filter", skewed (200.0f, 20000.0f, 3000.0f), 20000.0f,
+                  [] (float v) { return v >= 19900.0f ? String ("Off") : hzText (v); });
+        addFloat (l, ID::clip (stage, "HiFilt"), n + "Hi Filter", skewed (20.0f, 2000.0f, 150.0f), 20.0f,
+                  [] (float v) { return v <= 20.5f ? String ("Off") : hzText (v); });
+        addFloat (l, ID::clip (stage, "ShelfF"), n + "Shelf Freq", skewed (1000.0f, 16000.0f, 5000.0f), 6000.0f, hzText);
+        addFloat (l, ID::clip (stage, "ShelfG"), n + "Shelf Gain", { -18.0f, 18.0f, 0.01f }, 0.0f, dbText);
         addFloat (l, ID::clip (stage, "Mix"), n + "Mix", { 0.0f, 1.0f }, 1.0f, pctText);
         addFloat (l, ID::clip (stage, "Out"), n + "Output", { -24.0f, 12.0f, 0.01f }, -6.0f, dbText);
+        addBool (l, ID::clip (stage, "DC"), n + "DC Filter", true);
+        addChoice (l, ID::clip (stage, "OS"), n + "Oversampling", ClipDistortion::oversamplingNames(), 2);
     }
 
     // ---------------- EQ ----------------
