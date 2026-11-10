@@ -3,12 +3,39 @@
 //   CodexHostTest <path/to/Codex.vst3>
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_audio_utils/juce_audio_utils.h>
+#if JUCE_LINUX
+ #include <dlfcn.h>
+#endif
+
+#if JUCE_LINUX
+/** Headless X servers (Xvfb in CI) have no window manager, so atoms such as WM_STATE do not exist and JUCE's
+    window-state query fails with BadAtom; Xlib's default handler would then end the process. Log and continue
+    instead (real desktops are not affected). libX11 is loaded the same way JUCE loads it. */
+static void installTolerantXErrorHandler()
+{
+    using Handler = int (*) (void*, void*);
+    using SetHandler = Handler (*) (Handler);
+    if (auto* lib = dlopen ("libX11.so.6", RTLD_LAZY | RTLD_GLOBAL))
+        if (auto set = reinterpret_cast<SetHandler> (dlsym (lib, "XSetErrorHandler")))
+            set ([] (void*, void* event) -> int
+            {
+                // XErrorEvent: type, display*, resourceid, serial, error_code (unsigned char) ...
+                struct Ev { int type; void* display; unsigned long resource, serial; unsigned char code, request, minor; };
+                const auto* e = static_cast<const Ev*> (event);
+                std::cout << "        (ignored X error " << (int) e->code << ", request " << (int) e->request << ")\n";
+                return 0;
+            });
+}
+#endif
 
 int main (int argc, char** argv)
 {
     if (argc < 2) { std::cerr << "usage: CodexHostTest <Codex.vst3>\n"; return 1; }
     std::cout << std::unitbuf;   // flush every line (useful when a step hangs)
     std::cout << "Loading " << argv[1] << "\n";
+   #if JUCE_LINUX
+    installTolerantXErrorHandler();
+   #endif
     juce::ScopedJuceInitialiser_GUI init;
     int failures = 0;
     auto check = [&failures] (bool ok, const juce::String& what) { std::cout << (ok ? "  OK    " : "  FAIL  ") << what << "\n"; if (! ok) ++failures; };

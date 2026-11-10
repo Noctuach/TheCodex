@@ -20,7 +20,7 @@ jobs:
             pluginval: pluginval_Windows.zip
             pluginval_bin: ./pluginval.exe
           - name: macOS
-            os: macos-14
+            os: macos-latest   # macos-14 images were retired
             pluginval: pluginval_macOS.zip
             pluginval_bin: ./pluginval.app/Contents/MacOS/pluginval
           - name: Linux
