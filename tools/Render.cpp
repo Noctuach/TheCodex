@@ -434,6 +434,51 @@ int main (int argc, char** argv)
         if (proc.apvts.getRawParameterValue (ID::envMode ('p'))->load() > 0.5f) { ++failures; std::cout << "   preset did not reset envelope mode\n"; }
     }
 
+    // ---- Macros: each one moves the sound in its direction, centre = untouched ----
+    {
+        int bad = 0;
+        auto rmsDb = [] (const juce::AudioBuffer<float>& b, double t0, double t1)
+        { return juce::Decibels::gainToDecibels (b.getRMSLevel (0, (int) (t0 * sr), (int) ((t1 - t0) * sr)), -120.0f); };
+        proc.presets.loadPreset (7);   // 909 Clean: no distortion, so level changes are not flattened by clipping
+        const auto base = render (proc, 1);
+        setParam (proc, ID::macro (2), 1.0f);
+        const auto longTail = render (proc, 1);
+        setParam (proc, ID::macro (2), 0.0f);
+        const auto shortTail = render (proc, 1);
+        setParam (proc, ID::macro (2), 0.5f);
+        setParam (proc, ID::macro (0), 1.0f);
+        const auto punchy = render (proc, 1);
+        setParam (proc, ID::macro (0), 0.5f);
+        const auto again = render (proc, 1);
+        proc.presets.loadPreset (2);   // Oldskool Raw: Width acts on the distortion (Spatial)
+        const auto distorted = render (proc, 1);
+        setParam (proc, ID::macro (3), 1.0f);
+        const auto wide = render (proc, 1);
+        setParam (proc, ID::macro (3), 0.5f);
+        auto sideDb = [] (const juce::AudioBuffer<float>& b)
+        {
+            double s2 = 0; for (int i = 0; i < b.getNumSamples(); ++i) { const double d = b.getSample (0, i) - b.getSample (1, i); s2 += d * d; }
+            return juce::Decibels::gainToDecibels ((float) std::sqrt (s2 / b.getNumSamples()), -120.0f);
+        };
+        // tail after note-off (0.35 s); punch = zero crossings in the first 8 ms (a deeper, harder sweep);
+        // back at the centre the sound must match the original (RMS: the click is random noise)
+        const float tBase = rmsDb (base, 0.42, 0.55), tLong = rmsDb (longTail, 0.42, 0.55), tShort = rmsDb (shortTail, 0.42, 0.55);
+        auto crossings = [] (const juce::AudioBuffer<float>& b)
+        {
+            int c = 0; for (int i = 1; i < (int) (0.008 * sr); ++i) c += (b.getSample (0, i - 1) < 0.0f) != (b.getSample (0, i) < 0.0f) ? 1 : 0;
+            return (float) c;
+        };
+        const float pBase = crossings (base), pPunch = crossings (punchy);
+        const float diff = std::abs (rmsDb (base, 0.0, 0.6) - rmsDb (again, 0.0, 0.6));
+        std::cout << "\nMacros: tail level " << juce::String (tShort, 1) << " / " << juce::String (tBase, 1) << " / " << juce::String (tLong, 1)
+                  << " dB (Tail -100 / 0 / +100 %), zero crossings in 8 ms " << pBase << " -> " << pPunch
+                  << " (Punch +100 %), side " << juce::String (sideDb (distorted), 1) << " -> " << juce::String (sideDb (wide), 1)
+                  << " dB (Width +100 %), back to centre: " << diff << " dB\n";
+        if (! (tShort < tBase - 1.0f && tLong > tBase + 0.5f) || pPunch <= pBase || sideDb (wide) < sideDb (distorted) + 10.0f || diff > 0.05f) ++bad;
+        std::cout << "Macro checks: " << (bad == 0 ? "OK" : "FAILED") << "\n";
+        failures += bad;
+    }
+
     // ---- Every key, both engines ----
     std::cout << "\nKey   target Hz   synth Hz   909 Hz\n";
     for (int k = 0; k < 12; ++k)

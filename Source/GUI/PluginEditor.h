@@ -70,6 +70,16 @@ private:
     DrawEnvelopeEditor pitchDrawEditor, ampDrawEditor;
     SegmentedChoice pitchModeSwitch, ampModeSwitch;
     void updateEnvelopeModes();
+
+    // Footer: macros, A/B compare, CPU
+    std::array<HeaderKnob, ID::numMacros> macroKnobs { HeaderKnob ("Punch"), HeaderKnob ("Dirt"), HeaderKnob ("Tail"), HeaderKnob ("Width") };
+    juce::TextButton abA { "A" }, abB { "B" }, abCopy { "COPY" };
+    std::array<juce::ValueTree, 2> abSlots;
+    int abCurrent = 0;
+    void switchAB (int slot);
+    juce::Rectangle<int> footer;
+    float cpuShown = 0.0f;
+    int footerTick = 0;
     Knob pAmount { "Amount" }, pAttack { "Attack" }, pDecay { "Decay" }, pSustain { "Sustain" }, pRelease { "Release" }, pCurve { "Curve" };
     Knob aAttack { "Attack" }, aDecay { "Decay" }, aSustain { "Sustain" }, aRelease { "Release" }, aCurve { "Curve" };
 

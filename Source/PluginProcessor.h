@@ -76,6 +76,8 @@ public:
     sat::MultibandSaturator& getSaturator() { return saturator; }
     space::SpaceReverb& getReverb() { return reverb; }
     comp::MultibandCompressor& getCompressor() { return compressor; }
+    /** Share of the available processing time used by the audio callback (0..1, for the CPU readout). */
+    double getCpuLoad() const { return loadMeasurer.getLoadAsProportion(); }
 
     /** Output peak since last read, per channel (0 = left, 1 = right). */
     float getAndResetPeak (int channel) { return peaks[(size_t) channel].exchange (0.0f); }
@@ -117,6 +119,7 @@ private:
     sat::MultibandSaturator saturator;
     space::SpaceReverb reverb;
     comp::MultibandCompressor compressor;
+    juce::AudioProcessLoadMeasurer loadMeasurer;
     std::vector<float> left, right, mid;
     juce::SmoothedValue<float> outGain;
 
@@ -143,6 +146,7 @@ private:
     std::atomic<float>* eqScaleParams[ID::numEqs] {}, * eqOnParams[ID::numEqs] {}, * eqModeParams[ID::numEqs] {}, * eqResParams[ID::numEqs] {};
     std::atomic<float>* spcParams[25] {};
     std::atomic<float>* drawModes[2] {}, * drawCounts[2] {};
+    std::atomic<float>* macros[ID::numMacros] {};
     std::atomic<float>* drawT[2][DrawEnvelope::maxPoints] {}, * drawL[2][DrawEnvelope::maxPoints] {}, * drawB[2][DrawEnvelope::maxPoints] {};
     std::atomic<float>* cmpGlobal[13] {};
     std::atomic<float>* cmpBandParams[comp::maxBands][11] {};

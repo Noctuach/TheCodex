@@ -70,6 +70,7 @@ CodexProcessor::CodexProcessor()
             drawB[e][i] = p (ID::envPoint (env, 'B', i));
         }
     }
+    for (int m = 0; m < ID::numMacros; ++m) macros[m] = p (ID::macro (m));
     satOn = p (ID::sat ("On")); satBands = p (ID::sat ("Bands")); satSlope = p (ID::sat ("Slope"));
     satOs = p (ID::sat ("OS")); satMix = p (ID::sat ("Mix")); satOut = p (ID::sat ("Out"));
     satIn = p (ID::sat ("In")); satMode = p (ID::sat ("Mode"));
@@ -92,8 +93,9 @@ bool CodexProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
     return out == juce::AudioChannelSet::mono() || out == juce::AudioChannelSet::stereo();
 }
 
-void CodexProcessor::prepareToPlay (double sampleRate, int)
+void CodexProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
+    loadMeasurer.reset (sampleRate, juce::jmax (1, samplesPerBlock));
     for (auto* v : { &left, &right, &mid })
         v->assign ((size_t) chunkSize, 0.0f);
     scopePos = -1;
@@ -139,13 +141,20 @@ void CodexProcessor::updateParameters()
     s.wave             = (int) wave->load();
     s.tuneSemis        = tune->load();
     s.startPhaseDeg    = phase->load();
-    s.pitchAmountSemis = pAmount->load();
-    s.clickLevel       = clickLevel->load();
+    // Macros (0.5 = neutral): applied on top of the parameters, so the preset itself stays untouched
+    const float mPunch = macros[0]->load() - 0.5f, mDirt = macros[1]->load() - 0.5f, mTail = macros[2]->load() - 0.5f, mWidth = macros[3]->load() - 0.5f;
+    const float punchAmount = std::exp2 (mPunch * 1.0f);          // pitch sweep depth x0.7 .. x1.4
+    const float punchSpeed  = std::exp2 (-mPunch * 1.2f);         // faster sweep with more punch
+    const float tailMul     = std::exp2 (mTail * 2.0f);           // decay / release x0.5 .. x2
+    s.decay909         = juce::jlimit (0.0f, 1.0f, s.decay909 + mTail * 0.5f);
+    s.attack909        = juce::jlimit (0.0f, 1.0f, attack909->load() + mPunch * 0.6f);
+    s.pitchAmountSemis = juce::jlimit (0.0f, 96.0f, pAmount->load() * punchAmount);
+    s.clickLevel       = juce::jlimit (0.0f, 1.0f, clickLevel->load() * (1.0f + mPunch * 2.0f));
     s.clickDecayMs     = clickDecay->load();
     s.clickToneHz      = clickTone->load();
     voice.setSettings (s);
 
-    voice.pitchEnv.setParameters (pAttack->load(), pDecay->load(), pSustain->load(), pRelease->load(), pCurve->load());
+    voice.pitchEnv.setParameters (pAttack->load(), pDecay->load() * punchSpeed, pSustain->load(), pRelease->load(), pCurve->load());
     voice.pitchDrawMode = drawModes[0]->load() > 0.5f;
     voice.ampDrawMode = drawModes[1]->load() > 0.5f && s.engine == KickVoice::SynthEngine;
     for (int e = 0; e < 2; ++e)
@@ -153,13 +162,13 @@ void CodexProcessor::updateParameters()
         DrawEnvelope::Shape shape;
         shape.count = (int) drawCounts[e]->load();
         for (int i = 0; i < DrawEnvelope::maxPoints; ++i)
-            shape.points[(size_t) i] = { drawT[e][i]->load(), drawL[e][i]->load(), drawB[e][i]->load() };
+            shape.points[(size_t) i] = { drawT[e][i]->load() * (e == 0 ? punchSpeed : tailMul), drawL[e][i]->load(), drawB[e][i]->load() };
         (e == 0 ? voice.pitchDraw : voice.ampDraw).setShape (shape);
     }
     if (s.engine == KickVoice::Engine909 || voice.ampDrawMode) // amp ADSR is a gate: attack + release only
-        voice.ampEnv.setParameters (voice.ampDrawMode ? 0.0f : aAttack->load(), 1.0f, 1.0f, aRelease->load(), aCurve->load());
+        voice.ampEnv.setParameters (voice.ampDrawMode ? 0.0f : aAttack->load(), 1.0f, 1.0f, aRelease->load() * tailMul, aCurve->load());
     else
-        voice.ampEnv.setParameters (aAttack->load(), aDecay->load(), aSustain->load(), aRelease->load(), aCurve->load());
+        voice.ampEnv.setParameters (aAttack->load(), aDecay->load() * tailMul, aSustain->load(), aRelease->load() * tailMul, aCurve->load());
 
     ClipDistortion* clips[] = { &clip1, &clip2 };
     for (int i = 0; i < 2; ++i)
@@ -168,7 +177,7 @@ void CodexProcessor::updateParameters()
         ClipDistortion::Settings cs;
         cs.enabled      = c.on->load() > 0.5f;
         cs.mode         = (int) c.mode->load();
-        cs.driveDb      = c.drive->load();
+        cs.driveDb      = juce::jlimit (0.0f, 48.0f, c.drive->load() + mDirt * 24.0f);   // Dirt macro: +-12 dB drive
         cs.boostDb      = c.boost->load();
         cs.character    = c.chr->load();
         cs.offset       = c.bias->load();
@@ -180,7 +189,8 @@ void CodexProcessor::updateParameters()
         cs.outDb        = c.out->load();
         cs.dcFilter     = c.dc->load() > 0.5f;
         cs.oversampling = (int) c.os->load();
-        cs.spatial      = c.spatial->load();
+        // Width macro: right adds stereo distortion, left narrows it back to mono
+        cs.spatial      = juce::jlimit (0.0f, 1.0f, c.spatial->load() * (1.0f + juce::jmin (0.0f, mWidth) * 2.0f) + juce::jmax (0.0f, mWidth) * 0.8f);
         cs.filterPos    = (int) c.fltPos->load();
         cs.filterType   = (int) c.fltType->load();
         cs.filterHz     = c.fltFreq->load();
@@ -250,7 +260,7 @@ void CodexProcessor::updateParameters()
         auto v = [this] (int i) { return spcParams[i]->load(); };
         space::Settings rs;
         rs.enabled = v (0) > 0.5f; rs.mode = (int) v (1); rs.mix = v (2); rs.predelayMs = v (3); rs.decay = v (4);
-        rs.highCut = v (5); rs.lowCut = v (6); rs.depth = v (7); rs.width = v (8); rs.duck = v (9);
+        rs.highCut = v (5); rs.lowCut = v (6); rs.depth = v (7); rs.width = juce::jlimit (0.0f, 2.0f, v (8) * (1.0f + mWidth * 2.0f)); rs.duck = v (9);
         rs.eSize = v (10); rs.eCross = v (11); rs.eSend = v (12); rs.eDiffusion = v (13); rs.eModRate = v (14); rs.eModDepth = v (15);
         rs.lSize = v (16); rs.lCross = v (17); rs.lDiffusion = v (18); rs.lModRate = v (19); rs.lModDepth = v (20);
         rs.bassMult = v (21); rs.bassXover = v (22); rs.highMult = v (23); rs.highXover = v (24);
@@ -332,6 +342,7 @@ void CodexProcessor::handleMidi (const juce::MidiMessage& m, int positionInChunk
 void CodexProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
 {
     juce::ScopedNoDenormals noDenormals;
+    juce::AudioProcessLoadMeasurer::ScopedTimer loadTimer (loadMeasurer, buffer.getNumSamples());
     updateParameters();
 
     // GUI preview button always plays the selected key (uses an out-of-range note id so MIDI can't cut it)

@@ -83,6 +83,30 @@ MainView::MainView (CodexProcessor& p, PropertiesFile* settingsFile)
     attack909.attach (s, ID::attack909);
     decay909.attach (s, ID::decay909);
     engineSwitch.onChange = [this] (int) { updateEngineView(); };
+    // ---- Footer ----
+    for (int m = 0; m < ID::numMacros; ++m)
+    {
+        macroKnobs[(size_t) m].attach (s, ID::macro (m));
+        macroKnobs[(size_t) m].slider.setTooltip (Help::forParameter (ID::macro (m)));
+        macroKnobs[(size_t) m].slider.getProperties().set ("bipolar", true);
+        addAndMakeVisible (macroKnobs[(size_t) m]);
+    }
+    for (auto* b : { &abA, &abB })
+    {
+        b->setComponentID ("seg");
+        b->setTooltip ("A/B compare: switch between two versions of your sound. Edits go to the selected slot.");
+        addAndMakeVisible (b);
+    }
+    abA.setConnectedEdges (Button::ConnectedOnRight);
+    abB.setConnectedEdges (Button::ConnectedOnLeft);
+    abA.setToggleState (true, dontSendNotification);
+    abA.onClick = [this] { switchAB (0); };
+    abB.onClick = [this] { switchAB (1); };
+    abCopy.setComponentID ("pill");
+    abCopy.setTooltip ("Copy the current slot to the other one");
+    abCopy.onClick = [this] { abSlots[(size_t) (1 - abCurrent)] = proc.apvts.copyState(); };
+    addAndMakeVisible (abCopy);
+
     pitchModeSwitch.onChange = [this] (int) { updateEngineView(); };
     ampModeSwitch.onChange = [this] (int) { updateEngineView(); };
     pitchDrawEditor.levelToText = [this] (float level) { return level * proc.apvts.getRawParameterValue (ID::pAmount)->load(); };
@@ -140,6 +164,9 @@ void MainView::timerCallback()
     meterR.setLevel (proc.getAndResetPeak (1));
     undoButton.setEnabled (proc.undoManager.canUndo());
     redoButton.setEnabled (proc.undoManager.canRedo());
+    const float cpu = (float) proc.getCpuLoad();
+    cpuShown += 0.1f * (cpu - cpuShown);
+    if (++footerTick % 15 == 0) repaint (footer);
 }
 
 void MainView::showMainMenu()
@@ -186,6 +213,25 @@ void MainView::showMainMenu()
                     break;
             }
         });
+}
+
+void MainView::switchAB (int slot)
+{
+    abA.setToggleState (slot == 0, dontSendNotification);
+    abB.setToggleState (slot == 1, dontSendNotification);
+    if (slot == abCurrent) return;
+
+    // The key belongs to the track, not the sound: keep it when switching
+    const float key = proc.apvts.getRawParameterValue (ID::key)->load(), oct = proc.apvts.getRawParameterValue (ID::octave)->load(),
+                mode = proc.apvts.getRawParameterValue (ID::keyMode)->load();
+    abSlots[(size_t) abCurrent] = proc.apvts.copyState();
+    if (! abSlots[(size_t) slot].isValid())
+        abSlots[(size_t) slot] = abSlots[(size_t) abCurrent].createCopy();
+    proc.apvts.replaceState (abSlots[(size_t) slot].createCopy());
+    for (auto [id, v] : { std::pair<String, float> { ID::key, key }, { ID::octave, oct }, { ID::keyMode, mode } })
+        if (auto* p = proc.apvts.getParameter (id)) p->setValueNotifyingHost (p->convertTo0to1 (v));
+    abCurrent = slot;
+    presetBar.refresh();
 }
 
 void MainView::updateEngineView()
@@ -295,6 +341,20 @@ void MainView::paint (Graphics& g)
     g.setFont (Fonts::label (11.5f, 0.14f));
     g.drawText ("PRESET", presetArea.withHeight (16).translated (1, 0), Justification::centredLeft);
 
+    // Footer
+    {
+        g.setColour (Colours_::outline);
+        g.drawHorizontalLine (footer.getY(), (float) footer.getX(), (float) footer.getRight());
+        g.setColour (Colours_::textDim);
+        g.setFont (Fonts::label (11.5f, 0.1f));
+        g.drawText ("MACROS", footer.withTrimmedTop (4).withWidth (72), Justification::centredLeft);
+        auto cpuArea = footer.withTrimmedTop (4).removeFromRight (90);
+        g.drawText ("A / B", abA.getBounds().translated (-48, 0).withWidth (44), Justification::centredRight);
+        g.setFont (Fonts::medium (12.0f));
+        g.setColour (cpuShown > 0.7f ? Colours_::warn : Colours_::textDim);
+        g.drawText ("CPU " + String (roundToInt (cpuShown * 100.0f)) + " %", cpuArea, Justification::centredRight);
+    }
+
     // Tab bar
     g.setColour (Colours_::outline);
     g.drawHorizontalLine (tabBar.getBottom() - 1, (float) tabBar.getX(), (float) tabBar.getRight());
@@ -382,6 +442,25 @@ void MainView::resized()
         h.removeFromRight (24);
         presetArea = h;
         presetBar.setBounds (lower (h));
+    }
+
+    // ---- Footer: macros | A/B | CPU ----
+    footer = r.removeFromBottom (40);
+    r.removeFromBottom (10);
+    {
+        auto f = footer.withTrimmedTop (4);
+        f.removeFromLeft (78);   // "MACROS" caption
+        for (auto& k : macroKnobs)
+        {
+            k.setBounds (f.removeFromLeft (124).withHeight (36));
+            f.removeFromLeft (6);
+        }
+        auto right = f.removeFromRight (360);
+        right.removeFromRight (96);   // CPU readout
+        abCopy.setBounds (right.removeFromRight (64).withSizeKeepingCentre (64, 24));
+        right.removeFromRight (8);
+        abB.setBounds (right.removeFromRight (36).withSizeKeepingCentre (36, 24));
+        abA.setBounds (right.removeFromRight (36).withSizeKeepingCentre (36, 24));
     }
 
     r.removeFromTop (14);

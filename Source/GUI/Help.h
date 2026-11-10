@@ -35,6 +35,10 @@ namespace Help
             { ID::aCurve,     "Amp Curve: Shape of decay and release. Higher values drop faster at first." },
             { "pEnvMode", "Pitch Envelope Mode: ADSR (knobs) or DRAW (breakpoints: drag points and curves in the display, double-click to add or delete). In Draw mode, Amount still sets the depth in semitones." },
             { "aEnvMode", "Amp Envelope Mode: ADSR (knobs) or DRAW (breakpoints). In Draw mode the drawn curve shapes the hit; Release still fades the note out when the key is released." },
+            { "macro1", "Punch macro: one knob for the attack: pitch sweep depth and speed, click and 909 attack. Centre = as the preset is set." },
+            { "macro2", "Dirt macro: adds or removes up to 12 dB of drive on both distortion units at once. Centre = as the preset is set." },
+            { "macro3", "Tail macro: shortens or lengthens the kick's body and tail (amp decay / release, 909 decay, drawn amp envelope). Centre = as the preset is set." },
+            { "macro4", "Width macro: right adds stereo distortion (Spatial) and widens the reverb; left narrows towards mono. Centre = as the preset is set." },
             { ID::outGain,    "Output: Final output level. Watch the meter: the peak marker turns red above 0 dB." },
         };
         if (auto it = tips.find (id); it != tips.end())

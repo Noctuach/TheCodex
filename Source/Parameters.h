@@ -38,6 +38,10 @@ namespace ID
     inline const juce::String aRelease { "aRelease" };
     inline const juce::String aCurve   { "aCurve" };
     // Envelope mode (ADSR / Draw) and breakpoints: env = "p" (pitch) or "a" (amp); "pEnvMode", "pPts", "pT3", "pL3", "pB3"
+    // Macros: one-knob tweaks applied on top of the preset (0.5 = neutral)
+    constexpr int numMacros = 4;
+    inline juce::String macro (int i) { return "macro" + juce::String (i + 1); }
+    inline juce::String macroName (int i) { const char* n[] = { "Punch", "Dirt", "Tail", "Width" }; return n[juce::jlimit (0, 3, i)]; }
     inline juce::String envMode (char env) { return juce::String::charToString ((juce::juce_wchar) env) + "EnvMode"; }
     inline juce::String envPoints (char env) { return juce::String::charToString ((juce::juce_wchar) env) + "Pts"; }
     inline juce::String envPoint (char env, char what, int index) { return juce::String::charToString ((juce::juce_wchar) env) + juce::String::charToString ((juce::juce_wchar) what) + juce::String (index + 1); }

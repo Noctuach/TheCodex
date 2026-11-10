@@ -96,6 +96,11 @@ AudioProcessorValueTreeState::ParameterLayout Params::createLayout()
     addFloat (l, ID::aRelease, "Amp Release", skewed (1.0f, 5000.0f, 400.0f), 150.0f, msText);
     addFloat (l, ID::aCurve, "Amp Curve", skewed (1.0f, 10.0f, 3.0f), 2.0f, [] (float v) { return String (v, 2); });
 
+    // ---------------- Macros ----------------
+    for (int m = 0; m < ID::numMacros; ++m)
+        addFloat (l, ID::macro (m), "Macro " + ID::macroName (m), { 0.0f, 1.0f }, 0.5f,
+                  [] (float v) { const int p = roundToInt ((v - 0.5f) * 200.0f); return (p > 0 ? "+" : "") + String (p) + " %"; });
+
     // ---------------- Drawn envelopes (breakpoints) ----------------
     {
         // defaults: a classic hardstyle pitch drop, and a full-body amp curve

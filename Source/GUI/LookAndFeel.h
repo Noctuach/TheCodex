@@ -265,8 +265,8 @@ public:
         const float angle = startAngle + pos * (endAngle - startAngle);
         const bool hot = s.isMouseOverOrDragging() && s.isEnabled();
 
-        const bool bipolar = s.getMinimum() < 0.0 && s.getMaximum() > 0.0
-                             && std::abs (s.getMinimum() + s.getMaximum()) < 1.0e-6;
+        const bool bipolar = (s.getMinimum() < 0.0 && s.getMaximum() > 0.0 && std::abs (s.getMinimum() + s.getMaximum()) < 1.0e-6)
+                             || s.getProperties().contains ("bipolar");
         const float from = bipolar ? (startAngle + endAngle) * 0.5f : startAngle;
         const auto arcColour = s.isEnabled() ? (hot ? accentHi : accent) : textFaint;
 
