@@ -65,7 +65,7 @@ distortion, so you can see your kick is in key. It turns green within 10 cents o
 |---|---|
 | **Source: Synth** | *Wave* (Sine, Triangle, Warm Sine), *Fine Tune*, *Phase* (start phase), *Click* (noise transient: level, decay, tone). |
 | **Source: 909** | Synthesized 909-style bass drum. *909 Model* (Classic, Long Tail, Punch, Deep, Hard Attack, Gabber, Early Hardstyle, Boom, Driven, Short Tok) plus the original's *Tune* (sweep depth), *Attack* (click) and *Decay*. |
-| **Pitch Envelope** | ADSR for the pitch sweep, with *Amount* (semitones above the root) and *Curve*. Inactive in 909 mode. |
+| **Pitch Envelope** | ADSR for the pitch sweep (drag the points in the display, or use the knobs), with *Amount* (semitones above the root) and *Curve*. Inactive in 909 mode. |
 | **Amp Envelope** | ADSR for volume with *Curve*. In 909 mode it acts as a gate (attack and release only). |
 | **Equalizer** | Up to **24 bands** (the Pro-Q 4 limit): double-click the display or press **+ ADD** to add one, **DELETE** (or the Delete key) to remove it, the power button or Alt-click to bypass it; only bands in use are shown. 10 shapes: Bell, Low/High Shelf, Low/High Cut, Notch, Band Pass, Tilt Shelf, Flat Tilt, All Pass. Slopes 6–96 dB/oct. Each band has a **stereo placement** (Stereo, Left, Right, **Mid**, **Side**); the display draws a result curve per channel group. Right-click a node to **split** a band into L+R or M+S. *Gain Scale* scales all gains at once. Analyzer with Pre/Post/Freeze and range/speed/tilt settings; display range 3/6/12/30 dB (expands automatically). |
 

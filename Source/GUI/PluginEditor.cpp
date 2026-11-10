@@ -250,21 +250,13 @@ void MainView::showTab (int tab)
 //==============================================================================
 void MainView::paint (Graphics& g)
 {
-    // Background: vertical gradient, soft blue glow at the top, film grain
-    g.setGradientFill (ColourGradient (Colour (0xff0c1324), 0, 0, Colour (0xff060910), 0, (float) getHeight(), false));
-    g.fillAll();
-    g.setGradientFill (ColourGradient (Colours_::accent.withAlpha (0.07f), (float) getWidth() * 0.5f, 0.0f,
-                                       Colours::transparentBlack, (float) getWidth() * 0.5f, (float) getHeight() * 0.6f, true));
-    g.fillAll();
-    g.setTiledImageFill (noiseTile(), 0, 0, 1.0f);
-    g.fillAll();
+    // Background: flat graphite
+    g.fillAll (Colours_::background);
 
     // Header bar
     const auto bar = getLocalBounds().removeFromTop (header.getBottom() + 8).toFloat();
-    g.setGradientFill (ColourGradient (Colour (0xff17223f), 0, 0, Colour (0xff0e1528), 0, bar.getBottom(), false));
+    g.setColour (Colours_::panel);
     g.fillRect (bar);
-    g.setColour (Colours::black.withAlpha (0.4f));
-    g.drawHorizontalLine ((int) bar.getBottom(), 0, (float) getWidth());
     g.setColour (Colours_::outline);
     g.drawHorizontalLine ((int) bar.getBottom() - 1, 0, (float) getWidth());
 
@@ -272,15 +264,13 @@ void MainView::paint (Graphics& g)
     {
         auto r = logoArea.toFloat();
         auto mark = r.removeFromLeft (40.0f).withSizeKeepingCentre (38.0f, 38.0f);
-        g.setColour (Colours_::accent.withAlpha (0.15f));
-        g.fillEllipse (mark.expanded (3.0f));
-        Icons::draw (g, Icons::kickMark(), mark, Colours_::accent, 2.0f);
-        r.removeFromLeft (12.0f);
+        Icons::draw (g, Icons::kickMark(), mark.reduced (2.0f), Colours_::accent, 1.8f);
+        r.removeFromLeft (10.0f);
         g.setColour (Colours_::text);
-        g.setFont (Fonts::display (31.0f, 0.28f));
+        g.setFont (Fonts::display (28.0f, 0.22f));
         g.drawText ("CODEX", r.removeFromTop (r.getHeight() * 0.64f), Justification::bottomLeft);
-        g.setColour (Colours_::accent);
-        g.setFont (Fonts::label (11.0f, 0.24f));
+        g.setColour (Colours_::textDim);
+        g.setFont (Fonts::label (10.5f, 0.2f));
         g.drawText ("HARDSTYLE KICK SYNTH", r.translated (1.0f, 0.0f), Justification::topLeft);
     }
 

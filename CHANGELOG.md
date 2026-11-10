@@ -17,6 +17,11 @@ All notable changes to Codex. Versions follow [Semantic Versioning](https://semv
 - Distortion units show a clear **BYPASSED** state with an ENABLE button.
 
 ### Changed
+- Cleaner, flatter interface (graphite palette, flat panels, thinner knobs, subtle glows), modelled on modern
+  mastering suites such as Ozone 12.
+- All displays animate at 60 fps; the scope, spectrum and stereo field render at the screen's full pixel density, and
+  the oscilloscope captures 4x more detail per hit.
+- Envelope displays are editable: drag the attack, decay/sustain, release and curve points directly.
 - Tabs follow the signal chain: Kick, Distortion, Saturation, Compressor, EQ 2, Space, Scope.
 - Smaller Drive knobs in the distortion units and the saturation band panel.
 - The host's tail length follows the reverb decay.

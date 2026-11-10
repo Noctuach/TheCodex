@@ -387,34 +387,22 @@ public:
 inline void drawSectionPanel (juce::Graphics& g, juce::Rectangle<int> r, const juce::String& title, juce::Colour dot)
 {
     using namespace juce;
+    // Flat card: one fill, a hairline border and a quiet header line (no gradients or shadows)
     const auto rf = r.toFloat();
-    for (int i = 3; i > 0; --i)
-    {
-        g.setColour (Colours::black.withAlpha (0.09f));
-        g.fillRoundedRectangle (rf.expanded ((float) i * 1.5f).translated (0.0f, (float) i), 10.0f);
-    }
-    g.setGradientFill (ColourGradient (Colours_::panelTop, 0, rf.getY(), Colours_::panel, 0, rf.getBottom(), false));
-    g.fillRoundedRectangle (rf, 8.0f);
+    g.setColour (Colours_::panel);
+    g.fillRoundedRectangle (rf, 6.0f);
+    g.setColour (Colours_::outline);
+    g.drawRoundedRectangle (rf.reduced (0.5f), 6.0f, 1.0f);
 
     auto strip = rf.withHeight (28.0f);
-    Path headerPath;
-    headerPath.addRoundedRectangle (strip.getX(), strip.getY(), strip.getWidth(), strip.getHeight(), 8.0f, 8.0f, true, true, false, false);
-    g.setGradientFill (ColourGradient (Colours_::header.brighter (0.06f), 0, strip.getY(), Colours_::header, 0, strip.getBottom(), false));
-    g.fillPath (headerPath);
-    g.setColour (Colours_::outline);
-    g.drawHorizontalLine ((int) strip.getBottom(), strip.getX(), strip.getRight());
-    g.setColour (Colours::white.withAlpha (0.05f));
-    g.drawHorizontalLine ((int) strip.getY() + 1, strip.getX() + 8.0f, strip.getRight() - 8.0f);
-    g.setColour (Colours_::outline);
-    g.drawRoundedRectangle (rf.reduced (0.5f), 8.0f, 1.0f);
+    g.setColour (Colours_::outline.withAlpha (0.7f));
+    g.drawHorizontalLine ((int) strip.getBottom(), strip.getX() + 1.0f, strip.getRight() - 1.0f);
 
-    g.setColour (dot.withAlpha (0.25f));
-    g.fillRoundedRectangle (rf.getX() + 10.0f, strip.getCentreY() - 6.0f, 3.0f, 12.0f, 1.5f);
     g.setColour (dot);
-    g.fillRoundedRectangle (rf.getX() + 10.0f, strip.getCentreY() - 4.0f, 3.0f, 8.0f, 1.5f);
-    g.setColour (Colour (0xffc3d0ee));
-    g.setFont (Fonts::label (13.5f, 0.16f));
-    g.drawText (title, strip.withTrimmedLeft (22.0f), Justification::centredLeft);
+    g.fillEllipse (Rectangle<float> (5.0f, 5.0f).withCentre ({ rf.getX() + 14.0f, strip.getCentreY() }));
+    g.setColour (Colours_::text.withAlpha (0.86f));
+    g.setFont (Fonts::label (13.0f, 0.1f));
+    g.drawText (title, strip.withTrimmedLeft (25.0f), Justification::centredLeft);
 }
 
 /** Small caption with a rule, drawn above a group of controls. */
@@ -422,7 +410,7 @@ inline void drawGroupCaption (juce::Graphics& g, juce::Rectangle<int> r, const j
 {
     using namespace juce;
     g.setColour (Colours_::textDim);
-    const auto font = Font (Fonts::label (11.5f, 0.18f));
+    const auto font = Font (Fonts::label (11.5f, 0.1f));
     g.setFont (font);
     g.drawText (text, r, Justification::centredLeft);
     GlyphArrangement ga;

@@ -3,26 +3,26 @@
 #include "CodexAssets.h"
 
 //==============================================================================
-/** Colour palette: deep navy with a blue glow. */
+/** Colour palette: clean graphite with a cool blue accent (flat, studio-tool look). */
 namespace Colours_
 {
-    const juce::Colour background { 0xff090d17 };
-    const juce::Colour panel      { 0xff0f1626 };
-    const juce::Colour panelTop   { 0xff141d33 };
-    const juce::Colour header     { 0xff151f38 };
-    const juce::Colour display    { 0xff060912 };
-    const juce::Colour outline    { 0xff1e2944 };
-    const juce::Colour outlineHi  { 0xff2c3b61 };
-    const juce::Colour knobTrack  { 0xff19223b };
-    const juce::Colour accent     { 0xff38b6ff }; // primary blue
-    const juce::Colour accentHi   { 0xff9adcff };
-    const juce::Colour accent2    { 0xff7d6bff }; // violet (pitch envelope)
-    const juce::Colour good       { 0xff51e5a0 };
-    const juce::Colour warn       { 0xffff4d6d };
-    const juce::Colour text       { 0xffe6edfb };
-    const juce::Colour textDim    { 0xff7c8aae };
-    const juce::Colour textFaint  { 0xff4a5677 };
-    const juce::Colour grid       { 0xff121a2e };
+    const juce::Colour background { 0xff0c0e12 };
+    const juce::Colour panel      { 0xff14171d };
+    const juce::Colour panelTop   { 0xff181b22 };
+    const juce::Colour header     { 0xff181b22 };
+    const juce::Colour display    { 0xff0a0b0e };
+    const juce::Colour outline    { 0xff242831 };
+    const juce::Colour outlineHi  { 0xff343a46 };
+    const juce::Colour knobTrack  { 0xff252a33 };
+    const juce::Colour accent     { 0xff45a6ff }; // primary blue
+    const juce::Colour accentHi   { 0xffa3d2ff };
+    const juce::Colour accent2    { 0xff9487ff }; // violet (pitch envelope)
+    const juce::Colour good       { 0xff4fd49a };
+    const juce::Colour warn       { 0xffff5a6a };
+    const juce::Colour text       { 0xffe8ebf0 };
+    const juce::Colour textDim    { 0xff8b929e };
+    const juce::Colour textFaint  { 0xff545a65 };
+    const juce::Colour grid       { 0xff171a20 };
 
     inline juce::Colour band (int i)
     {
@@ -34,10 +34,9 @@ namespace Colours_
     /** Draws a path twice: a wide translucent "glow" and a crisp core line. */
     inline void strokeGlow (juce::Graphics& g, const juce::Path& p, juce::Colour c, float width)
     {
-        g.setColour (c.withAlpha (0.10f));
-        g.strokePath (p, juce::PathStrokeType (width * 4.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
-        g.setColour (c.withAlpha (0.22f));
-        g.strokePath (p, juce::PathStrokeType (width * 2.2f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        // a restrained halo: just enough to lift curves off the display
+        g.setColour (c.withAlpha (0.12f));
+        g.strokePath (p, juce::PathStrokeType (width * 2.6f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
         g.setColour (c);
         g.strokePath (p, juce::PathStrokeType (width, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
     }
@@ -71,7 +70,7 @@ namespace Fonts
     inline juce::FontOptions medium (float h)   { return make (faces().medium, h); }
     inline juce::FontOptions semibold (float h) { return make (faces().semibold, h); }
     /** Upper-case captions: condensed with tracking. */
-    inline juce::FontOptions label (float h, float tracking = 0.12f) { return make (faces().condensed, h).withKerningFactor (tracking); }
+    inline juce::FontOptions label (float h, float tracking = 0.08f) { return make (faces().condensed, h).withKerningFactor (tracking); }
     /** Headlines / logo. */
     inline juce::FontOptions display (float h, float tracking = 0.18f) { return make (faces().condensedBold, h).withKerningFactor (tracking); }
 }
@@ -261,7 +260,7 @@ public:
         const auto bounds = juce::Rectangle<float> ((float) x, (float) y, (float) w, (float) h).reduced (3.0f);
         const float radius = juce::jmin (bounds.getWidth(), bounds.getHeight()) * 0.5f;
         const auto centre = bounds.getCentre();
-        const float lineW = juce::jlimit (2.5f, 5.0f, radius * 0.1f);
+        const float lineW = juce::jlimit (2.0f, 3.5f, radius * 0.075f);
         const float arcR = radius - lineW;
         const float angle = startAngle + pos * (endAngle - startAngle);
         const bool hot = s.isMouseOverOrDragging() && s.isEnabled();
@@ -282,40 +281,26 @@ public:
         {
             juce::Path value;
             value.addCentredArc (centre.x, centre.y, arcR, arcR, 0.0f, juce::jmin (from, angle), juce::jmax (from, angle), true);
-            Colours_::strokeGlow (g, value, arcColour, lineW);
+            g.setColour (arcColour);
+            g.strokePath (value, juce::PathStrokeType (lineW, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
         }
 
-        // Body with drop shadow, bevelled rim and a soft top highlight
-        const float bodyR = arcR - lineW * 2.0f;
+        // Flat body with a hairline rim
+        const float bodyR = arcR - lineW * 2.2f;
         const auto body = juce::Rectangle<float> (bodyR * 2.0f, bodyR * 2.0f).withCentre (centre);
-        g.setColour (juce::Colours::black.withAlpha (0.45f));
-        g.fillEllipse (body.translated (0.0f, bodyR * 0.12f).expanded (1.5f));
-        g.setGradientFill (juce::ColourGradient (juce::Colour (0xff26335a), centre.x, body.getY(),
-                                                 juce::Colour (0xff0e1528), centre.x, body.getBottom(), false));
+        g.setGradientFill (juce::ColourGradient (juce::Colour (0xff272c36), centre.x, body.getY(),
+                                                 juce::Colour (0xff1b1f27), centre.x, body.getBottom(), false));
         g.fillEllipse (body);
-        g.setGradientFill (juce::ColourGradient (juce::Colour (0xff3d4e80), centre.x, body.getY(),
-                                                 juce::Colour (0xff0b1120), centre.x, body.getBottom(), false));
+        g.setColour (hot ? outlineHi.brighter (0.2f) : outlineHi);
         g.drawEllipse (body.reduced (0.5f), 1.0f);
-        const auto cap = body.reduced (bodyR * 0.18f);
-        g.setGradientFill (juce::ColourGradient (juce::Colour (0xff1d2846), centre.x, cap.getY(),
-                                                 juce::Colour (0xff141c33), centre.x, cap.getBottom(), false));
-        g.fillEllipse (cap);
 
         // Pointer
         const auto dir = juce::Point<float> (std::sin (angle), -std::cos (angle));
         juce::Path pointer;
-        pointer.startNewSubPath (centre + dir * (bodyR * 0.42f));
-        pointer.lineTo (centre + dir * (bodyR * 0.86f));
+        pointer.startNewSubPath (centre + dir * (bodyR * 0.35f));
+        pointer.lineTo (centre + dir * (bodyR * 0.85f));
         g.setColour (s.isEnabled() ? (hot ? juce::Colours::white : text) : textFaint);
-        g.strokePath (pointer, juce::PathStrokeType (juce::jmax (2.0f, bodyR * 0.11f), juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
-
-        // Position dot on the ring
-        if (s.isEnabled())
-        {
-            const auto dot = centre + dir * arcR;
-            g.setColour (juce::Colours::white);
-            g.fillEllipse (juce::Rectangle<float> (lineW * 1.15f, lineW * 1.15f).withCentre (dot));
-        }
+        g.strokePath (pointer, juce::PathStrokeType (juce::jmax (1.6f, bodyR * 0.08f), juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
     }
 
     void drawLinearSlider (juce::Graphics& g, int x, int y, int w, int h, float pos, float, float,
@@ -373,9 +358,9 @@ public:
         if (dynamic_cast<juce::Slider*> (l.getParentComponent()) != nullptr)
             return juce::Font (Fonts::medium (13.0f));
         if (l.getProperties().contains ("captionLarge"))
-            return juce::Font (Fonts::label (15.0f, 0.2f));
+            return juce::Font (Fonts::label (14.0f, 0.12f));
         if (l.getProperties().contains ("caption"))
-            return juce::Font (Fonts::label (11.5f, 0.14f));
+            return juce::Font (Fonts::label (11.5f, 0.09f));
         return juce::Font (Fonts::regular (13.0f));
     }
 
@@ -384,12 +369,12 @@ public:
     {
         auto r = juce::Rectangle<float> (0, 0, (float) w, (float) h).reduced (0.5f);
         const bool hot = box.isMouseOver (true) || box.isPopupActive();
-        g.setColour (hot ? Colours_::display.brighter (0.06f) : Colours_::display);
-        g.fillRoundedRectangle (r, 5.0f);
-        g.setColour (hot ? Colours_::accent.withAlpha (0.55f) : Colours_::outline);
-        g.drawRoundedRectangle (r, 5.0f, 1.0f);
-        Icons::draw (g, Icons::chevronDown(), juce::Rectangle<float> ((float) w - 22.0f, 0.0f, 14.0f, (float) h).withSizeKeepingCentre (12.0f, 12.0f),
-                     hot ? Colours_::accentHi : Colours_::accent, 1.6f);
+        g.setColour (hot ? Colours_::panelTop.brighter (0.05f) : Colours_::panelTop);
+        g.fillRoundedRectangle (r, 4.0f);
+        g.setColour (hot ? Colours_::outlineHi.brighter (0.2f) : Colours_::outline);
+        g.drawRoundedRectangle (r, 4.0f, 1.0f);
+        Icons::draw (g, Icons::chevronDown(), juce::Rectangle<float> ((float) w - 22.0f, 0.0f, 14.0f, (float) h).withSizeKeepingCentre (10.0f, 10.0f),
+                     hot ? Colours_::text : Colours_::textDim, 1.4f);
     }
 
     juce::Font getComboBoxFont (juce::ComboBox&) override { return juce::Font (Fonts::medium (14.0f)); }
@@ -492,11 +477,8 @@ public:
         {
             if (b.getToggleState())
             {
-                auto line = r.removeFromBottom (2.0f).reduced (8.0f, 0.0f);
-                g.setColour (Colours_::accent.withAlpha (0.25f));
-                g.fillRoundedRectangle (line.expanded (0.0f, 3.0f).translated (0.0f, -2.0f), 2.0f);
                 g.setColour (Colours_::accent);
-                g.fillRoundedRectangle (line, 1.0f);
+                g.fillRect (r.removeFromBottom (2.0f).reduced (6.0f, 0.0f));
             }
             return;
         }
@@ -504,10 +486,10 @@ public:
         if (id == "pill")
         {
             const bool on = b.getToggleState();
-            g.setColour (on ? Colours_::accent.withAlpha (0.18f) : Colours_::display);
-            g.fillRoundedRectangle (r, r.getHeight() * 0.5f);
-            g.setColour (on ? Colours_::accent : (over ? Colours_::outlineHi : Colours_::outline));
-            g.drawRoundedRectangle (r, r.getHeight() * 0.5f, 1.0f);
+            g.setColour (on ? Colours_::accent.withAlpha (0.16f) : (over ? Colours_::panelTop.brighter (0.04f) : Colours_::panelTop));
+            g.fillRoundedRectangle (r, 4.0f);
+            g.setColour (on ? Colours_::accent.withAlpha (0.8f) : (over ? Colours_::outlineHi : Colours_::outline));
+            g.drawRoundedRectangle (r, 4.0f, 1.0f);
             return;
         }
 
@@ -517,11 +499,11 @@ public:
             const bool first = b.getConnectedEdgeFlags() & juce::Button::ConnectedOnRight;
             const bool last  = b.getConnectedEdgeFlags() & juce::Button::ConnectedOnLeft;
             juce::Path p;
-            p.addRoundedRectangle (r.getX(), r.getY(), r.getWidth(), r.getHeight(), 5.0f, 5.0f,
+            p.addRoundedRectangle (r.getX(), r.getY(), r.getWidth(), r.getHeight(), 4.0f, 4.0f,
                                    ! last, ! first, ! last, ! first);
-            g.setColour (on ? Colours_::accent : (over ? Colours_::panelTop : Colours_::display));
+            g.setColour (on ? Colours_::accent.withAlpha (0.2f) : (over ? Colours_::panelTop.brighter (0.04f) : Colours_::panelTop));
             g.fillPath (p);
-            g.setColour (on ? Colours_::accent : Colours_::outline);
+            g.setColour (on ? Colours_::accent.withAlpha (0.8f) : Colours_::outline);
             g.strokePath (p, juce::PathStrokeType (1.0f));
             return;
         }
@@ -541,7 +523,7 @@ public:
         if (id == "kick")      c = juce::Colour (0xff04101e);
         else if (id == "tab")  c = b.getToggleState() ? Colours_::text : (over ? Colours_::text.withAlpha (0.8f) : Colours_::textDim);
         else if (id == "pill") c = b.getToggleState() ? Colours_::accentHi : Colours_::textDim;
-        else if (id == "seg")  c = b.getToggleState() ? juce::Colour (0xff04101e) : (over ? Colours_::text : Colours_::textDim);
+        else if (id == "seg")  c = b.getToggleState() ? Colours_::accentHi : (over ? Colours_::text : Colours_::textDim);
         else                   c = b.getToggleState() ? b.findColour (juce::TextButton::textColourOnId)
                                                       : (over ? Colours_::text : b.findColour (juce::TextButton::textColourOffId));
         if (! b.isEnabled()) c = Colours_::textFaint;
@@ -554,8 +536,8 @@ public:
     {
         const auto id = b.getComponentID();
         if (id == "kick") return juce::Font (Fonts::display (19.0f, 0.3f));
-        if (id == "tab")  return juce::Font (Fonts::label (15.0f, 0.2f));
-        return juce::Font (Fonts::label (juce::jmin (13.5f, (float) h * 0.6f), 0.12f));
+        if (id == "tab")  return juce::Font (Fonts::label (14.5f, 0.1f));
+        return juce::Font (Fonts::label (juce::jmin (13.0f, (float) h * 0.58f), 0.08f));
     }
 
     //==========================================================================
