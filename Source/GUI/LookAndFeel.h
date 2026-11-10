@@ -318,6 +318,44 @@ public:
         }
     }
 
+    void drawLinearSlider (juce::Graphics& g, int x, int y, int w, int h, float pos, float, float,
+                           juce::Slider::SliderStyle style, juce::Slider& s) override
+    {
+        if (style != juce::Slider::LinearVertical)
+        {
+            LookAndFeel_V4::drawLinearSlider (g, x, y, w, h, pos, 0, 0, style, s);
+            return;
+        }
+        const auto r = juce::Rectangle<float> ((float) x, (float) y, (float) w, (float) h);
+        const float cx = r.getCentreX();
+        const auto track = juce::Rectangle<float> (4.0f, r.getHeight()).withCentre ({ cx, r.getCentreY() });
+        g.setColour (Colours_::knobTrack);
+        g.fillRoundedRectangle (track, 2.0f);
+
+        // bipolar fill from the centre (0 dB) to the thumb
+        const bool bipolar = s.getMinimum() < 0.0 && s.getMaximum() > 0.0;
+        const float zeroY = bipolar ? (float) s.getPositionOfValue (0.0) : r.getBottom();
+        const bool hot = s.isMouseOverOrDragging() && s.isEnabled();
+        const auto col = s.isEnabled() ? (hot ? Colours_::accentHi : Colours_::accent) : Colours_::textFaint;
+        g.setColour (col);
+        g.fillRoundedRectangle (juce::Rectangle<float> (cx - 2.0f, juce::jmin (zeroY, pos), 4.0f, std::abs (zeroY - pos)), 2.0f);
+        if (bipolar)
+        {
+            g.setColour (Colours_::textFaint);
+            g.drawHorizontalLine ((int) zeroY, cx - 8.0f, cx + 8.0f);
+        }
+
+        // thumb
+        const auto thumb = juce::Rectangle<float> (26.0f, 12.0f).withCentre ({ cx, pos });
+        g.setColour (juce::Colours::black.withAlpha (0.4f));
+        g.fillRoundedRectangle (thumb.translated (0.0f, 1.5f), 4.0f);
+        g.setGradientFill (juce::ColourGradient (juce::Colour (0xff2c3a63), cx, thumb.getY(), juce::Colour (0xff141c33), cx, thumb.getBottom(), false));
+        g.fillRoundedRectangle (thumb, 4.0f);
+        g.setColour (col);
+        g.drawRoundedRectangle (thumb, 4.0f, 1.2f);
+        g.fillRect (thumb.withSizeKeepingCentre (14.0f, 2.0f));
+    }
+
     juce::Label* createSliderTextBox (juce::Slider& s) override
     {
         auto* l = LookAndFeel_V4::createSliderTextBox (s);

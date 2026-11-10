@@ -144,6 +144,8 @@ AudioProcessorValueTreeState::ParameterLayout Params::createLayout()
     addChoice (l, ID::sat ("OS"), "Saturation Oversampling", sat::oversamplingNames(), 1);
     addFloat (l, ID::sat ("Mix"), "Saturation Mix", { 0.0f, 1.0f }, 1.0f, pctText);
     addFloat (l, ID::sat ("Out"), "Saturation Output", { -24.0f, 12.0f, 0.01f }, 0.0f, dbText);
+    addFloat (l, ID::sat ("In"), "Saturation Input", { -24.0f, 24.0f, 0.01f }, 0.0f, dbText);
+    addChoice (l, ID::sat ("Mode"), "Saturation Channel Mode", sat::channelModeNames(), 0);
     {
         const float defX[] = { 120.0f, 400.0f, 1200.0f, 3500.0f, 9000.0f };
         for (int j = 0; j < sat::maxBands - 1; ++j)
@@ -162,7 +164,11 @@ AudioProcessorValueTreeState::ParameterLayout Params::createLayout()
         addFloat (l, ID::satBand (b, "Fb"), n + "Feedback", { 0.0f, 1.0f }, 0.0f, pctText);
         addFloat (l, ID::satBand (b, "FbFreq"), n + "Feedback Freq", skewed (20.0f, 20000.0f, 640.0f), 1000.0f, hzText);
         addFloat (l, ID::satBand (b, "Dyn"), n + "Dynamics", { -1.0f, 1.0f, 0.001f }, 0.0f, [] (float v) { return String (roundToInt (v * 100.0f)) + " %"; });
-        addFloat (l, ID::satBand (b, "Tone"), n + "Tone", { -1.0f, 1.0f, 0.001f }, 0.0f, [] (float v) { return String (roundToInt (v * 100.0f)) + " %"; });
+        for (auto [sfx, name] : { std::pair<const char*, const char*> { "Bass", "Bass" }, { "MidT", "Mid" }, { "Treble", "Treble" }, { "Pres", "Presence" } })
+            addFloat (l, ID::satBand (b, sfx), n + name, { -12.0f, 12.0f, 0.01f }, 0.0f, dbText);
+        auto panText = [] (float v) { return std::abs (v) < 0.005f ? String ("C") : (v < 0 ? "L " : "R ") + String (roundToInt (std::abs (v) * 100.0f)); };
+        addFloat (l, ID::satBand (b, "DrivePan"), n + "Drive Pan", { -1.0f, 1.0f, 0.001f }, 0.0f, panText);
+        addFloat (l, ID::satBand (b, "LevelPan"), n + "Level Pan", { -1.0f, 1.0f, 0.001f }, 0.0f, panText);
         addFloat (l, ID::satBand (b, "Level"), n + "Level", { -24.0f, 12.0f, 0.01f }, 0.0f, dbText);
         addBool (l, ID::satBand (b, "Mute"), n + "Mute", false);
         addBool (l, ID::satBand (b, "Solo"), n + "Solo", false);

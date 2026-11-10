@@ -154,7 +154,7 @@ PresetManager::PresetManager (AudioProcessorValueTreeState& s) : apvts (s)
          .set (ID::sat ("On"), 1.0f).set (ID::sat ("Bands"), 3.0f).set (ID::sat ("X1"), 150.0f).set (ID::sat ("X2"), 2500.0f)
          .set (ID::satBand (0, "Style"), 1.0f).set (ID::satBand (0, "Drive"), 8.0f)
          .set (ID::satBand (1, "Style"), 4.0f).set (ID::satBand (1, "Drive"), 12.0f).set (ID::satBand (1, "Dyn"), 0.3f)
-         .set (ID::satBand (2, "Style"), 9.0f).set (ID::satBand (2, "Drive"), 6.0f).set (ID::satBand (2, "Tone"), -0.3f)
+         .set (ID::satBand (2, "Style"), 9.0f).set (ID::satBand (2, "Drive"), 6.0f).set (ID::satBand (2, "Treble"), -4.0f)
          .set (ID::satBand (2, "Level"), -6.0f));
 
     // Output levels matched to about -3 dBFS peak in the key of F (measured with tools/CodexRender),
@@ -164,7 +164,7 @@ PresetManager::PresetManager (AudioProcessorValueTreeState& s) : apvts (s)
         { "Zaag Kick", 1.4f }, { "Rotterdam Gabber", -0.2f }, { "909 Clean", -3.7f }, { "909 Oldskool Hardstyle", 1.4f },
         { "909 Euphoric", -0.9f }, { "909 Rawstyle", -0.8f }, { "909 Gabber Overdrive", 1.6f }, { "909 Tok", -3.3f },
         { "909 Boom Tail", -0.2f }, { "909 Fuzz Box", 1.7f }, { "909 Bitcrushed", 1.9f }, { "909 Hard Attack Raw", -0.1f },
-        { "909 Wide Rawstyle", 3.0f }, { "Saturated Euphoric", -9.1f } };
+        { "909 Wide Rawstyle", 3.0f }, { "Saturated Euphoric", -4.0f } };
     for (auto& preset : factory)
         if (auto it = outputLevels.find (preset.name); it != outputLevels.end())
         {

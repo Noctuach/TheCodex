@@ -87,6 +87,8 @@ namespace Help
             { "satOS",    "Oversampling: reduces aliasing from the saturation at the cost of CPU." },
             { "satMix",   "Mix: blend between the signal before and after the saturation stage." },
             { "satOut",   "Output: level after the saturation stage." },
+            { "satIn",    "Input: level going into the saturation stage. Higher input = more saturation in every band." },
+            { "satMode",  "Channel Mode: Stereo processes left and right; Mid/Side processes the centre and the width separately (use with Drive Pan / Level Pan)." },
         };
         if (auto it = satTips.find (id); it != satTips.end())
             return it->second;
@@ -96,12 +98,17 @@ namespace Help
         {
             static const std::map<juce::String, juce::String> satBand {
                 { "Style",  "Style: saturation character of this band: tube, tape, transformer, amp, clipping or effects." },
-                { "Drive",  "Drive: how hard this band is pushed into the saturation." },
+                { "Drive",  "Drive: how hard this band is pushed into the saturation. The output level is compensated automatically." },
                 { "Mix",    "Mix: blend between the clean and the saturated band." },
                 { "Fb",     "Feedback: feeds the saturated output back into the input around the Feedback Freq, adding resonance and grit." },
                 { "FbFreq", "Feedback Freq: centre frequency of the feedback path." },
-                { "Dyn",    "Dynamics: positive values saturate loud parts more (punchier); negative values saturate them less (smoother)." },
-                { "Tone",   "Tone: tilts this band darker (negative) or brighter (positive) after the saturation." },
+                { "Dyn",    "Dynamics: turn right for compression (loud parts pulled down, pumping), left for gating / expansion (quiet parts pulled down)." },
+                { "Bass",   "Bass: low shelf at 120 Hz on the saturated band." },
+                { "MidT",   "Mid: bell at 800 Hz on the saturated band." },
+                { "Treble", "Treble: high shelf at 5 kHz on the saturated band." },
+                { "Pres",   "Presence: bell at 3 kHz on the saturated band." },
+                { "DrivePan", "Drive Pan: shifts the drive towards the left or right channel (mid or side in Mid/Side mode)." },
+                { "LevelPan", "Level Pan: balance of this band between left and right (mid and side in Mid/Side mode)." },
                 { "Level",  "Level: output level of this band." },
                 { "Mute",   "Mute: silences this band." },
                 { "Solo",   "Solo: hear only the soloed bands." },

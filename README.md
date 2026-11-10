@@ -60,10 +60,12 @@ distortion, so you can see your kick is in key. It turns green within 10 cents o
 | **Source: 909** | Synthesized 909-style bass drum. *909 Model* (Classic, Long Tail, Punch, Deep, Hard Attack, Gabber, Early Hardstyle, Boom, Driven, Short Tok) plus the original's *Tune* (sweep depth), *Attack* (click) and *Decay*. |
 | **Pitch Envelope** | ADSR for the pitch sweep, with *Amount* (semitones above the root) and *Curve*. Inactive in 909 mode. |
 | **Amp Envelope** | ADSR for volume with *Curve*. In 909 mode it acts as a gate (attack and release only). |
-| **Equalizer** | 6 bands: Low/High Cut (12/24/48 dB/oct), Low/High Shelf, Bell, Notch. Each band has a **stereo placement**: Stereo, Left, Right, **Mid** or **Side**. When bands work on Mid or Side only, the display shows a separate dashed Side curve. Live spectrum analyzer, ±12/±24 dB view. |
+| **Equalizer** | 6 bands, 10 shapes: Bell, Low/High Shelf, Low/High Cut, Notch, Band Pass, Tilt Shelf, Flat Tilt, All Pass. Slopes 6–96 dB/oct. Each band has a **stereo placement** (Stereo, Left, Right, **Mid**, **Side**); the display draws a result curve per channel group. Right-click a node to **split** a band into L+R or M+S. *Gain Scale* scales all gains at once. Analyzer with Pre/Post/Freeze and range/speed/tilt settings; display range 3/6/12/30 dB (expands automatically). |
 
-**EQ mouse controls:** drag a node to set frequency/gain · mouse wheel for Q · double-click a node to turn it on/off ·
-double-click empty space to add a band · right-click a node for type, slope and stereo placement · Shift for fine moves.
+**EQ mouse controls:** drag a node for frequency/gain (Shift: fine, Ctrl/Cmd + vertical drag: Q) · mouse wheel: Q, or slope on
+cut filters (Ctrl/Cmd + wheel: gain) · Alt-click or double-click a node: on/off · double-click empty space: new band (far left = low
+cut, far right = high cut, bottom = notch, elsewhere = bell) · right-click a node: shape, slope, stereo placement, split, reset ·
+hover the display to read the frequency and note.
 
 ### Distortion page
 Two full distortion units, one **before** and one **after** the EQ:
@@ -81,9 +83,9 @@ Multiband saturation after Distortion 2, modelled on the feature set of classic 
 
 | Group | Controls |
 |---|---|
-| Bands | 1–6 bands. Drag the crossover lines on the display; crossover slope 6/12/24/48 dB/oct (Linkwitz-Riley, phase-aligned so bands sum flat). M / S / B badges on each band: mute, solo, bypass. |
-| Per band | *Style* (19 styles: Tube, Tape, Transformer, Amp, Clip and FX categories), *Drive*, *Mix*, *Level*, *Feedback* + *Feedback Freq* (resonant feedback), *Dynamics* (more or less saturation on loud parts), *Tone* (tilt). |
-| Global | Power, *Oversampling* (Off/2x/4x), *Mix*, *Output*. |
+| Bands | 1–6 bands. Hover the top of the display and click **+** to split a band; the **×** in the band panel removes it. Drag crossover lines to move them, click a crossover handle for the slope (6/12/24/48 dB/oct, Linkwitz-Riley, phase-aligned so bands sum flat). Drag a band's **level handle** for level (Alt-drag: drive, Ctrl/Cmd-click: reset, wheel: level). M / S / B badges: mute, solo, bypass (Ctrl/Cmd-click: exclusive). |
+| Per band | *Style* (20 styles: Tube, Tape, Transformer, Amp, Clip, FX), *Drive* (output level compensated automatically) with *Drive Pan*, *Mix*, *Level* with *Level Pan*, *Feedback* + *Feedback Freq* (dies away when the input stops), *Dynamics* (right: compression, left: gating), *Tone*: Bass, Mid, Treble, Presence. |
+| Global | Power, *Channel Mode* (Stereo or Mid/Side), *Oversampling* (Off/2x/4x/8x), *Input*, *Mix*, *Output*. |
 
 ### Scope page
 | Panel | What it shows |

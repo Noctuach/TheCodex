@@ -74,3 +74,23 @@ Because a kick is generated in mono, the distortion units also gained Distroyer'
 **In Codex:** a hit-synced or free-running oscilloscope (100 ms – 2 s, L/R/M/S), a vectorscope with correlation and width, a spectrum with slope and peak hold, a tuner and L/R level meters.
 
 The FabFilter help pages could not be opened from the build environment (blocked host), so these notes are based on search results quoting them, plus reviews.
+
+## Update: built against the Pro-Q 4 and Saturn 2 user manuals
+The official manuals were supplied, so the EQ and saturation sections were checked against them directly.
+
+**Pro-Q 4 manual** (Display and workflow, Band controls, Stereo options, Spectrum analyzer, Output options):
+- Shapes: Bell, Low/High Shelf, Low/High Cut, Notch, Band Pass, Tilt Shelf, Flat Tilt, All Pass. *Codex: all ten.*
+- Slope from 0 to 96 dB/oct (brickwall for cuts), fractional slopes. *Codex: 6, 12, 18, 24, 36, 48, 72, 96 dB/oct; no brickwall or fractional slopes.*
+- Gain ±30 dB; display ranges 3/6/12/30 dB that expand while dragging. *Codex: same.*
+- Per-band stereo placement, a **split** button that turns a band into L+R or M+S, a result curve per channel group, "Reset Placement". *Codex: same, in the right-click menu.*
+- Analyzer: Pre/Post, Freeze, range 60/90/120 dB, speed, tilt (4.5 dB/oct default). *Codex: same (no side-chain or external spectra).*
+- Gain Scale. *Codex: yes.* Auto Gain and phase invert are not included.
+- Mouse: Alt-click bypass, Ctrl/Cmd-drag for Q, wheel for slope on cut filters, frequency shown on hover. *Codex: yes.*
+- Not included: dynamic EQ, spectral dynamics, EQ Sketch, EQ Match, linear/natural phase modes, character modes, piano display.
+
+**Saturn 2 manual** (Interactive multi-band display, Band controls, Input and output controls):
+- Up to 6 bands, add a band with "+" (it copies the band it splits), select, remove; drag level buttons (Alt: drive, Ctrl/Cmd-click: reset); drag crossovers; slope button on the crossover (6/12/24/48 dB/oct); solo/mute with Ctrl/Cmd-click for exclusive. *Codex: same; the slope is global.*
+- Band controls: Enabled, Mix, Feedback amount + frequency, Dynamics (right = compression, left = gating/expansion), Style, Drive with pan ring (and automatic level compensation), Tone (bass, mid, treble, presence), Level with pan ring, Remove. *Codex: same.*
+- Styles: Tube, Tape, Amplifier, Transformer, Smudge, Breakdown, Foldback, Rectify, Destroy. *Codex: 20 original styles in matching categories (Clip and FX cover foldback, rectify, smear, sub fuzz and a "Wreck" bit-crush/sample-rate/clip style).*
+- Input/output: High Quality oversampling, Channel Mode Stereo or Mid/Side, input and output level, mix, restricted feedback (feedback reduced when the input is silent). *Codex: oversampling up to 8x, everything else included.*
+- Not included: linear-phase crossovers, "Superb" 32x oversampling, the modulation system (XLFO, envelopes, MIDI sources, XY controllers), band presets.

@@ -16,21 +16,22 @@ namespace sat
 {
     struct StyleInfo { const char* category; const char* name; };
 
-    inline const std::array<StyleInfo, 19>& styles()
+    inline const std::array<StyleInfo, 20>& styles()
     {
-        static const std::array<StyleInfo, 19> s { {
+        static const std::array<StyleInfo, 20> s { {
             { "Tube", "Clean Tube" }, { "Tube", "Warm Tube" }, { "Tube", "Driven Tube" },
             { "Tape", "Clean Tape" }, { "Tape", "Warm Tape" }, { "Tape", "Worn Tape" },
             { "Transformer", "Subtle Transformer" }, { "Transformer", "Iron Transformer" },
             { "Amp", "Clean Amp" }, { "Amp", "Crunch Amp" }, { "Amp", "Lead Amp" },
             { "Clip", "Soft Clip" }, { "Clip", "Hard Clip" }, { "Clip", "Foldback" }, { "Clip", "Rectifier" },
-            { "FX", "Bitcrush" }, { "FX", "Downsample" }, { "FX", "Smear" }, { "FX", "Sub Fuzz" },
+            { "FX", "Bitcrush" }, { "FX", "Downsample" }, { "FX", "Smear" }, { "FX", "Sub Fuzz" }, { "FX", "Wreck" },
         } };
         return s;
     }
 
     inline juce::StringArray slopeNames()        { return { "6 dB/oct", "12 dB/oct", "24 dB/oct", "48 dB/oct" }; }
-    inline juce::StringArray oversamplingNames() { return { "Off", "2x", "4x" }; }
+    inline juce::StringArray oversamplingNames() { return { "Off", "2x", "4x", "8x" }; }
+    inline juce::StringArray channelModeNames()  { return { "Stereo", "Mid/Side" }; }
 
     constexpr int maxBands = 6;
 
@@ -38,7 +39,9 @@ namespace sat
     {
         int   style = 1;
         float driveDb = 6.0f, mix = 1.0f, feedback = 0.0f, feedbackHz = 1000.0f;
-        float dynamics = 0.0f, tone = 0.0f, levelDb = 0.0f;
+        float dynamics = 0.0f, levelDb = 0.0f;
+        float bassDb = 0.0f, midDb = 0.0f, trebleDb = 0.0f, presenceDb = 0.0f;   // tone controls
+        float drivePan = 0.0f, levelPan = 0.0f;                                  // -1 = left/mid ... +1 = right/side
         bool  mute = false, solo = false, bypass = false;
     };
 
@@ -48,7 +51,8 @@ namespace sat
         int   numBands = 3;
         int   slope = 2;
         int   oversampling = 1;
-        float mix = 1.0f, outDb = 0.0f;
+        int   channelMode = 0;          // 0 = stereo (L/R), 1 = mid/side
+        float mix = 1.0f, outDb = 0.0f, inDb = 0.0f;
         std::array<float, maxBands - 1> crossovers { 120.0f, 400.0f, 1200.0f, 3500.0f, 9000.0f };
         std::array<BandSettings, maxBands> bands {};
     };
@@ -217,6 +221,12 @@ namespace sat
             case 17:                                                                                 // Smear
                 st.slew += juce::jlimit (-k.smearStep, k.smearStep, x - st.slew);
                 return std::tanh (1.2f * st.slew);
+            case 19:                                                                                 // Wreck: crush + rate reduction + clip
+            {
+                if (st.holdCount-- <= 0) { st.held = x; st.holdCount = 2 * k.downsampleHold - 1; }
+                const float c = juce::jlimit (-1.0f, 1.0f, st.held * 1.5f);
+                return std::round (c * 6.0f) / 6.0f;
+            }
             case 18:                                                                                 // Sub Fuzz
             {
                 const float lo = st.low.process (x);
@@ -236,7 +246,7 @@ namespace sat
         void prepare (double sr, int maxBlockSize)
         {
             baseRate = sr;
-            for (int i = 0; i < 2; ++i)
+            for (int i = 0; i < 3; ++i)
             {
                 oversamplers[(size_t) i] = std::make_unique<juce::dsp::Oversampling<float>> (
                     2, i + 1, juce::dsp::Oversampling<float>::filterHalfBandPolyphaseIIR, true, false);
@@ -297,10 +307,11 @@ namespace sat
         struct BandState
         {
             StyleState style;
-            eq::Biquad feedbackFilter, toneLow, toneHigh;
+            eq::Biquad feedbackFilter;
+            std::array<eq::Biquad, 4> tone {};
             float lastOut = 0.0f, env = 0.0f, dynGain = 1.0f;
             int dynCounter = 0;
-            void reset() { style.reset(); feedbackFilter.reset(); toneLow.reset(); toneHigh.reset(); lastOut = env = 0.0f; dynGain = 1.0f; dynCounter = 0; }
+            void reset() { style.reset(); feedbackFilter.reset(); for (auto& t : tone) t.reset(); lastOut = env = 0.0f; dynGain = 1.0f; dynCounter = 0; }
         };
 
         struct Channel
@@ -329,7 +340,7 @@ namespace sat
                 constants.rate = rate;
                 constants.downsampleHold = std::max (1, (int) std::round (rate / 8000.0));
                 constants.smearStep = (float) (0.02 * 48000.0 / rate);
-                for (auto* v : { &globalMix, &globalOut }) v->reset (rate, 0.02);
+                for (auto* v : { &globalMix, &globalOut, &globalIn }) v->reset (rate, 0.02);
                 for (int b = 0; b < maxBands; ++b)
                     for (auto* v : { &drive[(size_t) b], &mixes[(size_t) b], &levels[(size_t) b] }) v->reset (rate, 0.02);
                 last = Settings {};
@@ -340,6 +351,7 @@ namespace sat
             auto target = [rateChanged] (juce::SmoothedValue<float>& v, float t) { if (rateChanged) v.setCurrentAndTargetValue (t); else v.setTargetValue (t); };
             target (globalMix, s.mix);
             target (globalOut, juce::Decibels::decibelsToGain (s.outDb));
+            target (globalIn, juce::Decibels::decibelsToGain (s.inDb));
 
             // Crossovers (sorted and kept a little apart)
             std::array<float, maxBands - 1> xf {};
@@ -379,21 +391,26 @@ namespace sat
                 target (mixes[(size_t) b], bs.mix);
                 target (levels[(size_t) b], juce::Decibels::decibelsToGain (bs.levelDb));
 
-                if (rateChanged || bs.style != lb.style || bs.feedbackHz != lb.feedbackHz || bs.tone != lb.tone)
+                if (rateChanged || bs.style != lb.style || bs.feedbackHz != lb.feedbackHz || bs.bassDb != lb.bassDb
+                    || bs.midDb != lb.midDb || bs.trebleDb != lb.trebleDb || bs.presenceDb != lb.presenceDb)
                 {
-                    // feedback: band-pass (constant 0 dB peak), tone: tilt around 800 Hz (+/-6 dB per side)
+                    // feedback: band-pass (constant 0 dB peak) at the feedback frequency
                     const double w0 = juce::MathConstants<double>::twoPi * std::min ((double) bs.feedbackHz, rate * 0.45) / rate;
                     const double alpha = std::sin (w0) / (2.0 * 2.0), cw = std::cos (w0), a0 = 1.0 + alpha;
                     const eq::Coeffs bp { alpha / a0, 0.0, -alpha / a0, -2.0 * cw / a0, (1.0 - alpha) / a0 };
-                    eq::BandSettings lo; lo.on = true; lo.type = eq::BandType::LowShelf;  lo.freq = 800.0f; lo.gainDb = -6.0f * bs.tone; lo.q = 0.7f;
-                    eq::BandSettings hi; hi.on = true; hi.type = eq::BandType::HighShelf; hi.freq = 800.0f; hi.gainDb =  6.0f * bs.tone; hi.q = 0.7f;
-                    const auto lc = eq::design (lo, rate).stages[0], hc = eq::design (hi, rate).stages[0];
+                    // tone controls: bass (low shelf 120 Hz), mid (bell 800 Hz), treble (high shelf 5 kHz), presence (bell 3 kHz)
+                    auto bell = [this] (double f, double gainDb, double q)
+                    {
+                        eq::BandSettings bb; bb.on = true; bb.type = eq::BandType::Bell; bb.freq = (float) f; bb.gainDb = (float) gainDb; bb.q = (float) q;
+                        return eq::design (bb, rate).stages[0];
+                    };
+                    const std::array<eq::Coeffs, 4> toneCoeffs { eq::shelf (false, 120.0, bs.bassDb, 0.7, rate), bell (800.0, bs.midDb, 0.7),
+                                                                 eq::shelf (true, 5000.0, bs.trebleDb, 0.7, rate), bell (3000.0, bs.presenceDb, 1.2) };
                     for (auto& ch : channels)
                     {
                         auto& st = ch.bands[(size_t) b];
                         st.feedbackFilter.c = bp;
-                        st.toneLow.c = lc;
-                        st.toneHigh.c = hc;
+                        for (size_t t = 0; t < 4; ++t) st.tone[t].c = toneCoeffs[t];
                         if (rateChanged || bs.style != lb.style)
                         {
                             st.style.reset();
@@ -425,12 +442,18 @@ namespace sat
                     mx[(size_t) b] = mixes[(size_t) b].getNextValue();
                     lv[(size_t) b] = levels[(size_t) b].getNextValue();
                 }
-                const float gm = globalMix.getNextValue(), go = globalOut.getNextValue();
+                const float gm = globalMix.getNextValue(), go = globalOut.getNextValue(), gi = globalIn.getNextValue();
+                const bool ms = settings.channelMode == 1;
+
+                // Input gain, then optional mid/side encoding (channel 0 = mid, channel 1 = side)
+                std::array<float, 2> in { chans[0][i] * gi, chans[1][i] * gi };
+                if (ms) in = { 0.5f * (in[0] + in[1]), 0.5f * (in[0] - in[1]) };
+                std::array<float, 2> out {};
 
                 for (int c = 0; c < 2; ++c)
                 {
                     auto& ch = channels[(size_t) c];
-                    const float input = chans[c][i];
+                    const float input = in[(size_t) c];
 
                     // Split into bands
                     float rest = input;
@@ -452,21 +475,37 @@ namespace sat
 
                         if (! bs.bypass)
                         {
-                            // Dynamics: louder passages get more (positive) or less (negative) drive
                             const float a = std::abs (dry);
                             st.env += (a > st.env ? envAttack : envRelease) * (a - st.env);
+
+                            // Dynamics (Saturn behaviour): right = compression (loud parts down, pumping),
+                            // left = gating / expansion (quiet parts down).
                             if (st.dynCounter-- <= 0)
                             {
                                 st.dynCounter = 7;
                                 st.dynGain = std::abs (bs.dynamics) < 0.001f ? 1.0f
-                                           : std::pow (juce::jlimit (0.03f, 4.0f, st.env / 0.3f), bs.dynamics);
+                                           : juce::jlimit (0.03f, 4.0f, std::pow (juce::jmax (1.0e-4f, st.env / 0.25f), -0.85f * bs.dynamics));
                             }
-                            const float fb = st.feedbackFilter.process (st.lastOut) * bs.feedback * 0.95f;
-                            float w = processStyle (bs.style, dry * dr[(size_t) b] * st.dynGain + fb, st.style, constants);
+
+                            // Drive with pan: shifts the drive between the channels (L/R, or M/S in mid/side mode)
+                            const float panDb = 6.0f * bs.drivePan;
+                            const float chDrive = dr[(size_t) b] * juce::Decibels::decibelsToGain (c == 0 ? -panDb : panDb);
+
+                            // Feedback is reduced automatically when the band goes quiet, so it cannot ring forever
+                            const float fbAmount = bs.feedback * 0.95f * juce::jmin (1.0f, st.env * 50.0f);
+                            const float fb = st.feedbackFilter.process (st.lastOut) * fbAmount;
+                            float w = processStyle (bs.style, dry * chDrive + fb, st.style, constants);
                             st.lastOut = w;
-                            if (std::abs (bs.tone) > 0.001f)
-                                w = st.toneHigh.process (st.toneLow.process (w));
-                            y = (dry + mx[(size_t) b] * (w - dry)) * lv[(size_t) b];
+                            w *= 1.0f / std::sqrt (chDrive);   // automatic level compensation for drive
+                            w *= st.dynGain;
+                            if (std::abs (bs.bassDb) > 0.01f)     w = st.tone[0].process (w);
+                            if (std::abs (bs.midDb) > 0.01f)      w = st.tone[1].process (w);
+                            if (std::abs (bs.trebleDb) > 0.01f)   w = st.tone[2].process (w);
+                            if (std::abs (bs.presenceDb) > 0.01f) w = st.tone[3].process (w);
+
+                            const float lvPan = c == 0 ? (bs.levelPan > 0.0f ? 1.0f - bs.levelPan : 1.0f)
+                                                       : (bs.levelPan < 0.0f ? 1.0f + bs.levelPan : 1.0f);
+                            y = (dry + mx[(size_t) b] * (w - dry)) * lv[(size_t) b] * lvPan;
                         }
 
                         const bool audible = ! bs.mute && (! anySolo || bs.solo);
@@ -476,8 +515,12 @@ namespace sat
                             peaks[(size_t) b] = std::max (peaks[(size_t) b], std::abs (y));
                         }
                     }
-                    chans[c][i] = (input + gm * (sum - input)) * go;
+                    out[(size_t) c] = input + gm * (sum - input);
                 }
+
+                if (ms) out = { out[0] + out[1], out[0] - out[1] };
+                chans[0][i] = out[0] * go;
+                chans[1][i] = out[1] * go;
             }
 
             for (int b = 0; b < nb; ++b)
@@ -486,13 +529,13 @@ namespace sat
         }
 
         double baseRate = 48000.0, rate = 48000.0;
-        std::array<std::unique_ptr<juce::dsp::Oversampling<float>>, 2> oversamplers;
+        std::array<std::unique_ptr<juce::dsp::Oversampling<float>>, 3> oversamplers;
         int activeOs = -2;
         Settings settings, last;
         std::array<float, maxBands - 1> lastXf {};
         StyleConstants constants;
         std::array<Channel, 2> channels {};
-        juce::SmoothedValue<float> globalMix, globalOut;
+        juce::SmoothedValue<float> globalMix, globalOut, globalIn;
         std::array<juce::SmoothedValue<float>, maxBands> drive, mixes, levels;
         bool anySolo = false;
         float dcR = 0.999f;

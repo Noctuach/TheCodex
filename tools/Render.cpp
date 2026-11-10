@@ -331,7 +331,70 @@ int main (int argc, char** argv)
                 std::cout << " " << juce::String (d, 2);
                 if (std::abs (d) > 0.3) { ++failures; std::cout << "(!)"; }
             }
+        // Mid/Side channel mode must also reconstruct perfectly
+        {
+            sat::MultibandSaturator satProc;
+            sat::Settings st;
+            st.enabled = true; st.numBands = 4; st.channelMode = 1; st.oversampling = 0;
+            for (auto& b : st.bands) b.bypass = true;
+            satProc.setSettings (st);
+            satProc.prepare (sr, 512);
+            double diff = 0, in = 0;
+            for (int blk = 0; blk < 50; ++blk)
+            {
+                float l[512], r[512], l0[512], r0[512];
+                for (int i = 0; i < 512; ++i) { l0[i] = l[i] = rng.nextFloat() - 0.5f; r0[i] = r[i] = rng.nextFloat() - 0.5f; }
+                satProc.process (l, r, 512);
+                if (blk > 10)
+                    for (int i = 0; i < 512; ++i) { in += (double) l0[i] * l0[i]; diff += 0.0; }
+                // level check only (crossovers are all-pass): compare energies
+                if (blk > 10) for (int i = 0; i < 512; ++i) diff += (double) l[i] * l[i] + (double) r[i] * r[i] - (double) l0[i] * l0[i] - (double) r0[i] * r0[i];
+            }
+            const double err = std::abs (diff) / std::max (1.0e-9, 2.0 * in);
+            std::cout << " | M/S mode energy error " << juce::String (err * 100.0, 2) << " %";
+            if (err > 0.05) { ++failures; std::cout << "(!)"; }
+        }
         std::cout << "\n";
+
+        // Feedback must die away once the input stops; dynamics must compress (right) and gate (left)
+        {
+            auto run = [] (sat::BandSettings band, std::vector<float> input)
+            {
+                sat::MultibandSaturator satProc;
+                sat::Settings st;
+                st.enabled = true; st.numBands = 1; st.oversampling = 0;
+                st.bands[0] = band;
+                satProc.setSettings (st);
+                satProc.prepare (sr, 512);
+                std::vector<float> l (input), r (input);
+                for (size_t pos = 0; pos < l.size(); pos += 512)
+                    satProc.process (l.data() + pos, r.data() + pos, (int) std::min<size_t> (512, l.size() - pos));
+                return l;
+            };
+            auto rms = [] (const std::vector<float>& v, size_t a, size_t b) { double s2 = 0; for (size_t i = a; i < b; ++i) s2 += (double) v[i] * v[i]; return std::sqrt (s2 / (double) (b - a)); };
+
+            std::vector<float> burst ((size_t) sr * 2, 0.0f);
+            for (size_t i = 0; i < (size_t) (0.3 * sr); ++i) burst[i] = 0.5f * std::sin (6.2831853f * 55.0f * (float) i / (float) sr);
+            sat::BandSettings fbBand; fbBand.style = 12; fbBand.driveDb = 12.0f; fbBand.feedback = 1.0f; fbBand.feedbackHz = 300.0f;
+            const auto fbOut = run (fbBand, burst);
+            const double tail = rms (fbOut, (size_t) (1.5 * sr), (size_t) (2.0 * sr));
+
+            // loud then quiet sine: compare quiet/loud ratio with and without dynamics
+            std::vector<float> steps ((size_t) sr, 0.0f);
+            for (size_t i = 0; i < steps.size(); ++i)
+                steps[i] = (i < steps.size() / 2 ? 0.8f : 0.05f) * std::sin (6.2831853f * 200.0f * (float) i / (float) sr);
+            auto ratio = [&] (float dyn)
+            {
+                sat::BandSettings b; b.style = 0; b.driveDb = 0.0f; b.dynamics = dyn;
+                const auto o = run (b, steps);
+                return 20.0 * std::log10 (rms (o, (size_t) (0.75 * sr), (size_t) sr) / rms (o, (size_t) (0.25 * sr), (size_t) (0.5 * sr)));
+            };
+            const double neutral = ratio (0.0f), compress = ratio (1.0f), gate = ratio (-1.0f);
+            std::cout << "Saturation feedback tail after input stops: " << juce::String (juce::Decibels::gainToDecibels ((float) tail, -200.0f), 1)
+                      << " dBFS; quiet-vs-loud level: neutral " << juce::String (neutral, 1) << " dB, dynamics right " << juce::String (compress, 1)
+                      << " dB (compresses), left " << juce::String (gate, 1) << " dB (gates)\n";
+            if (tail > 1.0e-3 || compress < neutral + 6.0 || gate > neutral - 6.0) ++failures;
+        }
 
         proc.presets.loadPreset (8);
         setParam (proc, ID::sat ("On"), 1.0f);
@@ -348,7 +411,7 @@ int main (int argc, char** argv)
             const float pk = juce::Decibels::gainToDecibels (a.getMagnitude (0, 0, a.getNumSamples()));
             if (pk > worst) { worst = pk; worstStyle = sat::styles()[(size_t) style].name; }
         }
-        std::cout << "Saturation, all 19 styles at max drive / feedback / dynamics: " << (allFinite ? "finite" : "NaN!")
+        std::cout << "Saturation, all styles at max drive / feedback / dynamics: " << (allFinite ? "finite" : "NaN!")
                   << ", loudest peak " << juce::String (worst, 1) << " dBFS (" << worstStyle << ")\n";
         if (! allFinite || worst > 18.0f) ++failures;
         setParam (proc, ID::sat ("On"), 0.0f);

@@ -34,12 +34,14 @@ CodexProcessor::CodexProcessor()
 
     satOn = p (ID::sat ("On")); satBands = p (ID::sat ("Bands")); satSlope = p (ID::sat ("Slope"));
     satOs = p (ID::sat ("OS")); satMix = p (ID::sat ("Mix")); satOut = p (ID::sat ("Out"));
+    satIn = p (ID::sat ("In")); satMode = p (ID::sat ("Mode"));
     for (int j = 0; j < sat::maxBands - 1; ++j)
         satX[(size_t) j] = p (ID::sat (("X" + juce::String (j + 1)).toRawUTF8()));
     for (int b = 0; b < sat::maxBands; ++b)
     {
         auto c = [&] (const char* sfx) { return p (ID::satBand (b, sfx)); };
-        satBandParams[b] = { c ("Style"), c ("Drive"), c ("Mix"), c ("Fb"), c ("FbFreq"), c ("Dyn"), c ("Tone"),
+        satBandParams[b] = { c ("Style"), c ("Drive"), c ("Mix"), c ("Fb"), c ("FbFreq"), c ("Dyn"),
+                             c ("Bass"), c ("MidT"), c ("Treble"), c ("Pres"), c ("DrivePan"), c ("LevelPan"),
                              c ("Level"), c ("Mute"), c ("Solo"), c ("Bypass") };
     }
 
@@ -154,6 +156,8 @@ void CodexProcessor::updateParameters()
     ss.oversampling = (int) satOs->load();
     ss.mix          = satMix->load();
     ss.outDb        = satOut->load();
+    ss.inDb         = satIn->load();
+    ss.channelMode  = (int) satMode->load();
     for (int j = 0; j < sat::maxBands - 1; ++j)
         ss.crossovers[(size_t) j] = satX[(size_t) j]->load();
     for (int b = 0; b < sat::maxBands; ++b)
@@ -166,7 +170,12 @@ void CodexProcessor::updateParameters()
         bs.feedback = sp.fb->load();
         bs.feedbackHz = sp.fbFreq->load();
         bs.dynamics = sp.dyn->load();
-        bs.tone = sp.tone->load();
+        bs.bassDb = sp.bass->load();
+        bs.midDb = sp.midT->load();
+        bs.trebleDb = sp.treble->load();
+        bs.presenceDb = sp.pres->load();
+        bs.drivePan = sp.drivePan->load();
+        bs.levelPan = sp.levelPan->load();
         bs.levelDb = sp.level->load();
         bs.mute = sp.mute->load() > 0.5f;
         bs.solo = sp.solo->load() > 0.5f;

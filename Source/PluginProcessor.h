@@ -120,7 +120,7 @@ private:
 
     struct BandParams { std::atomic<float>* on, * type, * freq, * gain, * q, * slope, * place; };
     struct ClipParams { std::atomic<float> *on, *mode, *drive, *boost, *chr, *bias, *loFilt, *hiFilt, *shelfF, *shelfG, *mix, *out, *dc, *os, *spatial; };
-    struct SatBandParams { std::atomic<float> *style, *drive, *mix, *fb, *fbFreq, *dyn, *tone, *level, *mute, *solo, *bypass; };
+    struct SatBandParams { std::atomic<float> *style, *drive, *mix, *fb, *fbFreq, *dyn, *bass, *midT, *treble, *pres, *drivePan, *levelPan, *level, *mute, *solo, *bypass; };
 
     std::atomic<float>* p (const juce::String& id) { return apvts.getRawParameterValue (id); }
 
@@ -131,7 +131,7 @@ private:
     std::atomic<float> *outGainParam, *eqScaleParam;
     ClipParams clipParams[2];
     BandParams bandParams[Params::numBands];
-    std::atomic<float> *satOn, *satBands, *satSlope, *satOs, *satMix, *satOut;
+    std::atomic<float> *satOn, *satBands, *satSlope, *satOs, *satMix, *satOut, *satIn, *satMode;
     std::array<std::atomic<float>*, sat::maxBands - 1> satX {};
     SatBandParams satBandParams[sat::maxBands];
 
