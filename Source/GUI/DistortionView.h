@@ -125,7 +125,7 @@ public:
         mix.attach (s, ID::clip (stage, "Mix"));
         output.attach (s, ID::clip (stage, "Out"));
 
-        drive.label.setFont (Fonts::label (13.5f, 0.15f));
+        drive.label.getProperties().set ("captionLarge", true);
         drive.label.setColour (juce::Label::textColourId, Colours_::accent);
 
         for (juce::Component* c : std::initializer_list<juce::Component*> {
@@ -133,12 +133,36 @@ public:
                  &loFilter, &hiFilter, &shelfFreq, &shelfGain, &mix, &output, &inMeter, &outMeter })
             addAndMakeVisible (c);
 
+        // Shown while the unit is bypassed, so a switched-off stage is impossible to miss
+        bypassNotice.enable.onClick = [this, &s]
+        {
+            if (auto* prm = s.getParameter (ID::clip (stage, "On")))
+            {
+                prm->beginChangeGesture();
+                prm->setValueNotifyingHost (1.0f);
+                prm->endChangeGesture();
+            }
+        };
+        bypassNotice.title = "DISTORTION " + juce::String (stage) + " IS BYPASSED";
+        addChildComponent (bypassNotice);
+        onParam = s.getRawParameterValue (ID::clip (stage, "On"));
+
         startTimerHz (30);
     }
 
     void paint (juce::Graphics& g) override
     {
-        drawSectionPanel (g, getLocalBounds(), title, Colours_::accent);
+        drawSectionPanel (g, getLocalBounds(), title, bypassed ? Colours_::textFaint : Colours_::accent);
+        if (bypassed)
+        {
+            auto tag = getLocalBounds().withHeight (28).withTrimmedRight (40).removeFromRight (86).reduced (0, 6).toFloat();
+            g.setColour (Colours_::warn.withAlpha (0.18f));
+            g.fillRoundedRectangle (tag, tag.getHeight() * 0.5f);
+            g.setColour (Colours_::warn);
+            g.drawRoundedRectangle (tag, tag.getHeight() * 0.5f, 1.0f);
+            g.setFont (Fonts::label (11.0f, 0.15f));
+            g.drawText ("BYPASSED", tag, juce::Justification::centred);
+        }
         drawGroupCaption (g, shapeCaption, "SHAPE");
         drawGroupCaption (g, filterCaption, "WET FILTERS  /  TONE");
         drawGroupCaption (g, outputCaption, "OUTPUT");
@@ -177,23 +201,27 @@ public:
             k->setBounds (bottomRow.removeFromLeft (w6));
         output.setBounds (bottomRow);
 
-        // Middle: meters around the transfer display | drive + shape knobs
+        // Middle: meters around the transfer display | drive (moderate size) + 2x2 shape knobs
         auto middle = c;
-        const int displaySize = juce::jmin (middle.getHeight() - 16, middle.getWidth() / 2);
+        const int displaySize = juce::jmin (middle.getHeight() - 16, middle.getWidth() / 2 + 40);
         auto left = middle.removeFromLeft (displaySize + 44);
         inMeter.setBounds (left.removeFromLeft (12).withTrimmedBottom (16));
         outMeter.setBounds (left.removeFromRight (12).withTrimmedBottom (16));
         transfer.setBounds (left.reduced (8, 0).withTrimmedBottom (16));
         middle.removeFromLeft (16);
-        auto shapeRow = middle.removeFromBottom (96);
-        shapeCaption = middle.removeFromBottom (16);
-        middle.removeFromBottom (6);
-        drive.setBounds (middle.withSizeKeepingCentre (juce::jmin (middle.getWidth(), middle.getHeight() + 20), middle.getHeight()));
-        const int w4 = shapeRow.getWidth() / 4;
-        boost.setBounds (shapeRow.removeFromLeft (w4));
-        character.setBounds (shapeRow.removeFromLeft (w4));
-        offset.setBounds (shapeRow.removeFromLeft (w4));
-        spatial.setBounds (shapeRow);
+        const int driveH = juce::jmin (150, middle.getHeight() / 2);
+        drive.setBounds (middle.removeFromTop (driveH).withSizeKeepingCentre (juce::jmin (middle.getWidth(), 130), driveH));
+        middle.removeFromTop (6);
+        shapeCaption = middle.removeFromTop (16);
+        auto grid = middle;
+        const int rowH = juce::jmin (96, grid.getHeight() / 2);
+        auto row1 = grid.removeFromTop (rowH), row2 = grid.removeFromTop (rowH);
+        boost.setBounds (row1.removeFromLeft (row1.getWidth() / 2));
+        character.setBounds (row1);
+        offset.setBounds (row2.removeFromLeft (row2.getWidth() / 2));
+        spatial.setBounds (row2);
+
+        bypassNotice.setBounds (getLocalBounds().withTrimmedTop (29).reduced (1));
     }
 
 private:
@@ -204,7 +232,42 @@ private:
         inMeter.setLevel (in);
         outMeter.setLevel (clip.getAndResetOutputPeak());
         transfer.setInputLevel (in);
+
+        const bool off = onParam->load() < 0.5f;
+        if (off != bypassed)
+        {
+            bypassed = off;
+            bypassNotice.setVisible (off);
+            repaint();
+        }
     }
+
+    /** Overlay shown while the unit is bypassed. */
+    struct BypassNotice : public juce::Component
+    {
+        BypassNotice() { enable.setComponentID ("pill"); addAndMakeVisible (enable); }
+        juce::String title;
+        juce::TextButton enable { "ENABLE" };
+        juce::Rectangle<float> card() const { return getLocalBounds().toFloat().withSizeKeepingCentre (jmin (420.0f, (float) getWidth() - 40.0f), 112.0f); }
+        void paint (juce::Graphics& g) override
+        {
+            g.setColour (Colours_::panel.withAlpha (0.72f));
+            g.fillRoundedRectangle (getLocalBounds().toFloat(), 7.0f);
+            auto c = card();
+            g.setColour (Colours_::display.withAlpha (0.95f));
+            g.fillRoundedRectangle (c, 8.0f);
+            g.setColour (Colours_::outlineHi);
+            g.drawRoundedRectangle (c, 8.0f, 1.0f);
+            g.setColour (Colours_::text);
+            g.setFont (Fonts::label (14.0f, 0.18f));
+            g.drawText (title, c.removeFromTop (38.0f), juce::Justification::centredBottom);
+            g.setColour (Colours_::textDim);
+            g.setFont (Fonts::regular (13.0f));
+            g.drawText ("The signal passes through unchanged.", c.removeFromTop (22.0f), juce::Justification::centred);
+        }
+        void resized() override { enable.setBounds (card().toNearestInt().removeFromBottom (44).withSizeKeepingCentre (120, 28)); }
+        static float jmin (float a, float b) { return a < b ? a : b; }
+    };
 
     CodexProcessor& proc;
     int stage;
@@ -220,4 +283,7 @@ private:
     LevelMeter inMeter, outMeter;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> onAttachment, dcAttachment;
     juce::Rectangle<int> shapeCaption, filterCaption, outputCaption;
+    BypassNotice bypassNotice;
+    std::atomic<float>* onParam = nullptr;
+    bool bypassed = false;
 };

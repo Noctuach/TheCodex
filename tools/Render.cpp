@@ -127,6 +127,22 @@ int main (int argc, char** argv)
         writeWav (audio, outDir.getChildFile (juce::File::createLegalFileName (proc.presets.getFactoryNames()[i]) + ".wav"));
     }
 
+    // ---- Preset switching restores everything (e.g. distortion re-enabled after "909 Clean") ----
+    {
+        int bad = 0;
+        for (int i = 0; i < proc.presets.getNumFactory(); ++i)
+        {
+            proc.presets.loadPreset (7);   // 909 Clean: both distortions off
+            proc.presets.loadPreset (i);
+            const bool d1 = proc.apvts.getRawParameterValue (ID::clip (1, "On"))->load() > 0.5f;
+            const bool d2 = proc.apvts.getRawParameterValue (ID::clip (2, "On"))->load() > 0.5f;
+            const bool expectOff = proc.presets.getFactoryNames()[i] == "909 Clean";
+            if ((d1 && d2) == expectOff) { ++bad; std::cout << "   distortion state wrong after loading " << proc.presets.getFactoryNames()[i] << "\n"; }
+        }
+        std::cout << "\nPreset switching after '909 Clean' re-enables distortion: " << (bad == 0 ? "OK" : "FAILED") << "\n";
+        failures += bad;
+    }
+
     // ---- Every key, both engines ----
     std::cout << "\nKey   target Hz   synth Hz   909 Hz\n";
     for (int k = 0; k < 12; ++k)
@@ -432,6 +448,8 @@ int main (int argc, char** argv)
     snapshot (proc, render (proc, 1), outDir.getChildFile ("ui_909.png"));
     proc.presets.loadPreset (10); // 909 Rawstyle
     snapshot (proc, render (proc, 1), outDir.getChildFile ("ui_distortion.png"), 1);
+    proc.presets.loadPreset (7);  // 909 Clean: both distortions bypassed
+    snapshot (proc, render (proc, 1), outDir.getChildFile ("ui_distortion_bypassed.png"), 1);
     {
         // Stereo features: spatial distortion, a Side low cut and multiband saturation
         setParam (proc, ID::clip (2, "Spatial"), 0.6f);

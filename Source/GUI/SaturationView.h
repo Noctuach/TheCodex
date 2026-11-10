@@ -604,7 +604,8 @@ public:
             left.removeFromTop (6);
             auto panRow = left.removeFromBottom (76);
             drivePan.setBounds (panRow.withSizeKeepingCentre (90, panRow.getHeight()));
-            drive.setBounds (left);
+            const int driveH = juce::jmin (150, left.getHeight());
+            drive.setBounds (left.withSizeKeepingCentre (juce::jmin (left.getWidth(), 130), driveH));
             c.removeFromLeft (16);
 
             auto toneArea = c.removeFromRight (240);
