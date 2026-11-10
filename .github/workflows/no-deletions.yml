@@ -1,0 +1,26 @@
+name: No file deletions
+
+# Repository rule: files may be added or changed, but never deleted.
+# The "main" ruleset requires this check to pass before a pull request can be merged.
+
+on:
+  pull_request:
+
+jobs:
+  no-deletions:
+    name: No file deletions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fail if the pull request deletes any file
+        run: |
+          deleted=$(git diff --diff-filter=D --name-only "origin/${{ github.base_ref }}...HEAD")
+          if [ -n "$deleted" ]; then
+            echo "::error::This repository does not allow deleting files. Deleted:"
+            echo "$deleted"
+            exit 1
+          fi
+          echo "No files deleted."
