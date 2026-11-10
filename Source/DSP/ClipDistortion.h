@@ -82,6 +82,8 @@ public:
     void prepare (double sr, int maxBlockSize)
     {
         baseRate = sr;
+        fixedTable (0);                                   // build the shared ADAA tables here, never on the audio thread
+        curveTable.build ([] (float x) { return juce::jlimit (-1.0f, 1.0f, x); }, false);   // allocate the X-Shaper table up front
         for (int i = 0; i < 4; ++i)
         {
             oversamplers[(size_t) i] = std::make_unique<juce::dsp::Oversampling<float>> (
@@ -187,12 +189,15 @@ public:
         bool periodic = false;
         double period = 4.0, h = 0.0;
 
-        void build (const std::function<float (float)>& fn, bool isPeriodic)
+        /** Allocates once; rebuilding later (e.g. while an X-Shaper point is dragged) does not allocate. */
+        template <typename Fn>
+        void build (Fn&& fn, bool isPeriodic)
         {
             periodic = isPeriodic;
             const double lo = periodic ? -0.5 * period : -range, hi = periodic ? 0.5 * period : range;
             h = (hi - lo) / (size - 1);
-            F.assign (size, 0.0); f.assign (size, 0.0);
+            if ((int) F.size() != size) { F.resize (size); f.resize (size); }
+            std::fill (F.begin(), F.end(), 0.0);
             for (int i = 0; i < size; ++i) f[(size_t) i] = fn ((float) (lo + h * i));
             // trapezoid integration from the centre so F(0) = 0
             const int mid = (size - 1) / 2;
