@@ -14,6 +14,10 @@ OSC / 909 -> DISTORTION 1 -> EQ 1 -> DISTORTION 2 -> SATURATION -> COMPRESSOR ->
 |---|---|---|
 | ![Distortion page](docs/screenshot-distortion.png) | ![Saturation page](docs/screenshot-saturation.png) | ![Compressor page](docs/screenshot-compressor.png) |
 
+| Draw envelopes | Preset browser |
+|---|---|
+| ![Draw envelopes](docs/screenshot-draw-envelopes.png) | ![Preset browser](docs/screenshot-browser.png) |
+
 | EQ 2 | Space | Scope |
 |---|---|---|
 | ![EQ 2 page](docs/screenshot-eq2.png) | ![Space page](docs/screenshot-space.png) | ![Scope page](docs/screenshot-scope.png) |
