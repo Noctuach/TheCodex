@@ -64,6 +64,7 @@ distortion, so you can see your kick is in key. It turns green within 10 cents o
 | Control | What it does |
 |---|---|
 | Macros | **Punch** (sweep depth and speed, click), **Dirt** (±12 dB drive on both distortion units), **Tail** (body and tail length), **Width** (stereo distortion and reverb width). Centre = the preset as it is; the preset itself is never changed. |
+| DRAG KICK | Drag onto a DAW track to drop the kick as audio (24-bit WAV, selected key, tail trimmed). Click to save it as a file instead. |
 | CLIP | Output clipper after the output level: **Ceiling** (maximum level) and **Knee** (0 % = hard, higher = rounder). The red bar under CLIP shows how hard it works. |
 | A / B | Two versions of your sound: edits go to the selected slot, **COPY** copies it to the other slot. The key stays the same. |
 | CPU | Share of the audio time Codex uses. |

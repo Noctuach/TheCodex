@@ -4,6 +4,9 @@ All notable changes to Codex. Versions follow [Semantic Versioning](https://semv
 
 ## [Unreleased]
 ### Added
+- **Drag kick to DAW** (footer): drag the button onto a track to drop the current kick as a 24-bit WAV in the selected
+  key (named e.g. "Codex - Screech Rawstyle - G#1.wav"), or click it to save the file. Rendered offline with a copy of
+  the plugin; the tail is trimmed automatically.
 - **Output clipper** (footer): 4x oversampled, adjustable knee, hard ceiling (a +12 dB hot kick comes out at exactly
   the ceiling; inter-sample peaks stay within 0.5 dB of it). Off by default.
 - **Preset browser**: search, style categories (Hardstyle, Rawstyle, Euphoric, Early Hardstyle, Hardcore, Tok, FX),

@@ -8,6 +8,7 @@
 #include "Eq2View.h"
 #include "DrawEnvelopeEditor.h"
 #include "PresetBrowser.h"
+#include "ExportButton.h"
 #include "Tuner.h"
 #include "PresetBar.h"
 #include "DistortionView.h"
@@ -77,6 +78,7 @@ private:
     std::array<HeaderKnob, ID::numMacros> macroKnobs { HeaderKnob ("Punch"), HeaderKnob ("Dirt"), HeaderKnob ("Tail"), HeaderKnob ("Width") };
     juce::TextButton abA { "A" }, abB { "B" }, abCopy { "COPY" };
     juce::TextButton clipButton { "CLIP" };
+    ExportButton exportButton { proc };
     HeaderKnob clipCeiling { "Ceiling" }, clipSoftness { "Knee" };
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> clipAttachment;
     float clipShown = 0.0f;

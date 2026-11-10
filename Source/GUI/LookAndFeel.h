@@ -124,6 +124,15 @@ namespace Icons
         for (float y : { 0.25f, 0.5f, 0.75f }) { p.startNewSubPath (0.18f, y); p.lineTo (0.82f, y); }
         return p;
     }
+    /** Export: arrow down onto a tray. */
+    inline juce::Path exportArrow()
+    {
+        juce::Path p;
+        p.startNewSubPath (0.5f, 0.12f); p.lineTo (0.5f, 0.62f);
+        p.startNewSubPath (0.3f, 0.44f); p.lineTo (0.5f, 0.64f); p.lineTo (0.7f, 0.44f);
+        p.startNewSubPath (0.16f, 0.62f); p.lineTo (0.16f, 0.86f); p.lineTo (0.84f, 0.86f); p.lineTo (0.84f, 0.62f);
+        return p;
+    }
     /** Preset browser: a 2x2 grid of tiles. */
     inline juce::Path browse()
     {

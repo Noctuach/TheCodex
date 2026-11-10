@@ -111,7 +111,7 @@ MainView::MainView (CodexProcessor& p, PropertiesFile* settingsFile)
     clipSoftness.attach (s, ID::clipSoft);
     clipCeiling.slider.setTooltip (Help::forParameter (ID::clipCeiling));
     clipSoftness.slider.setTooltip (Help::forParameter (ID::clipSoft));
-    for (Component* c : std::initializer_list<Component*> { &clipButton, &clipCeiling, &clipSoftness }) addAndMakeVisible (c);
+    for (Component* c : std::initializer_list<Component*> { &clipButton, &clipCeiling, &clipSoftness, &exportButton }) addAndMakeVisible (c);
     abCopy.setComponentID ("pill");
     abCopy.setTooltip ("Copy the current slot to the other one");
     abCopy.onClick = [this] { abSlots[(size_t) (1 - abCurrent)] = proc.apvts.copyState(); };
@@ -489,6 +489,8 @@ void MainView::resized()
         clipCeiling.setBounds (f.removeFromLeft (108).withHeight (36));
         clipSoftness.setBounds (f.removeFromLeft (96).withHeight (36));
         auto right = f.removeFromRight (290);
+        f.removeFromRight (10);
+        exportButton.setBounds (f.removeFromRight (118).withSizeKeepingCentre (118, 26));
         right.removeFromRight (96);   // CPU readout
         abCopy.setBounds (right.removeFromRight (64).withSizeKeepingCentre (64, 24));
         right.removeFromRight (8);

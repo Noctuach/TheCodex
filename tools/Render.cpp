@@ -8,6 +8,7 @@
 #include "../Source/GUI/PluginEditor.h"
 #include "../Source/DSP/EqEngine.h"
 #include "../Source/DSP/DrawEnvelope.h"
+#include "../Source/KickExporter.h"
 
 static void setParam (CodexProcessor& p, const juce::String& id, float value)
 {
@@ -555,6 +556,37 @@ int main (int argc, char** argv)
         failures += bad;
         proc.presets.loadPreset (10);
         if (proc.apvts.getRawParameterValue (ID::clipOn)->load() > 0.5f) { ++failures; std::cout << "   preset did not reset the clipper\n"; }
+    }
+
+    // ---- Kick export (drag to DAW): WAV in the selected key, tail trimmed, the live instance untouched ----
+    {
+        int bad = 0;
+        proc.presets.loadPreset (8);
+        setParam (proc, ID::key, 3.0f);   // G#
+        const auto before = proc.apvts.copyState().toXmlString();
+        const auto file = KickExporter::render (proc, outDir.getChildFile ("export_test.wav"), 0.4, sr);
+        juce::AudioFormatManager fm; fm.registerBasicFormats();
+        std::unique_ptr<juce::AudioFormatReader> reader (fm.createReaderFor (file));
+        if (reader == nullptr) { ++bad; std::cout << "\nExport: no file written\n"; }
+        else
+        {
+            juce::AudioBuffer<float> b (2, (int) reader->lengthInSamples);
+            reader->read (&b, 0, b.getNumSamples(), 0, true, true);
+            const float target = juce::MidiMessage::getMidiNoteInHertz (Params::keyBaseNote + 3);
+            const float pitch = measurePitch (b, 0.2, 0.15);
+            const float secs = (float) b.getNumSamples() / (float) reader->sampleRate;
+            const float pk = juce::Decibels::gainToDecibels (b.getMagnitude (0, b.getNumSamples()));
+            std::cout << "\nExport: " << file.getFileName() << ", " << reader->bitsPerSample << "-bit, " << juce::String (secs, 2) << " s, peak "
+                      << juce::String (pk, 1) << " dBFS, pitch " << juce::String (pitch, 2) << " Hz (G#1 = " << juce::String (target, 2) << ")\n";
+            if (reader->bitsPerSample != 24 || secs < 0.4f || secs > 2.0f || pk < -9.0f || pk > 0.0f
+                || std::abs (1200.0f * std::log2 (pitch / target)) > 25.0f) ++bad;
+            std::cout << "  default drag file name: " << KickExporter::defaultFile (proc).getFileName() << "\n";
+        }
+        if (proc.apvts.copyState().toXmlString() != before) { ++bad; std::cout << "   export changed the live instance\n"; }
+        std::cout << "Export checks: " << (bad == 0 ? "OK" : "FAILED") << "\n";
+        failures += bad;
+        setParam (proc, ID::key, 0.0f);
+        proc.prepareToPlay (sr, block);
     }
 
     // ---- Every key, both engines ----
