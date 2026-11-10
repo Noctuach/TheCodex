@@ -30,7 +30,7 @@ CodexProcessor::CodexProcessor()
         auto c = [&] (const char* sfx) { return p (ID::clip (s + 1, sfx)); };
         clipParams[s] = { c ("On"), c ("Mode"), c ("Drive"), c ("Boost"), c ("Char"), c ("Bias"), c ("LoFilt"), c ("HiFilt"),
                           c ("ShelfF"), c ("ShelfG"), c ("Mix"), c ("Out"), c ("DC"), c ("OS"), c ("Spatial"),
-                          c ("FltPos"), c ("FltType"), c ("FltFreq"), c ("FltRes") };
+                          c ("FltPos"), c ("FltType"), c ("FltFreq"), c ("FltRes"), c ("TailDrv"), c ("Split") };
         for (int k = 0; k < ClipDistortion::numCurvePoints; ++k)
         {
             clipParams[s].xp[(size_t) k] = c (("XP" + juce::String (k + 1)).toRawUTF8());
@@ -105,7 +105,7 @@ void CodexProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     subDelayPos = 0;
     subLp1.reset(); subLp2.reset();
     subGain.reset (sampleRate, 0.02);
-    for (auto* v : { &left, &right, &mid, &sub })
+    for (auto* v : { &left, &right, &mid, &sub, &hitTime, &hitTime2 })
         v->assign ((size_t) chunkSize, 0.0f);
     scopePos = -1;
 
@@ -224,6 +224,8 @@ void CodexProcessor::updateParameters()
         cs.filterType   = (int) c.fltType->load();
         cs.filterHz     = c.fltFreq->load();
         cs.filterRes    = c.fltRes->load();
+        cs.tailDriveDb  = c.tailDrv->load();
+        cs.splitMs      = c.split->load();
         for (int k = 0; k < ClipDistortion::numCurvePoints; ++k)
         {
             cs.curve.pos[(size_t) k] = c.xp[(size_t) k]->load();
@@ -414,17 +416,23 @@ void CodexProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiB
                 else          { next = std::min (t, n); break; }
             }
             voice.subOut = sub.data() + pos;
+            voice.hitTimeOut = hitTime.data() + pos;
             voice.render (l + pos, next - pos);
             pos = next;
         }
         std::copy (l, l + n, r);
 
         // Old-school chain: distort -> EQ -> distort again -> multiband saturation -> compressor -> EQ 2 -> space (stereo from here on)
-        clip1.process (l, r, n);
+        clip1.process (l, r, n, hitTime.data());
         for (int i = 0; i < n; ++i) m[i] = 0.5f * (l[i] + r[i]);
         analyzerPre.push (m, n);           // spectrum before the EQ (for the EQ display)
         equalisers[0].process (l, r, n);
-        clip2.process (l, r, n);
+        {
+            // Distortion 2 hears the hit later (Distortion 1 oversampling and EQ 1 latency): shift its clock
+            const float lagMs = (float) ((clip1.getLatencyInSamples() + equalisers[0].getLatencyInSamples()) * 1000.0 / getSampleRate());
+            for (int i = 0; i < n; ++i) hitTime2[(size_t) i] = hitTime[(size_t) i] >= lagMs ? hitTime[(size_t) i] - lagMs : 1.0e6f;
+        }
+        clip2.process (l, r, n, hitTime2.data());
         saturator.process (l, r, n);
         compressor.process (l, r, n);      // multiband up / down compression (off by default)
         for (int i = 0; i < n; ++i) m[i] = 0.5f * (l[i] + r[i]);

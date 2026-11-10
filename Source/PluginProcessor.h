@@ -129,7 +129,7 @@ private:
     juce::AudioProcessLoadMeasurer loadMeasurer;
     OutputClipper clipper;
     std::atomic<float> *clipOnParam = nullptr, *clipCeilParam = nullptr, *clipSoftParam = nullptr;
-    std::vector<float> left, right, mid, sub;
+    std::vector<float> left, right, mid, sub, hitTime, hitTime2;
     // Clean sub layer: delayed by the effect chain's latency so it stays phase-aligned with the kick
     std::vector<float> subDelay;
     int subDelayPos = 0;
@@ -147,7 +147,7 @@ private:
 
     struct BandParams { std::atomic<float>* on, * type, * freq, * gain, * q, * slope, * place; };
     struct ClipParams { std::atomic<float> *on, *mode, *drive, *boost, *chr, *bias, *loFilt, *hiFilt, *shelfF, *shelfG, *mix, *out, *dc, *os, *spatial,
-                               *fltPos, *fltType, *fltFreq, *fltRes;
+                               *fltPos, *fltType, *fltFreq, *fltRes, *tailDrv, *split;
                         std::array<std::atomic<float>*, ClipDistortion::numCurvePoints> xp {}, xn {}; };
     struct SatBandParams { std::atomic<float> *style, *drive, *mix, *fb, *fbFreq, *dyn, *bass, *midT, *treble, *pres, *drivePan, *levelPan, *level, *mute, *solo, *bypass; };
 

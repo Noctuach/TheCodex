@@ -145,6 +145,8 @@ namespace Help
                 { "FltType", "Filter Type: Low Pass 12/24 dB, Band Pass, High Pass 12/24 dB or Notch. Tip: a resonant Band Pass PRE the curve is a classic way to focus the distortion on the punch." },
                 { "FltFreq", "Filter Freq: cutoff / centre frequency of the distortion filter. Drag the handle on the transfer display's filter strip, or use the knob." },
                 { "FltRes",  "Filter Resonance: emphasis around the cutoff. High resonance PRE the curve gives a ringing, tonal distortion." },
+                { "TailDrv", "Tail Drive: changes the drive for the tail of the kick (after Split) relative to the punch. Positive = a dirtier, rawer tail with a cleaner punch; negative = a hard punch with a smoother tail." },
+                { "Split",   "Punch / Tail Split: time after each hit at which the tail drive is fully reached (smooth transition from the hit)." },
                 { "Spatial", "Spatial: Distorts the left and right channels slightly differently (drive and operating point), creating stereo width from the mono kick. Use the EQ's Side placement to shape it." },
             };
             if (auto it = dist.find (sfx); it != dist.end())

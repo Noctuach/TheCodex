@@ -147,6 +147,9 @@ AudioProcessorValueTreeState::ParameterLayout Params::createLayout()
         addChoice (l, ID::clip (stage, "FltType"), n + "Filter Type", ClipDistortion::filterTypeNames(), 0);
         addFloat (l, ID::clip (stage, "FltFreq"), n + "Filter Freq", skewed (20.0f, 20000.0f, 640.0f), 1000.0f, hzText);
         addFloat (l, ID::clip (stage, "FltRes"), n + "Filter Resonance", { 0.0f, 1.0f }, 0.2f, pctText);
+        // Punch / tail split
+        addFloat (l, ID::clip (stage, "TailDrv"), n + "Tail Drive", { -24.0f, 24.0f, 0.01f }, 0.0f, dbText);
+        addFloat (l, ID::clip (stage, "Split"), n + "Punch / Tail Split", skewed (5.0f, 400.0f, 60.0f), 60.0f, msText);
         // X-Shaper curve points (positive half; negative half used by X-Shaper Asym)
         for (int k = 0; k < ClipDistortion::numCurvePoints; ++k)
         {

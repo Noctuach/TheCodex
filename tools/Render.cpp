@@ -945,6 +945,37 @@ int main (int argc, char** argv)
             std::cout << "  Downsample at max drive: " << repeats << " of 1999 samples held\n";
             if (repeats < 1800) ++bad;
         }
+        // punch / tail split in the plugin: tail drive changes the tail, not the punch
+        {
+            auto harmonicDb = [] (const juce::AudioBuffer<float>& b, double t0, double t1)
+            {
+                // energy above 300 Hz relative to the total (more distortion = more upper harmonics)
+                eq::BandSettings hp; hp.on = true; hp.type = eq::BandType::LowCut; hp.freq = 300.0f; hp.slope = 3;
+                auto d = eq::design (hp, sr);
+                std::vector<eq::Biquad> st ((size_t) d.numStages);
+                for (int k = 0; k < d.numStages; ++k) st[(size_t) k].c = d.stages[(size_t) k];
+                double hi = 0, all = 0;
+                for (int i = 0; i < (int) (t1 * sr); ++i)
+                {
+                    float v = b.getSample (0, i), h = v;
+                    for (auto& f : st) h = f.process (h);
+                    if (i >= (int) (t0 * sr)) { hi += (double) h * h; all += (double) v * v; }
+                }
+                return (float) (10.0 * std::log10 (hi / juce::jmax (1.0e-12, all)));
+            };
+            proc.presets.loadPreset (8);
+            setParam (proc, ID::clip (1, "Drive"), 6.0f);
+            const auto plain = render (proc, 1);
+            setParam (proc, ID::clip (1, "TailDrv"), 18.0f);
+            setParam (proc, ID::clip (1, "Split"), 40.0f);
+            const auto split = render (proc, 1);
+            const float punchA = harmonicDb (plain, 0.0, 0.012), punchB = harmonicDb (split, 0.0, 0.012);
+            const float tailA = harmonicDb (plain, 0.15, 0.3), tailB = harmonicDb (split, 0.15, 0.3);
+            std::cout << "  Punch / tail split (+18 dB tail drive): punch harmonics " << juce::String (punchA, 1) << " -> " << juce::String (punchB, 1)
+                      << " dB, tail harmonics " << juce::String (tailA, 1) << " -> " << juce::String (tailB, 1) << " dB\n";
+            if (std::abs (punchB - punchA) > 1.5f || tailB < tailA + 3.0f) ++bad;
+            proc.presets.loadPreset (0);
+        }
         std::cout << "Distortion engine checks: " << (bad == 0 ? "OK" : "FAILED") << "\n";
         failures += bad;
     }
@@ -1218,6 +1249,7 @@ int main (int argc, char** argv)
     proc.presets.loadPreset (10);
     setParam (proc, ID::clip (1, "FltPos"), 1.0f); setParam (proc, ID::clip (1, "FltType"), 2.0f);
     setParam (proc, ID::clip (1, "FltFreq"), 180.0f); setParam (proc, ID::clip (1, "FltRes"), 0.55f);
+    setParam (proc, ID::clip (1, "TailDrv"), 10.0f); setParam (proc, ID::clip (1, "Mode"), (float) ClipDistortion::Tube);
     setParam (proc, ID::clip (2, "Mode"), (float) ClipDistortion::XShaperAsym);
     {
         const float ys[] = { 0.45f, 0.8f, 0.95f, 0.7f, 0.55f, 0.8f, 1.0f, 1.0f };

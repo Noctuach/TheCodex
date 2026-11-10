@@ -40,6 +40,8 @@ public:
 
     /** Optional second output: the clean sub layer (same length as `out`), or nullptr. */
     float* subOut = nullptr;
+    /** Optional output: milliseconds since the last note-on, per sample (for the distortion's punch / tail split). */
+    float* hitTimeOut = nullptr;
     /** Level of the current note from its velocity (set before noteOn). */
     float velocityGain = 1.0f;
 
@@ -116,6 +118,7 @@ public:
         pulseEnv = 1.0f;
         env909 = fast909 = slow909 = 1.0f;
         subTime = 0.0f;
+        hitClock = 0.0f;
     }
 
     void noteOff (int midiNote)
@@ -143,6 +146,10 @@ public:
 
     void render (float* out, int numSamples) noexcept
     {
+        if (hitTimeOut != nullptr)
+            for (int i = 0; i < numSamples; ++i) { hitTimeOut[i] = hitClock; hitClock = std::min (hitClock + msPerSample, 1.0e6f); }
+        else
+            hitClock = std::min (hitClock + msPerSample * (float) numSamples, 1.0e6f);
         if (settings.engine == Engine909) render909 (out, numSamples);
         else                              renderSynth (out, numSamples);
     }
@@ -277,7 +284,7 @@ private:
     Kick909Model model = kick909Models()[0];
     double baseFreq = 55.0, phase = 0.0;
     int currentNote = -1;
-    float subTime = 0.0f, msPerSample = 1000.0f / 44100.0f, noteGain = 1.0f;
+    float subTime = 0.0f, msPerSample = 1000.0f / 44100.0f, noteGain = 1.0f, hitClock = 1.0e6f;
 
     float clickEnv = 0.0f, clickMul = 0.99f, noiseLevel = 0.0f;
     float pulseEnv = 0.0f, pulseMul = 0.9f, pulseLevel = 0.0f;

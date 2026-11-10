@@ -77,11 +77,21 @@ public:
         int   filterPos = 0, filterType = LowPass12;   // filterPos: 0 = off, 1 = pre, 2 = post
         float filterHz = 1000.0f, filterRes = 0.2f;
         Curve curve;
+        // Punch / tail split: the drive moves by tailDriveDb from the hit to the tail over splitMs after each note-on
+        float tailDriveDb = 0.0f, splitMs = 60.0f;
     };
+
+    /** Drive change (dB) at a time after the hit: 0 at the hit, tailDriveDb after splitMs (smoothstep). */
+    static float tailDriveAt (float tailDriveDb, float splitMs, float msSinceHit) noexcept
+    {
+        const float u = juce::jlimit (0.0f, 1.0f, msSinceHit / juce::jmax (1.0f, splitMs));
+        return tailDriveDb * u * u * (3.0f - 2.0f * u);
+    }
 
     void prepare (double sr, int maxBlockSize)
     {
         baseRate = sr;
+        tailMul.assign ((size_t) juce::jmax (1, maxBlockSize), 1.0f);
         fixedTable (0);                                   // build the shared ADAA tables here, never on the audio thread
         curveTable.build ([] (float x) { return juce::jlimit (-1.0f, 1.0f, x); }, false);   // allocate the X-Shaper table up front
         for (int i = 0; i < 4; ++i)
@@ -121,8 +131,15 @@ public:
         applySettings (false);
     }
 
-    void process (float* left, float* right, int numSamples) noexcept
+    /** hitMs (optional): milliseconds since the last note-on for every sample (punch / tail split). */
+    void process (float* left, float* right, int numSamples, const float* hitMs = nullptr) noexcept
     {
+        // per-sample drive multiplier for the punch / tail split (computed at the base rate)
+        tailActive = hitMs != nullptr && std::abs (settings.tailDriveDb) > 0.01f && numSamples <= (int) tailMul.size();
+        if (tailActive)
+            for (int i = 0; i < numSamples; ++i)
+                tailMul[(size_t) i] = juce::Decibels::decibelsToGain (tailDriveAt (settings.tailDriveDb, settings.splitMs, hitMs[i]));
+
         float inPk = 0.0f;
         for (int i = 0; i < numSamples; ++i)
         {
@@ -447,7 +464,8 @@ private:
         if (filterPos != 0) updateFilterCoefficients (filterCutoff.getCurrentValue());
         for (int i = 0; i < n; ++i)
         {
-            const float d = drive.getNextValue(), off = offset.getNextValue(), chr = character.getNextValue();
+            const float d = drive.getNextValue() * (tailActive ? tailMul[(size_t) (i / osFactor)] : 1.0f);
+            const float off = offset.getNextValue(), chr = character.getNextValue();
             const float sp = spatial.getNextValue(), m = mix.getNextValue(), og = outGain.getNextValue();
             if (filterPos != 0 && filterCutoff.isSmoothing()) updateFilterCoefficients (filterCutoff.getNextValue());
 
@@ -499,6 +517,8 @@ private:
 
     double baseRate = 44100.0;
     std::array<std::unique_ptr<juce::dsp::Oversampling<float>>, 4> oversamplers;
+    std::vector<float> tailMul;
+    bool tailActive = false;
     int osFactor = 1;
     double curRate = 44100.0;
     juce::SmoothedValue<float, juce::ValueSmoothingTypes::Multiplicative> filterCutoff { 1000.0f };

@@ -25,6 +25,9 @@ All notable changes to Codex. Versions follow [Semantic Versioning](https://semv
 - **Draw envelopes**: pitch and amp envelopes can switch from ADSR to DRAW mode: up to 8 breakpoints with a bend per
   segment, edited directly in the display (drag points and bend handles, double-click to add/delete, right-click for
   shapes). Pitch Amount and the amp Release still apply.
+- **Punch / tail split** per distortion unit: *Tail Drive* changes the drive for the tail relative to the punch,
+  reached *Split* ms after each hit (sample-accurate; e.g. +18 dB adds 18 dB of tail harmonics while the punch stays
+  identical). The transfer display shows the tail's curve dashed.
 - **Distortion engine upgrade** (synth-style workflow):
   - Resonant **Pre / Post filter** per unit (Low Pass 12/24, Band Pass, High Pass 12/24, Notch), zero-delay SVF that
     stays clean under fast changes; response strip under the transfer display (drag: frequency + resonance).

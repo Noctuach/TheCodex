@@ -106,7 +106,8 @@ public:
         const bool hasReading = analyser.hasReading();
         const float shownNote = hasReading ? frequencyToMidi (analyser.getMeasuredHz()) : target;
         const int nearest = roundToInt (shownNote);
-        const float cents = (shownNote - (float) nearest) * 100.0f;
+        float cents = (shownNote - (float) nearest) * 100.0f;
+        if (std::abs (cents) < 0.05f) cents = 0.0f;   // never show "-0.0"
         const bool onTarget = hasReading && std::abs (shownNote - target) < 0.1f;   // within 10 cents
         const auto noteColour = ! hasReading ? Colours_::textDim : (onTarget ? Colour (0xff51e5a0) : Colours_::accent);
 
@@ -183,7 +184,8 @@ public:
         const float target = analyser.getTargetNote();
         const float note = has ? frequencyToMidi (analyser.getMeasuredHz()) : target;
         const int nearest = roundToInt (note);
-        const float cents = (note - (float) nearest) * 100.0f;
+        float cents = (note - (float) nearest) * 100.0f;
+        if (std::abs (cents) < 0.05f) cents = 0.0f;   // never show "-0.0"
         const bool onTarget = has && std::abs (note - target) < 0.1f;
         const auto col = ! has ? Colours_::textDim : (onTarget ? Colours_::good : Colours_::accent);
         g.setColour (has ? col.withAlpha (0.6f) : Colours_::outline);

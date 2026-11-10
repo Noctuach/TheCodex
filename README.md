@@ -110,6 +110,7 @@ Two full distortion units, one **before** and one **after** the EQ:
 | Shape | *Drive*, *Boost* (input gain on dry and wet), *Character* (morphs any curve towards a square wave), *Offset* (asymmetry), *Spatial* (distorts left and right differently for stereo width). |
 | Wet filters / tone | *Lo Filter* (low-pass before the distortion), *Hi Filter* (high-pass after it), *Shelf Freq/Gain*. |
 | Output | *Mix* (dry/wet), *Output*. |
+| Punch / tail | *Tail Drive* (±24 dB) changes the drive for the tail relative to the punch; *Split* sets how long after each hit the tail setting is reached. Raw tail with a clean punch, or a hard punch with a smooth tail, without layering. |
 | Filter | Resonant *Pre* / *Post* filter on the distorted path (Low Pass 12/24, Band Pass, High Pass 12/24, Notch). Drag the response strip under the transfer display: left/right = frequency, up/down = resonance. A resonant band-pass *Pre* focuses the distortion on one part of the kick. |
 | X-Shaper | In the *X-Shaper* modes, drag the points on the transfer display to draw your own curve (*Asym*: both halves separately); right-click for preset curves. |
 | Options | *Oversampling* (Off/2x/4x/8x/16x) and *DC Filter*. Every curve also uses antiderivative anti-aliasing, so 4x already keeps audible aliasing around -64 dB on a hard-clipped 5 kHz tone. |

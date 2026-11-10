@@ -15,6 +15,7 @@ public:
     {
         auto p = [&] (const char* sfx) { return s.getRawParameterValue (ID::clip (stage, sfx)); };
         mode = p ("Mode"); drive = p ("Drive"); boost = p ("Boost"); offset = p ("Bias"); chr = p ("Char"); on = p ("On");
+        tailDrv = p ("TailDrv");
         for (int k = 0; k < ClipDistortion::numCurvePoints; ++k)
         {
             xp[(size_t) k] = s.getParameter (ID::clip (stage, ("XP" + juce::String (k + 1)).toRawUTF8()));
@@ -89,6 +90,24 @@ public:
             if (i == 0) curvePath.startNewSubPath (pt); else curvePath.lineTo (pt);
         }
         const auto col = enabled ? Colours_::accent : Colours_::textDim;
+        // the tail's curve (Tail Drive), dashed, behind the punch curve
+        if (enabled && ! shaper && std::abs (tailDrv->load()) > 0.05f)
+        {
+            const float tailGain = Decibels::decibelsToGain (drive->load() + boost->load() + tailDrv->load());
+            Path tail;
+            for (int i = 0; i <= steps; ++i)
+            {
+                const float x = -1.0f + 2.0f * (float) i / (float) steps;
+                const auto pt = toPoint (x, ClipDistortion::transfer (m, x, tailGain, off, c, &cv));
+                if (i == 0) tail.startNewSubPath (pt); else tail.lineTo (pt);
+            }
+            float dash[] = { 5.0f, 4.0f };
+            PathStrokeType (1.4f).createDashedStroke (tail, tail, dash, 2);
+            g.setColour (Colours_::accent2.withAlpha (0.85f));
+            g.fillPath (tail);
+            g.setFont (Fonts::label (10.5f, 0.08f));
+            g.drawText ("TAIL", Rectangle<float> (plot.getRight() - 44.0f, plot.getY() + 16.0f, 40.0f, 12.0f), Justification::centredRight);
+        }
         Colours_::strokeGlow (g, curvePath, col, 2.0f);
 
         if (shaper)
@@ -247,7 +266,7 @@ private:
 
     juce::AudioProcessorValueTreeState& apvts;
     int stage;
-    std::atomic<float> *mode, *drive, *boost, *offset, *chr, *on;
+    std::atomic<float> *mode, *drive, *boost, *offset, *chr, *on, *tailDrv;
     std::array<juce::RangedAudioParameter*, ClipDistortion::numCurvePoints> xp {}, xn {};
     juce::Rectangle<float> plot;
     float level = 0.0f, lastY = 0.0f;
@@ -389,6 +408,8 @@ public:
         character.attach (s, ID::clip (stage, "Char"));
         offset.attach (s, ID::clip (stage, "Bias"));
         spatial.attach (s, ID::clip (stage, "Spatial"));
+        tailDrive.attach (s, ID::clip (stage, "TailDrv"));
+        split.attach (s, ID::clip (stage, "Split"));
         loFilter.attach (s, ID::clip (stage, "LoFilt"));
         hiFilter.attach (s, ID::clip (stage, "HiFilt"));
         shelfFreq.attach (s, ID::clip (stage, "ShelfF"));
@@ -400,7 +421,7 @@ public:
         drive.label.setColour (juce::Label::textColourId, Colours_::accent);
 
         for (juce::Component* c : std::initializer_list<juce::Component*> {
-                 &power, &dcButton, &type, &oversampling, &filterPos, &filterType, &filterStrip, &transfer, &drive, &boost, &character, &offset, &spatial,
+                 &power, &dcButton, &type, &oversampling, &filterPos, &filterType, &filterStrip, &transfer, &drive, &boost, &character, &offset, &spatial, &tailDrive, &split,
                  &loFilter, &hiFilter, &shelfFreq, &shelfGain, &mix, &output, &inMeter, &outMeter })
             addAndMakeVisible (c);
 
@@ -499,12 +520,11 @@ public:
         middle.removeFromTop (6);
         shapeCaption = middle.removeFromTop (16);
         auto grid = middle;
-        const int rowH = juce::jmin (96, grid.getHeight() / 2);
+        const int rowH = juce::jmin (100, grid.getHeight() / 2);
         auto row1 = grid.removeFromTop (rowH), row2 = grid.removeFromTop (rowH);
-        boost.setBounds (row1.removeFromLeft (row1.getWidth() / 2));
-        character.setBounds (row1);
-        offset.setBounds (row2.removeFromLeft (row2.getWidth() / 2));
-        spatial.setBounds (row2);
+        const int cw = row1.getWidth() / 3;
+        boost.setBounds (row1.removeFromLeft (cw)); character.setBounds (row1.removeFromLeft (cw)); offset.setBounds (row1);
+        spatial.setBounds (row2.removeFromLeft (cw)); tailDrive.setBounds (row2.removeFromLeft (cw)); split.setBounds (row2);
 
         bypassNotice.setBounds (getLocalBounds().withTrimmedTop (29).reduced (1));
     }
@@ -546,7 +566,8 @@ private:
     TransferDisplay transfer;
     DistortionFilterStrip filterStrip;
     SegmentedChoice filterPos;
-    Knob drive { "Drive" }, boost { "Boost" }, character { "Character" }, offset { "Offset" }, spatial { "Spatial" };
+    Knob drive { "Drive" }, boost { "Boost" }, character { "Character" }, offset { "Offset" }, spatial { "Spatial" },
+         tailDrive { "Tail Drive" }, split { "Split" };
     Knob loFilter { "Lo Filter" }, hiFilter { "Hi Filter" }, shelfFreq { "Shelf Freq" }, shelfGain { "Shelf Gain" };
     Knob mix { "Mix" }, output { "Output" };
     LevelMeter inMeter, outMeter;
