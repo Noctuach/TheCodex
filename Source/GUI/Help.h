@@ -109,7 +109,7 @@ namespace Help
             const auto sfx = id.substring (2);
             static const std::map<juce::String, juce::String> dist {
                 { "On",     "Distortion On/Off: Bypass this distortion stage." },
-                { "Mode",   "Type: Base distortion curve. Hard Clip and Fuzz are aggressive, Soft Clip / Tanh / Overdrive are smoother, Tube and Diode are asymmetric, Folds and Rectify add extra harmonics." },
+                { "Mode",   "Type: base distortion curve. Hard Clip, Fuzz and Diode 2 are aggressive, Soft Clip / Tanh / Overdrive are smoother, Tube and Diode are asymmetric, Folds and Rectify add extra harmonics, Zero-Square is hollow and gritty, Downsample reduces the sample rate (Drive sets the amount), X-Shaper lets you draw the curve (Asym: both halves separately)." },
                 { "Drive",  "Drive: How hard the signal hits the distortion curve." },
                 { "Boost",  "Boost: Extra input gain on both the dry and the distorted signal." },
                 { "Char",   "Characteristic: Morphs the curve from its normal shape (0 %) towards a square wave (100 %) for extreme distortion." },
@@ -121,11 +121,17 @@ namespace Help
                 { "Mix",    "Mix: Blend between the clean and the distorted signal." },
                 { "Out",    "Output: Level after this distortion stage. Use it to control how hard the next stage is driven." },
                 { "DC",     "DC Filter: Removes DC offset caused by asymmetric curves and Offset." },
-                { "OS",     "Oversampling: Reduces aliasing (harsh, non-musical overtones) at the cost of CPU. 4x is a good default." },
+                { "OS",     "Oversampling: reduces aliasing (harsh, non-musical overtones) at the cost of CPU. 4x is a good default; 8x or 16x for very high drive on bright sounds." },
+                { "FltPos",  "Filter Position: a resonant filter on the distorted path, either PRE (before the curve: only the part of the kick that passes the filter gets distorted) or POST (after the curve: shapes the distortion's harmonics). Off by default." },
+                { "FltType", "Filter Type: Low Pass 12/24 dB, Band Pass, High Pass 12/24 dB or Notch. Tip: a resonant Band Pass PRE the curve is a classic way to focus the distortion on the punch." },
+                { "FltFreq", "Filter Freq: cutoff / centre frequency of the distortion filter. Drag the handle on the transfer display's filter strip, or use the knob." },
+                { "FltRes",  "Filter Resonance: emphasis around the cutoff. High resonance PRE the curve gives a ringing, tonal distortion." },
                 { "Spatial", "Spatial: Distorts the left and right channels slightly differently (drive and operating point), creating stereo width from the mono kick. Use the EQ's Side placement to shape it." },
             };
             if (auto it = dist.find (sfx); it != dist.end())
                 return it->second;
+            if (sfx.startsWith ("XP") || sfx.startsWith ("XN"))
+                return "X-Shaper point: one point of the drawable shaper curve (used by the X-Shaper modes). Drag the points on the transfer display.";
         }
 
         if (id == "eqMode" || id == "eq2Mode")

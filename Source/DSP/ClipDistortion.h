@@ -8,24 +8,61 @@
 
     Signal path (inside the oversampled domain):
         Boost (dry + wet)
-          ├── dry ─────────────────────────────────────────────────────────┐
-          └── wet: Lo Filter (low-pass) -> Drive -> Type curve (+Offset)    │
-                   -> Characteristic (morph towards a rectangle)           Mix -> Output
-                   -> Hi Filter (high-pass) -> High shelf (tone) ──────────┘
+          ├── dry ──────────────────────────────────────────────────────────────┐
+          └── wet: Lo Filter (low-pass) -> [PRE filter] -> Drive -> Type curve   │
+                   (+Offset) -> Characteristic -> [POST filter]                 Mix -> Output
+                   -> Hi Filter (high-pass) -> High shelf (tone) ───────────────┘
         -> optional DC filter
+
+    The PRE / POST filter is a resonant zero-delay state-variable filter (LP 12/24, BP, HP 12/24, Notch),
+    the classic synth-distortion workflow: a resonant band-pass before the curve decides which part of the
+    kick gets distorted, a low-pass after it tames the fizz.
+    X-Shaper modes use a drawable curve (9 points per half, Catmull-Rom interpolated).
 */
 class ClipDistortion
 {
 public:
-    enum Mode { HardClip = 0, SoftClip, Tanh, Overdrive, Tube, Diode, Fuzz, SineFold, TriFold, Rectify, Bitcrush, AsymClip };
+    // New modes are appended so saved projects and presets keep their mode.
+    enum Mode { HardClip = 0, SoftClip, Tanh, Overdrive, Tube, Diode, Fuzz, SineFold, TriFold, Rectify, Bitcrush, AsymClip,
+                Diode2, ZeroSquare, Downsample, XShaper, XShaperAsym, numModes };
 
     static juce::StringArray modeNames()
     {
         return { "Hard Clip", "Soft Clip", "Tanh", "Overdrive", "Tube", "Diode",
-                 "Fuzz", "Sine Fold", "Tri Fold", "Rectify", "Bitcrush", "Asym Clip" };
+                 "Fuzz", "Sine Fold", "Tri Fold", "Rectify", "Bitcrush", "Asym Clip",
+                 "Diode 2", "Zero-Square", "Downsample", "X-Shaper", "X-Shaper (Asym)" };
     }
 
-    static juce::StringArray oversamplingNames() { return { "Off", "2x", "4x", "8x" }; }
+    static juce::StringArray oversamplingNames() { return { "Off", "2x", "4x", "8x", "16x" }; }
+
+    enum FilterType { LowPass12 = 0, LowPass24, BandPass, HighPass12, HighPass24, Notch };
+    static juce::StringArray filterTypeNames() { return { "Low Pass 12", "Low Pass 24", "Band Pass", "High Pass 12", "High Pass 24", "Notch" }; }
+    static juce::StringArray filterPositionNames() { return { "Off", "Pre", "Post" }; }
+
+    /** Drawable shaper curve: y at x = 0, 1/8 ... 1 for the positive half (and the negative half for the asym mode). */
+    static constexpr int numCurvePoints = 8;
+    struct Curve
+    {
+        std::array<float, numCurvePoints> pos { 0.125f, 0.25f, 0.375f, 0.5f, 0.625f, 0.75f, 0.875f, 1.0f };
+        std::array<float, numCurvePoints> neg { 0.125f, 0.25f, 0.375f, 0.5f, 0.625f, 0.75f, 0.875f, 1.0f };
+        bool operator== (const Curve& o) const { return pos == o.pos && neg == o.neg; }
+
+        /** Catmull-Rom through (0,0), (1/8, p0) ... (1, p7); held flat beyond x = 1. */
+        static float evalHalf (const std::array<float, numCurvePoints>& p, float ax) noexcept
+        {
+            if (ax >= 1.0f) return p[numCurvePoints - 1];
+            const float t = ax * (float) numCurvePoints;
+            const int i = juce::jlimit (0, numCurvePoints - 1, (int) t);
+            const float f = t - (float) i;
+            auto pt = [&p] (int k) { return k <= 0 ? (k == 0 ? 0.0f : -p[0]) : p[(size_t) juce::jmin (k, numCurvePoints) - 1]; };
+            const float y0 = pt (i - 1), y1 = pt (i), y2 = pt (i + 1), y3 = i + 2 <= numCurvePoints ? pt (i + 2) : 2.0f * pt (i + 1) - pt (i);
+            return y1 + 0.5f * f * (y2 - y0 + f * (2.0f * y0 - 5.0f * y1 + 4.0f * y2 - y3 + f * (3.0f * (y1 - y2) + y3 - y0)));
+        }
+        float eval (float x, bool asym) const noexcept
+        {
+            return x >= 0.0f ? evalHalf (pos, x) : -evalHalf (asym ? neg : pos, -x);
+        }
+    };
 
     struct Settings
     {
@@ -37,12 +74,15 @@ public:
         bool  dcFilter = true;
         int   oversampling = 2; // index into oversamplingNames()
         float spatial = 0.0f;   // 0 = identical L/R, 1 = different distortion per channel (stereo)
+        int   filterPos = 0, filterType = LowPass12;   // filterPos: 0 = off, 1 = pre, 2 = post
+        float filterHz = 1000.0f, filterRes = 0.2f;
+        Curve curve;
     };
 
     void prepare (double sr, int maxBlockSize)
     {
         baseRate = sr;
-        for (int i = 0; i < 3; ++i)
+        for (int i = 0; i < 4; ++i)
         {
             oversamplers[(size_t) i] = std::make_unique<juce::dsp::Oversampling<float>> (
                 2, i + 1, juce::dsp::Oversampling<float>::filterHalfBandPolyphaseIIR, true, false);
@@ -60,7 +100,10 @@ public:
             if (os != nullptr) os->reset();
         for (int ch = 0; ch < 2; ++ch)
             for (auto* f : { &loFilter[ch], &hiFilter[ch], &shelf[ch] }) f->reset();
+        for (auto& f : svf) f.reset();
         dcX = { 0.0f, 0.0f }; dcY = { 0.0f, 0.0f };
+        holdCount = { 0, 0 }; holdValue = { 0.0f, 0.0f };
+        adaaPrev = { 0.0, 0.0 }; adaaPrevF = { 0.0, 0.0 };
     }
 
     /** Latency in base-rate samples for the current oversampling setting. */
@@ -121,11 +164,83 @@ public:
     }
 
     /** Wet transfer curve for one input sample (excluding filters, mix and output); also used by the GUI display. */
-    static float transfer (int mode, float x, float driveGain, float offset, float character) noexcept
+    static float transfer (int mode, float x, float driveGain, float offset, float character, const Curve* curve = nullptr) noexcept
     {
-        const float shaped = shapeFor (mode, x * driveGain + offset) - shapeFor (mode, offset);
+        if (mode == Downsample) driveGain = 1.0f;   // in Downsample mode, Drive sets the rate reduction
+        const float shaped = shapeFor (mode, x * driveGain + offset, curve) - shapeFor (mode, offset, curve);
         return harden (shaped, character);
     }
+
+    //==========================================================================
+    /**
+        Antiderivative anti-aliasing (first order, Parker et al. 2016): instead of f(v[n]) the stage outputs
+        (F(v[n]) - F(v[n-1])) / (v[n] - v[n-1]), where F is the integral of the curve. This removes most of the
+        aliasing that clipping corners create, on top of oversampling. F is tabulated once per curve
+        (cubic Hermite between nodes), extended linearly beyond the table for saturating curves and wrapped
+        for the periodic folds.
+    */
+    struct AdaaTable
+    {
+        static constexpr double range = 16.0;
+        static constexpr int size = 8192;
+        std::vector<double> F, f;
+        bool periodic = false;
+        double period = 4.0, h = 0.0;
+
+        void build (const std::function<float (float)>& fn, bool isPeriodic)
+        {
+            periodic = isPeriodic;
+            const double lo = periodic ? -0.5 * period : -range, hi = periodic ? 0.5 * period : range;
+            h = (hi - lo) / (size - 1);
+            F.assign (size, 0.0); f.assign (size, 0.0);
+            for (int i = 0; i < size; ++i) f[(size_t) i] = fn ((float) (lo + h * i));
+            // trapezoid integration from the centre so F(0) = 0
+            const int mid = (size - 1) / 2;
+            for (int i = mid + 1; i < size; ++i) F[(size_t) i] = F[(size_t) i - 1] + 0.5 * h * (f[(size_t) i - 1] + f[(size_t) i]);
+            for (int i = mid - 1; i >= 0; --i)    F[(size_t) i] = F[(size_t) i + 1] - 0.5 * h * (f[(size_t) i + 1] + f[(size_t) i]);
+            const double offsetAtZero = F[(size_t) mid] + (0.0 - (lo + h * mid)) * f[(size_t) mid];
+            for (auto& v : F) v -= offsetAtZero;
+        }
+
+        double eval (double v) const noexcept
+        {
+            const double lo = periodic ? -0.5 * period : -range, hi = periodic ? 0.5 * period : range;
+            if (periodic)
+            {
+                v = std::fmod (v - lo, period);
+                if (v < 0.0) v += period;
+                v += lo;
+            }
+            else if (v >= hi) return F.back() + f.back() * (v - hi);
+            else if (v <= lo) return F.front() + f.front() * (v - lo);
+            const double t = (v - lo) / h;
+            const int i = juce::jlimit (0, size - 2, (int) t);
+            const double u = t - i;
+            // cubic Hermite with the curve itself as the derivative
+            const double u2 = u * u, u3 = u2 * u;
+            return (2 * u3 - 3 * u2 + 1) * F[(size_t) i] + (u3 - 2 * u2 + u) * h * f[(size_t) i]
+                 + (-2 * u3 + 3 * u2) * F[(size_t) i + 1] + (u3 - u2) * h * f[(size_t) i + 1];
+        }
+    };
+
+    static bool isPeriodicMode (int m) noexcept { return m == SineFold || m == TriFold; }
+
+    /** Shared tables for the fixed curves (built once, on first use). */
+    static const AdaaTable& fixedTable (int m)
+    {
+        static const std::vector<AdaaTable> tables = []
+        {
+            std::vector<AdaaTable> t ((size_t) numModes);
+            for (int i = 0; i < numModes; ++i)
+                if (i != XShaper && i != XShaperAsym)
+                    t[(size_t) i].build ([i] (float x) { return shapeFor (i, x); }, isPeriodicMode (i));
+            return t;
+        }();
+        return tables[(size_t) juce::jlimit (0, (int) numModes - 1, m)];
+    }
+
+    /** Downsample mode: hold factor (at the base sample rate) for a drive setting in dB (0-48). */
+    static float downsampleFactor (float driveDb) noexcept { return 1.0f + std::pow (juce::jlimit (0.0f, 1.0f, driveDb / 48.0f), 1.5f) * 47.0f; }
 
     /** Characteristic: 0 = curve unchanged ... 1 = pushed towards a rectangle wave. */
     static float harden (float y, float character) noexcept
@@ -135,7 +250,7 @@ public:
         return juce::jlimit (-1.0f, 1.0f, y * g);
     }
 
-    static float shapeFor (int m, float x) noexcept
+    static float shapeFor (int m, float x, const Curve* curve = nullptr) noexcept
     {
         using juce::MathConstants;
         switch (m)
@@ -167,6 +282,16 @@ public:
                 return std::round (c * 8.0f) / 8.0f;
             }
             case AsymClip:  return juce::jlimit (-0.55f, 1.0f, x);
+            case Diode2:    // symmetric diode pair: soft knee, then a firm ceiling (odd harmonics, "buzz")
+                return x / std::pow (1.0f + std::pow (std::abs (x), 2.5f), 0.4f);
+            case ZeroSquare:   // square law around zero (crossover gap) with a clipped top: hollow, gritty
+            {
+                const float c = juce::jlimit (-1.0f, 1.0f, x);
+                return c * std::abs (c);
+            }
+            case Downsample: return juce::jlimit (-1.0f, 1.0f, x);
+            case XShaper:     return curve != nullptr ? curve->eval (x, false) : juce::jlimit (-1.0f, 1.0f, x);
+            case XShaperAsym: return curve != nullptr ? curve->eval (x, true) : juce::jlimit (-1.0f, 1.0f, x);
             default:        return x;
         }
     }
@@ -182,6 +307,8 @@ private:
         const bool rateChanged = os != activeOs || force;
         activeOs = os;
         const double rate = baseRate * (os >= 0 ? (1 << (os + 1)) : 1);
+        osFactor = os >= 0 ? (1 << (os + 1)) : 1;
+        curRate = rate;
 
         if (rateChanged)
         {
@@ -189,6 +316,8 @@ private:
                 oversamplers[(size_t) os]->reset();
             for (auto* s : { &drive, &mix, &outGain, &offset, &character, &spatial })
                 s->reset (rate, 0.02);
+            filterCutoff.reset (rate, 0.03);
+            for (auto& f : svf) f.reset();
             boost.reset (baseRate, 0.02);
             for (int ch = 0; ch < 2; ++ch)
                 for (auto* f : { &loFilter[ch], &hiFilter[ch], &shelf[ch] }) f->reset();
@@ -204,6 +333,26 @@ private:
         setTarget (offset, s.offset, force || rateChanged);
         setTarget (character, s.character, force || rateChanged);
         setTarget (spatial, s.spatial, force || rateChanged);
+        setTarget (filterCutoff, juce::jlimit (20.0f, (float) (rate * 0.45), s.filterHz), force || rateChanged);
+        filterPos = s.enabled ? s.filterPos : 0;
+        filterType = s.filterType;
+        // resonance 0..1 -> Q 0.5 .. 18 (quadratic, so most of the knob is musical)
+        filterK = 1.0f / (0.5f + 17.5f * s.filterRes * s.filterRes);
+        // the resonant peak is Q (= 1/k); scale it so full resonance peaks around +12 dB
+        resComp = 1.0f / std::sqrt (juce::jmax (1.0f, 1.0f / filterK) / 4.0f + 0.75f);
+        if (! (s.curve == curve) || ! curveTableBuilt || s.mode != mode)
+        {
+            curve = s.curve;
+            if (s.mode == XShaper || s.mode == XShaperAsym)
+            {
+                const bool asym = s.mode == XShaperAsym;
+                const Curve c = curve;
+                curveTable.build ([c, asym] (float x) { return c.eval (x, asym); }, false);
+                curveTableBuilt = true;
+                tableChanged = true;
+            }
+        }
+        downsampleHold = downsampleFactor (s.driveDb) * (float) osFactor;
 
         // Wet filters (redesigned only when something changed)
         if (rate != lastFilterRate || s.loFilterHz != lastLo || s.hiFilterHz != lastHi || s.shelfHz != lastShelfHz || s.shelfDb != lastShelfDb)
@@ -222,22 +371,80 @@ private:
             shelfActive = std::abs (s.shelfDb) > 0.01f;
             lastFilterRate = rate; lastLo = s.loFilterHz; lastHi = s.hiFilterHz; lastShelfHz = s.shelfHz; lastShelfDb = s.shelfDb;
         }
+        if (s.mode != mode || tableChanged)
+        {
+            // keep the ADAA history consistent with the new curve (no click when switching modes)
+            const AdaaTable& tbl = (s.mode == XShaper || s.mode == XShaperAsym) ? curveTable : fixedTable (s.mode);
+            for (int ch = 0; ch < 2; ++ch) adaaPrevF[(size_t) ch] = tbl.eval (adaaPrev[(size_t) ch]);
+            tableChanged = false;
+        }
         mode = s.mode;
     }
 
-    static void setTarget (juce::SmoothedValue<float>& v, float target, bool snap)
+    template <typename Smoothed>
+    static void setTarget (Smoothed& v, float target, bool snap)
     {
         if (snap) v.setCurrentAndTargetValue (target);
         else      v.setTargetValue (target);
     }
 
+    /** Zero-delay-feedback state-variable filter (Cytomic / Simper), stable under fast modulation. */
+    struct Svf
+    {
+        float ic1 = 0.0f, ic2 = 0.0f;
+        void reset() { ic1 = ic2 = 0.0f; }
+        /** Returns low, band (unity peak), high and notch in one pass. */
+        inline void run (float x, float a1, float a2, float a3, float k, float& low, float& band, float& high) noexcept
+        {
+            const float v3 = x - ic2;
+            const float v1 = a1 * ic1 + a2 * v3;
+            const float v2 = ic2 + a2 * ic1 + a3 * v3;
+            ic1 = 2.0f * v1 - ic1;
+            ic2 = 2.0f * v2 - ic2;
+            low = v2; band = v1; high = x - k * v1 - v2;
+        }
+    };
+
+    inline float runFilter (int ch, float x) noexcept
+    {
+        float lo, bp, hi;
+        const bool steep = filterType == LowPass24 || filterType == HighPass24;
+        // 24 dB: a Butterworth stage followed by the resonant stage (one resonant peak, like an analog cascade)
+        svf[(size_t) ch * 2].run (x, steep ? fb1 : fa1, steep ? fb2 : fa2, steep ? fb3 : fa3, steep ? 1.41421356f : filterK, lo, bp, hi);
+        float y = x;
+        switch (filterType)
+        {
+            case LowPass12:  y = lo; break;
+            case LowPass24:  { float l2, b2, h2; svf[(size_t) ch * 2 + 1].run (lo, fa1, fa2, fa3, filterK, l2, b2, h2); y = l2; break; }
+            case BandPass:   return bp * filterK;
+            case HighPass12: y = hi; break;
+            case HighPass24: { float l2, b2, h2; svf[(size_t) ch * 2 + 1].run (hi, fa1, fa2, fa3, filterK, l2, b2, h2); y = h2; break; }
+            case Notch:      return lo + hi;
+            default:         return x;
+        }
+        return y * resComp;   // resonance gain compensation keeps the peak musical instead of ear-splitting
+    }
+
+    void updateFilterCoefficients (float hz) noexcept
+    {
+        const float g = std::tan (juce::MathConstants<float>::pi * juce::jmin (hz, (float) (curRate * 0.45)) / (float) curRate);
+        fa1 = 1.0f / (1.0f + g * (g + filterK));
+        fa2 = g * fa1;
+        fa3 = g * fa2;
+        fb1 = 1.0f / (1.0f + g * (g + 1.41421356f));
+        fb2 = g * fb1;
+        fb3 = g * fb2;
+    }
+
     void processSamples (float* l, float* r, int n) noexcept
     {
         float* chans[] = { l, r };
+        if (filterPos != 0) updateFilterCoefficients (filterCutoff.getCurrentValue());
         for (int i = 0; i < n; ++i)
         {
             const float d = drive.getNextValue(), off = offset.getNextValue(), chr = character.getNextValue();
             const float sp = spatial.getNextValue(), m = mix.getNextValue(), og = outGain.getNextValue();
+            if (filterPos != 0 && filterCutoff.isSmoothing()) updateFilterCoefficients (filterCutoff.getNextValue());
 
             // Spatial: the two channels hit slightly different curves (drive and operating point),
             // which creates stereo harmonics from a mono input.
@@ -248,7 +455,36 @@ private:
                 const float chDrive  = ch == 0 ? d * driveSpread : d / driveSpread;
                 const float chOffset = ch == 0 ? off + offsetSpread : off - offsetSpread;
                 float w = loActive ? loFilter[ch].process (dry) : dry;
-                w = transfer (mode, w, chDrive, chOffset, chr);
+                if (filterPos == 1) w = runFilter (ch, w);
+                if (mode == Downsample)
+                {
+                    // sample-and-hold rate reduction (Drive sets the amount), then a gentle clip
+                    if (--holdCount[(size_t) ch] <= 0)
+                    {
+                        holdValue[(size_t) ch] = w;
+                        holdCount[(size_t) ch] = juce::jmax (1, (int) (downsampleHold * (ch == 0 ? 1.0f : 1.0f + 0.15f * sp)));
+                    }
+                    w = holdValue[(size_t) ch];
+                }
+                if (mode == Downsample)
+                    w = transfer (mode, w, chDrive, chOffset, chr, &curve);
+                else
+                {
+                    // ADAA: average of the curve between the previous and the current input (via its integral)
+                    const AdaaTable& tbl = (mode == XShaper || mode == XShaperAsym) ? curveTable : fixedTable (mode);
+                    const double v = (double) w * chDrive + chOffset;
+                    const double dv = v - adaaPrev[(size_t) ch];
+                    const double Fv = tbl.eval (v);
+                    float y;
+                    if (std::abs (dv) > 1.0e-4)
+                        y = (float) ((Fv - adaaPrevF[(size_t) ch]) / dv);
+                    else
+                        y = shapeFor (mode, (float) (0.5 * (v + adaaPrev[(size_t) ch])), &curve);
+                    adaaPrev[(size_t) ch] = v;
+                    adaaPrevF[(size_t) ch] = Fv;
+                    w = harden (y - shapeFor (mode, chOffset, &curve), chr);
+                }
+                if (filterPos == 2) w = runFilter (ch, w);
                 if (hiActive)    w = hiFilter[ch].process (w);
                 if (shelfActive) w = shelf[ch].process (w);
                 chans[ch][i] = (dry + m * (w - dry)) * og;
@@ -257,7 +493,20 @@ private:
     }
 
     double baseRate = 44100.0;
-    std::array<std::unique_ptr<juce::dsp::Oversampling<float>>, 3> oversamplers;
+    std::array<std::unique_ptr<juce::dsp::Oversampling<float>>, 4> oversamplers;
+    int osFactor = 1;
+    double curRate = 44100.0;
+    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Multiplicative> filterCutoff { 1000.0f };
+    std::array<Svf, 4> svf;   // [channel * 2 + stage]
+    int filterPos = 0, filterType = 0;
+    float filterK = 1.0f, fa1 = 0.0f, fa2 = 0.0f, fa3 = 0.0f, fb1 = 0.0f, fb2 = 0.0f, fb3 = 0.0f, resComp = 1.0f;
+    Curve curve;
+    AdaaTable curveTable;
+    bool curveTableBuilt = false, tableChanged = false;
+    std::array<double, 2> adaaPrev { 0.0, 0.0 }, adaaPrevF { 0.0, 0.0 };
+    float downsampleHold = 1.0f;
+    std::array<int, 2> holdCount { 0, 0 };
+    std::array<float, 2> holdValue { 0.0f, 0.0f };
     int activeOs = -1;
     int mode = HardClip;
     Settings settings;

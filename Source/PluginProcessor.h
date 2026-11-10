@@ -126,7 +126,9 @@ private:
     std::array<std::atomic<float>, 2> peaks {};
 
     struct BandParams { std::atomic<float>* on, * type, * freq, * gain, * q, * slope, * place; };
-    struct ClipParams { std::atomic<float> *on, *mode, *drive, *boost, *chr, *bias, *loFilt, *hiFilt, *shelfF, *shelfG, *mix, *out, *dc, *os, *spatial; };
+    struct ClipParams { std::atomic<float> *on, *mode, *drive, *boost, *chr, *bias, *loFilt, *hiFilt, *shelfF, *shelfG, *mix, *out, *dc, *os, *spatial,
+                               *fltPos, *fltType, *fltFreq, *fltRes;
+                        std::array<std::atomic<float>*, ClipDistortion::numCurvePoints> xp {}, xn {}; };
     struct SatBandParams { std::atomic<float> *style, *drive, *mix, *fb, *fbFreq, *dyn, *bass, *midT, *treble, *pres, *drivePan, *levelPan, *level, *mute, *solo, *bypass; };
 
     std::atomic<float>* p (const juce::String& id) { return apvts.getRawParameterValue (id); }

@@ -25,7 +25,13 @@ CodexProcessor::CodexProcessor()
     {
         auto c = [&] (const char* sfx) { return p (ID::clip (s + 1, sfx)); };
         clipParams[s] = { c ("On"), c ("Mode"), c ("Drive"), c ("Boost"), c ("Char"), c ("Bias"), c ("LoFilt"), c ("HiFilt"),
-                          c ("ShelfF"), c ("ShelfG"), c ("Mix"), c ("Out"), c ("DC"), c ("OS"), c ("Spatial") };
+                          c ("ShelfF"), c ("ShelfG"), c ("Mix"), c ("Out"), c ("DC"), c ("OS"), c ("Spatial"),
+                          c ("FltPos"), c ("FltType"), c ("FltFreq"), c ("FltRes") };
+        for (int k = 0; k < ClipDistortion::numCurvePoints; ++k)
+        {
+            clipParams[s].xp[(size_t) k] = c (("XP" + juce::String (k + 1)).toRawUTF8());
+            clipParams[s].xn[(size_t) k] = c (("XN" + juce::String (k + 1)).toRawUTF8());
+        }
     }
 
     for (int e = 0; e < ID::numEqs; ++e)
@@ -153,6 +159,15 @@ void CodexProcessor::updateParameters()
         cs.dcFilter     = c.dc->load() > 0.5f;
         cs.oversampling = (int) c.os->load();
         cs.spatial      = c.spatial->load();
+        cs.filterPos    = (int) c.fltPos->load();
+        cs.filterType   = (int) c.fltType->load();
+        cs.filterHz     = c.fltFreq->load();
+        cs.filterRes    = c.fltRes->load();
+        for (int k = 0; k < ClipDistortion::numCurvePoints; ++k)
+        {
+            cs.curve.pos[(size_t) k] = c.xp[(size_t) k]->load();
+            cs.curve.neg[(size_t) k] = c.xn[(size_t) k]->load();
+        }
         clips[i]->setSettings (cs);
     }
 

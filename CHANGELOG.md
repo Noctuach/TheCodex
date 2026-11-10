@@ -4,6 +4,14 @@ All notable changes to Codex. Versions follow [Semantic Versioning](https://semv
 
 ## [Unreleased]
 ### Added
+- **Distortion engine upgrade** (synth-style workflow):
+  - Resonant **Pre / Post filter** per unit (Low Pass 12/24, Band Pass, High Pass 12/24, Notch), zero-delay SVF that
+    stays clean under fast changes; response strip under the transfer display (drag: frequency + resonance).
+  - **X-Shaper** and **X-Shaper (Asym)**: draw the distortion curve directly in the transfer display; preset curves on
+    right-click.
+  - New modes: **Diode 2**, **Zero-Square**, **Downsample** (Drive sets the rate reduction).
+  - **Antiderivative anti-aliasing** on every curve: audible aliasing on a 5 kHz hard-clipped sine drops by 12-28 dB
+    (4x: -64 dB, 8x: -89 dB, 16x: -91 dB). New **16x** oversampling option.
 - **EQ 2 tab**: a second 24-band equaliser after the Compressor (before Space).
 - **EQ processing modes** (Pro-Q 4): Zero Latency, Natural Phase (2x oversampled, analog-matched response) and
   Linear Phase (FIR with a 2x2 matrix for mid/side and left/right bands; resolution Low to Maximum), for both EQs.

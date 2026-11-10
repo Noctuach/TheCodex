@@ -116,6 +116,20 @@ AudioProcessorValueTreeState::ParameterLayout Params::createLayout()
         addFloat (l, ID::clip (stage, "Out"), n + "Output", { -24.0f, 12.0f, 0.01f }, -6.0f, dbText);
         addBool (l, ID::clip (stage, "DC"), n + "DC Filter", true);
         addChoice (l, ID::clip (stage, "OS"), n + "Oversampling", ClipDistortion::oversamplingNames(), 2);
+        // Resonant filter before or after the curve
+        addChoice (l, ID::clip (stage, "FltPos"), n + "Filter Position", ClipDistortion::filterPositionNames(), 0);
+        addChoice (l, ID::clip (stage, "FltType"), n + "Filter Type", ClipDistortion::filterTypeNames(), 0);
+        addFloat (l, ID::clip (stage, "FltFreq"), n + "Filter Freq", skewed (20.0f, 20000.0f, 640.0f), 1000.0f, hzText);
+        addFloat (l, ID::clip (stage, "FltRes"), n + "Filter Resonance", { 0.0f, 1.0f }, 0.2f, pctText);
+        // X-Shaper curve points (positive half; negative half used by X-Shaper Asym)
+        for (int k = 0; k < ClipDistortion::numCurvePoints; ++k)
+        {
+            const float def = (float) (k + 1) / (float) ClipDistortion::numCurvePoints;
+            addFloat (l, ID::clip (stage, ("XP" + String (k + 1)).toRawUTF8()), n + "X-Shaper +" + String (k + 1), { -1.0f, 1.0f, 0.001f }, def,
+                      [] (float v) { return String (v, 3); });
+            addFloat (l, ID::clip (stage, ("XN" + String (k + 1)).toRawUTF8()), n + "X-Shaper -" + String (k + 1), { -1.0f, 1.0f, 0.001f }, def,
+                      [] (float v) { return String (v, 3); });
+        }
         addFloat (l, ID::clip (stage, "Spatial"), n + "Spatial", { 0.0f, 1.0f }, 0.0f, pctText);
     }
 

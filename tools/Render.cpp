@@ -426,7 +426,7 @@ int main (int argc, char** argv)
 
     // ---- Distortion: every oversampling setting, extreme characteristic / filters ----
     std::cout << "\nOversampling   latency   peak dBFS\n";
-    for (int os = 0; os < 4; ++os)
+    for (int os = 0; os < 5; ++os)
     {
         proc.presets.loadPreset (10); // 909 Rawstyle
         for (int st = 1; st <= 2; ++st)
@@ -445,6 +445,126 @@ int main (int argc, char** argv)
         if (! finite || pk > 12.0f) ++failures;
         std::cout << ClipDistortion::oversamplingNames()[os].paddedRight (' ', 15) << juce::String (proc.getLatencySamples()).paddedRight (' ', 10)
                   << juce::String (pk, 1) << (finite ? "" : "  NaN!") << "\n";
+    }
+
+    // ---- Distortion engine: aliasing per oversampling, resonant pre/post filter, X-Shaper, new modes ----
+    {
+        int bad = 0;
+        // aliasing: 5 kHz sine, hard clip +24 dB; energy outside the harmonic series (odd multiples of 5 kHz, folded) in dB
+        auto runDist = [] (ClipDistortion::Settings st, juce::AudioBuffer<float> b)
+        {
+            ClipDistortion d; d.prepare (sr, 256); d.setSettings (st); d.reset(); d.setSettings (st);
+            for (int pos = 0; pos < b.getNumSamples(); pos += 256)
+                d.process (b.getWritePointer (0, pos), b.getWritePointer (1, pos), std::min (256, b.getNumSamples() - pos));
+            return b;
+        };
+        auto sineBuf = [] (float f, float amp, int n)
+        {
+            juce::AudioBuffer<float> b (2, n);
+            for (int i = 0; i < n; ++i)
+            {
+                // double-precision phase: a float phase adds noise around -60 dB over long buffers
+                const float v = amp * (float) std::sin (juce::MathConstants<double>::twoPi * std::fmod ((double) f * i / sr, 1.0));
+                b.setSample (0, i, v); b.setSample (1, i, v);
+            }
+            return b;
+        };
+        auto aliasDb = [&] (int os)
+        {
+            ClipDistortion::Settings st; st.mode = ClipDistortion::HardClip; st.driveDb = 24.0f; st.outDb = 0.0f; st.oversampling = os; st.dcFilter = false;
+            const int N = 1 << 15;
+            const float f0 = 5000.0f * (float) N / (float) sr;   // put the tone exactly on a bin
+            const float f = std::round (f0) * (float) sr / (float) N;
+            auto out = runDist (st, sineBuf (f, 0.5f, N + 8192));
+            juce::dsp::FFT fft (15);
+            std::vector<float> data ((size_t) N * 2, 0.0f);
+            for (int i = 0; i < N; ++i)
+            {
+                // 4-term Blackman-Harris (-92 dB sidelobes) so window leakage does not mask the aliasing
+                const double a = juce::MathConstants<double>::twoPi * i / N;
+                const double w = 0.35875 - 0.48829 * std::cos (a) + 0.14128 * std::cos (2 * a) - 0.01168 * std::cos (3 * a);
+                data[(size_t) i] = out.getSample (0, i + 8192) * (float) w;
+            }
+            fft.performFrequencyOnlyForwardTransform (data.data());
+            const int k0 = (int) std::round (f0);
+            double harm = 0.0, alias = 0.0;
+            std::vector<bool> isHarm ((size_t) N / 2, false);
+            // only true harmonics (below Nyquist) count as wanted; everything that folded back is aliasing
+            for (int h = 1; (long long) h * k0 < N / 2; h += 2)
+            {
+                const long long k = (long long) h * k0;
+                for (int d = -6; d <= 6; ++d) if (k + d >= 0 && k + d < N / 2) isHarm[(size_t) (k + d)] = true;
+            }
+            const int audible = (int) (20000.0 * N / sr);   // aliasing that folds above 20 kHz is inaudible
+            for (int k = 4; k < N / 2; ++k)
+                if (isHarm[(size_t) k]) harm += (double) data[(size_t) k] * data[(size_t) k];
+                else if (k < audible) alias += (double) data[(size_t) k] * data[(size_t) k];
+            return (float) (10.0 * std::log10 (alias / juce::jmax (1.0e-30, harm)));
+        };
+        std::cout << "\nDistortion aliasing (5 kHz sine, hard clip +24 dB): audible (< 20 kHz) aliasing relative to the harmonics\n";
+        float prev = 100.0f;
+        for (int os = 0; os < 5; ++os)
+        {
+            const float a = aliasDb (os);
+            std::cout << "  " << ClipDistortion::oversamplingNames()[os].paddedRight (' ', 6) << juce::String (a, 1).paddedLeft (' ', 8) << " dB\n";
+            if (a > prev + 1.0f) ++bad;   // more oversampling must never alias more
+            prev = a;
+        }
+        if (prev > -70.0f) ++bad;
+
+        // resonant BP before the curve focuses the distortion: output energy at the BP frequency vs far away
+        {
+            ClipDistortion::Settings st; st.mode = ClipDistortion::Tanh; st.driveDb = 0.0f; st.outDb = 0.0f; st.oversampling = 1;
+            st.filterPos = 1; st.filterType = ClipDistortion::BandPass; st.filterHz = 1000.0f; st.filterRes = 0.6f;
+            const auto at = juce::Decibels::gainToDecibels (runDist (st, sineBuf (1000.0f, 0.1f, 24000)).getMagnitude (0, 12000, 12000) / 0.1f);
+            const auto away = juce::Decibels::gainToDecibels (runDist (st, sineBuf (100.0f, 0.1f, 24000)).getMagnitude (0, 12000, 12000) / 0.1f);
+            st.filterType = ClipDistortion::LowPass24; st.filterHz = 300.0f; st.filterRes = 0.0f; st.filterPos = 2;
+            const auto lp = juce::Decibels::gainToDecibels (runDist (st, sineBuf (3000.0f, 0.1f, 24000)).getMagnitude (0, 12000, 12000) / 0.1f);
+            std::cout << "  Pre band-pass 1 kHz: " << juce::String (at, 1) << " dB at 1 kHz, " << juce::String (away, 1)
+                      << " dB at 100 Hz; post LP24 300 Hz: " << juce::String (lp, 1) << " dB at 3 kHz\n";
+            if (std::abs (at) > 1.0f || away > -15.0f || lp > -30.0f) ++bad;
+        }
+        // X-Shaper with the default (linear) points equals Hard Clip; Asym halves are independent
+        {
+            ClipDistortion::Curve cv;
+            float worst = 0.0f;
+            for (float x = -2.0f; x <= 2.0f; x += 0.01f)
+                worst = std::max (worst, std::abs (ClipDistortion::transfer (ClipDistortion::XShaper, x, 1.0f, 0.0f, 0.0f, &cv)
+                                                   - ClipDistortion::transfer (ClipDistortion::HardClip, x, 1.0f, 0.0f, 0.0f)));
+            cv.neg.fill (0.25f);
+            const float yNeg = ClipDistortion::transfer (ClipDistortion::XShaperAsym, -1.0f, 1.0f, 0.0f, 0.0f, &cv);
+            const float yPos = ClipDistortion::transfer (ClipDistortion::XShaperAsym, 1.0f, 1.0f, 0.0f, 0.0f, &cv);
+            std::cout << "  X-Shaper: default curve vs hard clip max diff " << worst << "; asym halves " << yPos << " / " << yNeg << "\n";
+            if (worst > 1.0e-4f || std::abs (yNeg + 0.25f) > 1.0e-4f || std::abs (yPos - 1.0f) > 1.0e-4f) ++bad;
+        }
+        // every mode x every filter type: finite, bounded, with modulation of the cutoff
+        for (int m = 0; m < ClipDistortion::numModes; ++m)
+            for (int ft = 0; ft < 6; ++ft)
+            {
+                ClipDistortion::Settings st; st.mode = m; st.driveDb = 36.0f; st.filterPos = 1 + (ft & 1); st.filterType = ft; st.filterRes = 1.0f; st.oversampling = 1;
+                ClipDistortion d; d.prepare (sr, 256); d.setSettings (st);
+                juce::AudioBuffer<float> b = sineBuf (60.0f, 0.9f, 256 * 40);
+                float pk = 0.0f;
+                for (int blk = 0; blk < 40; ++blk)
+                {
+                    st.filterHz = 50.0f * std::pow (2.0f, (float) (blk % 10));   // sweep 50 Hz .. 25 kHz
+                    d.setSettings (st);
+                    d.process (b.getWritePointer (0, blk * 256), b.getWritePointer (1, blk * 256), 256);
+                }
+                pk = b.getMagnitude (0, 0, b.getNumSamples());
+                if (! std::isfinite (pk) || pk > 8.0f) { ++bad; std::cout << "   mode " << ClipDistortion::modeNames()[m] << " filter " << ft << " peak " << pk << "\n"; }
+            }
+        // downsample: drive raises the hold factor (staircase)
+        {
+            ClipDistortion::Settings st; st.mode = ClipDistortion::Downsample; st.driveDb = 48.0f; st.oversampling = 0; st.dcFilter = false; st.outDb = 0.0f;
+            auto out = runDist (st, sineBuf (100.0f, 0.5f, 4800));
+            int repeats = 0;
+            for (int i = 2001; i < 4000; ++i) repeats += out.getSample (0, i) == out.getSample (0, i - 1) ? 1 : 0;
+            std::cout << "  Downsample at max drive: " << repeats << " of 1999 samples held\n";
+            if (repeats < 1800) ++bad;
+        }
+        std::cout << "Distortion engine checks: " << (bad == 0 ? "OK" : "FAILED") << "\n";
+        failures += bad;
     }
 
     // ---- Robustness: sample rates, block sizes, mono layout ----
@@ -710,6 +830,19 @@ int main (int argc, char** argv)
     snapshot (proc, render (proc, 1), outDir.getChildFile ("ui_909.png"));
     proc.presets.loadPreset (10); // 909 Rawstyle
     snapshot (proc, render (proc, 1), outDir.getChildFile ("ui_distortion.png"), 1);
+    proc.presets.loadPreset (10);
+    setParam (proc, ID::clip (1, "FltPos"), 1.0f); setParam (proc, ID::clip (1, "FltType"), 2.0f);
+    setParam (proc, ID::clip (1, "FltFreq"), 180.0f); setParam (proc, ID::clip (1, "FltRes"), 0.55f);
+    setParam (proc, ID::clip (2, "Mode"), (float) ClipDistortion::XShaperAsym);
+    {
+        const float ys[] = { 0.45f, 0.8f, 0.95f, 0.7f, 0.55f, 0.8f, 1.0f, 1.0f };
+        for (int k = 0; k < 8; ++k)
+        {
+            setParam (proc, ID::clip (2, ("XP" + juce::String (k + 1)).toRawUTF8()), ys[k]);
+            setParam (proc, ID::clip (2, ("XN" + juce::String (k + 1)).toRawUTF8()), std::min (1.0f, 0.3f + 0.1f * (float) k));
+        }
+    }
+    snapshot (proc, render (proc, 1), outDir.getChildFile ("ui_distortion_filter_xshaper.png"), 1);
     proc.presets.loadPreset (7);  // 909 Clean: both distortions bypassed
     snapshot (proc, render (proc, 1), outDir.getChildFile ("ui_distortion_bypassed.png"), 1);
     {
