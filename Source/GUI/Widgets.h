@@ -44,9 +44,15 @@ public:
 
     void resized() override
     {
+        // Knobs never grow beyond a comfortable size, however much room the layout gives them
+        // (large: 112 px dial, normal: 76 px dial, plus the value text below)
+        const int maxDial = label.getProperties().contains ("captionLarge") ? 112 : 76;
         auto r = getLocalBounds();
-        label.setBounds (r.removeFromTop (16));
-        slider.setBounds (r);
+        const int textH = 20;
+        const int dial = juce::jmin (maxDial, r.getWidth(), r.getHeight() - 16 - textH);
+        auto content = r.withSizeKeepingCentre (r.getWidth(), juce::jmin (r.getHeight(), 16 + dial + textH + 4));
+        label.setBounds (content.removeFromTop (16));
+        slider.setBounds (content.withSizeKeepingCentre (juce::jmax (dial, 84), content.getHeight()));
     }
 
     juce::Label label;
