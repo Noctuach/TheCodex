@@ -5,6 +5,7 @@
 #include "DSP/ClipDistortion.h"
 #include "DSP/ParametricEQ.h"
 #include "DSP/MultibandSaturator.h"
+#include "DSP/SpaceReverb.h"
 #include "PresetManager.h"
 
 /** Lock-free single-producer/single-consumer sample FIFO feeding the spectrum analyzer. */
@@ -55,7 +56,7 @@ public:
     bool acceptsMidi() const override { return true; }
     bool producesMidi() const override { return false; }
     bool isMidiEffect() const override { return false; }
-    double getTailLengthSeconds() const override { return 0.0; }
+    double getTailLengthSeconds() const override { return reverb.tailSeconds(); }
 
     int getNumPrograms() override { return presets.getNumFactory(); }
     int getCurrentProgram() override { return juce::jmax (0, presets.getCurrentIndex()); }
@@ -71,6 +72,7 @@ public:
 
     ClipDistortion& getClip (int stage) { return stage == 1 ? clip1 : clip2; }
     sat::MultibandSaturator& getSaturator() { return saturator; }
+    space::SpaceReverb& getReverb() { return reverb; }
 
     /** Output peak since last read, per channel (0 = left, 1 = right). */
     float getAndResetPeak (int channel) { return peaks[(size_t) channel].exchange (0.0f); }
@@ -110,6 +112,7 @@ private:
     ClipDistortion clip1, clip2;
     eq::ParametricEQ<Params::numBands> equaliser;
     sat::MultibandSaturator saturator;
+    space::SpaceReverb reverb;
     std::vector<float> left, right, mid;
     juce::SmoothedValue<float> outGain;
 
@@ -131,6 +134,7 @@ private:
     std::atomic<float> *outGainParam, *eqScaleParam;
     ClipParams clipParams[2];
     BandParams bandParams[Params::numBands];
+    std::atomic<float>* spcParams[25] {};
     std::atomic<float> *satOn, *satBands, *satSlope, *satOs, *satMix, *satOut, *satIn, *satMode;
     std::array<std::atomic<float>*, sat::maxBands - 1> satX {};
     SatBandParams satBandParams[sat::maxBands];

@@ -3,6 +3,7 @@
 #include "LookAndFeel.h"
 #include "Widgets.h"
 #include "EQDisplay.h"
+#include "SpaceView.h"
 #include "Tuner.h"
 #include "PresetBar.h"
 #include "DistortionView.h"
@@ -23,7 +24,7 @@ public:
     void paint (juce::Graphics&) override;
     void resized() override;
 
-    void showTab (int tab);   // 0 = KICK, 1 = DISTORTION, 2 = SATURATION, 3 = SCOPE
+    void showTab (int tab);   // 0 = KICK, 1 = DISTORTION, 2 = SATURATION, 3 = SPACE, 4 = SCOPE
     void openAbout() { aboutOverlay.open(); }
     void openSaveDialog() { presetBar.onSaveRequested(); }
     std::function<void (float)> onScaleRequested;
@@ -50,8 +51,8 @@ private:
     PressButton previewButton { "preview", Icons::play() };
     HeaderKnob outGain { "Output" };
     LevelMeter meterL, meterR;
-    std::array<juce::TextButton, 4> tabButtons { juce::TextButton ("KICK"), juce::TextButton ("DISTORTION"),
-                                                 juce::TextButton ("SATURATION"), juce::TextButton ("SCOPE") };
+    std::array<juce::TextButton, 5> tabButtons { juce::TextButton ("KICK"), juce::TextButton ("DISTORTION"),
+                                                 juce::TextButton ("SATURATION"), juce::TextButton ("SPACE"), juce::TextButton ("SCOPE") };
     TunerAnalyser tunerAnalyser;
     TunerChip tunerChip;
 
@@ -74,6 +75,7 @@ private:
     DistortionUnit unit1, unit2;
     ScopePage scopePage;
     SaturationPage saturationPage;
+    SpacePage spacePage;
 
     /** Shown over the pitch-envelope panel while the 909 engine is active. */
     struct EngineNotice : public juce::Component

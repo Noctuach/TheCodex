@@ -32,6 +32,12 @@ CodexProcessor::CodexProcessor()
         bandParams[b] = { p (ID::band (b, "On")), p (ID::band (b, "Type")), p (ID::band (b, "Freq")),
                           p (ID::band (b, "Gain")), p (ID::band (b, "Q")), p (ID::band (b, "Slope")), p (ID::band (b, "Place")) };
 
+    {
+        const char* spc[] = { "On", "Mode", "Mix", "PreDelay", "Decay", "HighCut", "LowCut", "Depth", "Width", "Duck",
+                              "ESize", "ECross", "ESend", "EDiff", "EModRate", "EModDepth",
+                              "LSize", "LCross", "LDiff", "LModRate", "LModDepth", "BassMult", "BassX", "HighMult", "HighX" };
+        for (int i = 0; i < 25; ++i) spcParams[i] = p (ID::spc (spc[i]));
+    }
     satOn = p (ID::sat ("On")); satBands = p (ID::sat ("Bands")); satSlope = p (ID::sat ("Slope"));
     satOs = p (ID::sat ("OS")); satMix = p (ID::sat ("Mix")); satOut = p (ID::sat ("Out"));
     satIn = p (ID::sat ("In")); satMode = p (ID::sat ("Mode"));
@@ -66,6 +72,7 @@ void CodexProcessor::prepareToPlay (double sampleRate, int)
     clip2.prepare (sampleRate, chunkSize);
     equaliser.prepare (sampleRate);
     saturator.prepare (sampleRate, chunkSize);
+    reverb.prepare (sampleRate);
     updateParameters();
 
     outGain.reset (sampleRate, 0.02);
@@ -183,6 +190,17 @@ void CodexProcessor::updateParameters()
     }
     saturator.setSettings (ss);
 
+    {
+        auto v = [this] (int i) { return spcParams[i]->load(); };
+        space::Settings rs;
+        rs.enabled = v (0) > 0.5f; rs.mode = (int) v (1); rs.mix = v (2); rs.predelayMs = v (3); rs.decay = v (4);
+        rs.highCut = v (5); rs.lowCut = v (6); rs.depth = v (7); rs.width = v (8); rs.duck = v (9);
+        rs.eSize = v (10); rs.eCross = v (11); rs.eSend = v (12); rs.eDiffusion = v (13); rs.eModRate = v (14); rs.eModDepth = v (15);
+        rs.lSize = v (16); rs.lCross = v (17); rs.lDiffusion = v (18); rs.lModRate = v (19); rs.lModDepth = v (20);
+        rs.bassMult = v (21); rs.bassXover = v (22); rs.highMult = v (23); rs.highXover = v (24);
+        reverb.setSettings (rs);
+    }
+
     outGain.setTargetValue (juce::Decibels::decibelsToGain (outGainParam->load()));
 
     // Oversampling and the saturation stage change the latency: report it to the host
@@ -279,13 +297,14 @@ void CodexProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiB
         }
         std::copy (l, l + n, r);
 
-        // Old-school chain: distort -> EQ -> distort again -> multiband saturation (stereo from here on)
+        // Old-school chain: distort -> EQ -> distort again -> multiband saturation -> space (stereo from here on)
         clip1.process (l, r, n);
         for (int i = 0; i < n; ++i) m[i] = 0.5f * (l[i] + r[i]);
         analyzerPre.push (m, n);           // spectrum before the EQ (for the EQ display)
         equaliser.process (l, r, n);
         clip2.process (l, r, n);
         saturator.process (l, r, n);
+        reverb.process (l, r, n);          // Space: stereo room reverb (off by default)
 
         for (int i = 0; i < n; ++i)
         {

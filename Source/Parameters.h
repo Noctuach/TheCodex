@@ -50,6 +50,8 @@ namespace ID
     // Saturation: global "satOn", "satBands", ... and per band "s1Style" ... "s6Bypass"
     inline juce::String sat (const char* suffix) { return juce::String ("sat") + suffix; }
     inline juce::String satBand (int bandIndex, const char* suffix) { return "s" + juce::String (bandIndex + 1) + suffix; }
+    /** Space (reverb) parameters: "spcOn", "spcDecay", ... */
+    inline juce::String spc (const char* suffix) { return juce::String ("spc") + suffix; }
 }
 
 namespace Params

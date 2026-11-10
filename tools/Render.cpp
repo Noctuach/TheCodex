@@ -171,6 +171,98 @@ int main (int argc, char** argv)
         proc.presets.loadPreset (0);
     }
 
+    // ---- Space reverb: stability, decay time, low cut, bypass ----
+    {
+        int bad = 0;
+        auto impulse = [] (space::SpaceReverb& rv, double seconds, float freq = 0.0f)
+        {
+            const int n = (int) (seconds * sr);
+            juce::AudioBuffer<float> b (2, n);
+            b.clear();
+            if (freq > 0.0f)   // 100 ms sine burst
+                for (int i = 0; i < (int) (0.1 * sr); ++i)
+                    b.setSample (0, i, 0.5f * std::sin (juce::MathConstants<float>::twoPi * freq * (float) i / (float) sr)), b.setSample (1, i, b.getSample (0, i));
+            else
+                b.setSample (0, 0, 1.0f), b.setSample (1, 0, 1.0f);
+            for (int pos = 0; pos < n; pos += 256)
+                rv.process (b.getWritePointer (0, pos), b.getWritePointer (1, pos), std::min (256, n - pos));
+            return b;
+        };
+        auto rmsDb = [] (const juce::AudioBuffer<float>& b, double t0, double t1)
+        {
+            const int s0 = (int) (t0 * sr), s1 = (int) (t1 * sr);
+            return juce::Decibels::gainToDecibels (0.5f * (b.getRMSLevel (0, s0, s1 - s0) + b.getRMSLevel (1, s0, s1 - s0)), -200.0f);
+        };
+
+        // every mode with extreme settings stays finite and bounded
+        for (int m = 0; m < 6; ++m)
+        {
+            space::SpaceReverb rv; rv.prepare (sr);
+            space::Settings st; st.enabled = true; st.mode = m; st.mix = 1.0f; st.decay = 20.0f; st.bassMult = 4.0f; st.highMult = 2.0f;
+            st.lSize = 1.0f; st.eSize = 1.0f; st.lDiffusion = 1.0f; st.eDiffusion = 1.0f; st.lModDepth = 1.0f; st.eModDepth = 1.0f; st.lowCut = 20.0f; st.duck = 0.0f;
+            rv.setSettings (st);
+            auto b = impulse (rv, 8.0, 80.0f);
+            const float pk = b.getMagnitude (0, b.getNumSamples());
+            if (! std::isfinite (pk) || pk > 4.0f) { ++bad; std::cout << "   mode " << m << " unstable, peak " << pk << "\n"; }
+        }
+
+        // measured RT60 roughly follows Decay (no ducking, flat decay EQ, 1 kHz)
+        std::cout << "\nSpace decay   set     measured RT60\n";
+        for (float d : { 0.6f, 1.5f, 4.0f })
+        {
+            space::SpaceReverb rv; rv.prepare (sr);
+            space::Settings st; st.enabled = true; st.mix = 1.0f; st.decay = d; st.bassMult = 1.0f; st.highMult = 1.0f; st.duck = 0.0f;
+            st.highCut = 20000.0f; st.predelayMs = 0.0f; st.depth = 1.0f; st.mode = 1;
+            rv.setSettings (st);
+            auto b = impulse (rv, d * 2.0 + 1.0, 1000.0f);
+            // slope between two windows in the late decay -> RT60
+            const double t0 = 0.25, t1 = 0.25 + d * 0.5;
+            const float drop = rmsDb (b, t0, t0 + 0.05) - rmsDb (b, t1, t1 + 0.05);
+            const float measured = (float) (60.0 * (t1 - t0) / juce::jmax (0.1f, drop));
+            std::cout << "              " << juce::String (d, 2).paddedRight (' ', 7) << " " << juce::String (measured, 2) << " s\n";
+            if (measured < d * 0.6f || measured > d * 1.6f) ++bad;
+        }
+
+        // the low cut keeps the sub out of the tail
+        {
+            space::SpaceReverb rv; rv.prepare (sr);
+            space::Settings st; st.enabled = true; st.mix = 1.0f; st.lowCut = 200.0f; st.duck = 0.0f; st.depth = 1.0f;
+            rv.setSettings (st);
+            auto sub = impulse (rv, 1.0, 45.0f);
+            space::SpaceReverb rv2; rv2.prepare (sr); rv2.setSettings (st);
+            auto mid = impulse (rv2, 1.0, 1000.0f);
+            const float diff = rmsDb (mid, 0.15, 0.6) - rmsDb (sub, 0.15, 0.6);
+            std::cout << "Space low cut: 45 Hz tail " << juce::String (diff, 1) << " dB below 1 kHz tail\n";
+            if (diff < 12.0f) ++bad;
+        }
+
+        // switched off: bit-exact passthrough; in the plugin: off by default and the tail rings on
+        {
+            space::SpaceReverb rv; rv.prepare (sr);
+            juce::AudioBuffer<float> b (2, 512);
+            for (int i = 0; i < 512; ++i) b.setSample (0, i, std::sin ((float) i * 0.1f)), b.setSample (1, i, std::cos ((float) i * 0.1f));
+            juce::AudioBuffer<float> ref (b);
+            rv.process (b.getWritePointer (0), b.getWritePointer (1), 512);
+            for (int i = 0; i < 512; ++i) if (b.getSample (0, i) != ref.getSample (0, i) || b.getSample (1, i) != ref.getSample (1, i)) { ++bad; break; }
+            if (proc.apvts.getRawParameterValue (ID::spc ("On"))->load() > 0.5f) ++bad;
+        }
+        {
+            proc.presets.loadPreset (8);
+            setParam (proc, ID::spc ("On"), 1.0f); setParam (proc, ID::spc ("Mix"), 0.3f); setParam (proc, ID::spc ("Decay"), 2.0f);
+            const auto withSpace = render (proc, 1);
+            const float tail = withSpace.getRMSLevel (1, withSpace.getNumSamples() - (int) (0.2 * sr), (int) (0.2 * sr));
+            const float sideRms = [&] { double s = 0; for (int i = 0; i < withSpace.getNumSamples(); ++i) { const float d = withSpace.getSample (0, i) - withSpace.getSample (1, i); s += d * d; } return (float) std::sqrt (s / withSpace.getNumSamples()); }();
+            std::cout << "Space in the plugin: tail level " << juce::String (juce::Decibels::gainToDecibels (tail), 1)
+                      << " dBFS, side (width) " << juce::String (juce::Decibels::gainToDecibels (sideRms), 1) << " dBFS, tail length "
+                      << juce::String (proc.getTailLengthSeconds(), 2) << " s\n";
+            if (sideRms < 1.0e-3f || proc.getTailLengthSeconds() < 2.0) ++bad;
+            proc.presets.loadPreset (8);
+            if (proc.apvts.getRawParameterValue (ID::spc ("On"))->load() > 0.5f) { ++bad; std::cout << "   preset did not reset Space\n"; }
+        }
+        std::cout << "Space reverb checks: " << (bad == 0 ? "OK" : "FAILED") << "\n";
+        failures += bad;
+    }
+
     // ---- Every key, both engines ----
     std::cout << "\nKey   target Hz   synth Hz   909 Hz\n";
     for (int k = 0; k < 12; ++k)
@@ -490,10 +582,14 @@ int main (int argc, char** argv)
         auto stereoAudio = render (proc, 1);
         snapshot (proc, stereoAudio, outDir.getChildFile ("ui_stereo_eq.png"), 0);
         snapshot (proc, stereoAudio, outDir.getChildFile ("ui_saturation.png"), 2);
-        snapshot (proc, stereoAudio, outDir.getChildFile ("ui_scope.png"), 3);
+        snapshot (proc, stereoAudio, outDir.getChildFile ("ui_scope.png"), 4);
         writeWav (stereoAudio, outDir.getChildFile ("stereo_demo.wav"));
         proc.presets.loadPreset (10);
     }
+    proc.presets.loadPreset (8);
+    setParam (proc, ID::spc ("On"), 1.0f);
+    snapshot (proc, render (proc, 1), outDir.getChildFile ("ui_space.png"), 3);
+    setParam (proc, ID::spc ("On"), 0.0f);
     snapshot (proc, render (proc, 1), outDir.getChildFile ("ui_about.png"), 0, 1);
     snapshot (proc, render (proc, 1), outDir.getChildFile ("ui_save.png"), 0, 2);
     {

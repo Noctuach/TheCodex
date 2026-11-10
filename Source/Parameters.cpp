@@ -3,6 +3,7 @@
 #include "DSP/ParametricEQ.h"
 #include "DSP/Kick909.h"
 #include "DSP/MultibandSaturator.h"
+#include "DSP/SpaceReverb.h"
 
 using namespace juce;
 
@@ -177,6 +178,45 @@ AudioProcessorValueTreeState::ParameterLayout Params::createLayout()
         addBool (l, ID::satBand (b, "Mute"), n + "Mute", false);
         addBool (l, ID::satBand (b, "Solo"), n + "Solo", false);
         addBool (l, ID::satBand (b, "Bypass"), n + "Bypass", false);
+    }
+
+    // ---------------- Space (reverb, ValhallaRoom-style controls) ----------------
+    {
+        auto secText = [] (float v) { return v < 10.0f ? String (v, 2) + " s" : String (v, 1) + " s"; };
+        auto multText = [] (float v) { return String (v, 2) + "x"; };
+        auto hzText2 = [] (float v) { return v < 1000.0f ? String (v, 0) + " Hz" : String (v / 1000.0f, 2) + " kHz"; };
+        auto rateText = [] (float v) { return String (0.05f + 4.95f * v * v, 2) + " Hz"; };
+        auto addPct = [&] (const char* sfx, const String& name, float def)
+        { addFloat (l, ID::spc (sfx), "Space " + name, { 0.0f, 1.0f }, def, pctText); };
+
+        addBool (l, ID::spc ("On"), "Space On", false);
+        addChoice (l, ID::spc ("Mode"), "Space Mode", space::modeNames(), 1);
+        addPct ("Mix", "Mix", 0.2f);
+        addFloat (l, ID::spc ("PreDelay"), "Space Predelay", skewed (0.0f, 500.0f, 60.0f), 10.0f, msText);
+        addFloat (l, ID::spc ("Decay"), "Space Decay", skewed (0.1f, 20.0f, 2.0f), 1.2f, secText);
+        addFloat (l, ID::spc ("HighCut"), "Space High Cut", skewed (1000.0f, 20000.0f, 6000.0f), 8000.0f, hzText2);
+        addFloat (l, ID::spc ("LowCut"), "Space Low Cut", skewed (20.0f, 1000.0f, 200.0f), 200.0f, hzText2);
+        addPct ("Depth", "Depth", 0.6f);
+        addFloat (l, ID::spc ("Width"), "Space Width", { 0.0f, 2.0f }, 1.0f, pctText);
+        addPct ("Duck", "Ducking", 0.3f);
+
+        addPct ("ESize", "Early Size", 0.5f);
+        addPct ("ECross", "Early Cross", 0.3f);
+        addPct ("ESend", "Early Send", 0.5f);
+        addPct ("EDiff", "Early Diffusion", 0.6f);
+        addFloat (l, ID::spc ("EModRate"), "Space Early Mod Rate", { 0.0f, 1.0f }, 0.4f, rateText);
+        addPct ("EModDepth", "Early Mod Depth", 0.3f);
+
+        addPct ("LSize", "Late Size", 0.5f);
+        addPct ("LCross", "Late Cross", 0.4f);
+        addPct ("LDiff", "Late Diffusion", 0.7f);
+        addFloat (l, ID::spc ("LModRate"), "Space Late Mod Rate", { 0.0f, 1.0f }, 0.35f, rateText);
+        addPct ("LModDepth", "Late Mod Depth", 0.3f);
+
+        addFloat (l, ID::spc ("BassMult"), "Space Bass Mult", skewed (0.25f, 4.0f, 1.0f), 0.75f, multText);
+        addFloat (l, ID::spc ("BassX"), "Space Bass Xover", skewed (50.0f, 2000.0f, 300.0f), 250.0f, hzText2);
+        addFloat (l, ID::spc ("HighMult"), "Space High Mult", skewed (0.1f, 2.0f, 0.75f), 0.6f, multText);
+        addFloat (l, ID::spc ("HighX"), "Space High Xover", skewed (1000.0f, 16000.0f, 4500.0f), 4000.0f, hzText2);
     }
 
     // ---------------- Output ----------------

@@ -38,6 +38,40 @@ namespace Help
         if (auto it = tips.find (id); it != tips.end())
             return it->second;
 
+        // Space (reverb): spcOn, spcDecay, ...
+        if (id.startsWith ("spc"))
+        {
+            static const std::map<juce::String, juce::String> spc {
+                { "On",        "Space On/Off: stereo room reverb at the end of the chain, for width and ambience around the kick." },
+                { "Mode",      "Mode: character of the room. Room / Large Room are natural, Chamber is dense, Hall is long and smooth, Plate is bright with almost no early reflections, Warehouse is big, dark and wobbly." },
+                { "Mix",       "Mix: balance between the dry kick and the reverb (equal power). Keep it low for kicks; 10-25 % is usually plenty." },
+                { "PreDelay",  "Predelay: gap between the kick and the start of the reverb. 10-30 ms keeps the transient clean." },
+                { "Decay",     "Decay: reverb time (RT60) of the mid frequencies. The display shows the decay across the spectrum." },
+                { "HighCut",   "High Cut: low-pass on the reverb output. Lower it for a darker, less noisy tail." },
+                { "LowCut",    "Low Cut: high-pass before the reverb, so the sub stays mono and clean. 150-300 Hz works well for kicks." },
+                { "Depth",     "Depth: balance between early reflections (0 %, close) and the late reverb (100 %, far away)." },
+                { "Width",     "Width: stereo width of the reverb (0 % = mono, 100 % = normal, 200 % = extra wide). The dry kick is not affected." },
+                { "Duck",      "Ducking: turns the reverb down while the kick hits and lets it bloom afterwards, keeping the punch." },
+                { "ESize",     "Early Size: spread of the early reflections (small = tight room, large = big space)." },
+                { "ECross",    "Early Cross: how much left and right feed into each other in the early reflections." },
+                { "ESend",     "Early Send: how much of the early reflections feed the late reverb." },
+                { "EDiff",     "Early Diffusion: smears the early reflections from distinct echoes into a smooth wash." },
+                { "EModRate",  "Early Mod Rate: speed of the movement in the early reflections." },
+                { "EModDepth", "Early Mod Depth: amount of movement in the early reflections (chorus-like)." },
+                { "LSize",     "Late Size: size of the late reverb (delay lengths). Larger sounds bigger and less metallic." },
+                { "LCross",    "Late Cross: how much left and right feed into each other in the late reverb." },
+                { "LDiff",     "Late Diffusion: density of the late reverb. High = smooth, low = grainier, more echo-like." },
+                { "LModRate",  "Late Mod Rate: speed of the delay modulation in the late reverb." },
+                { "LModDepth", "Late Mod Depth: amount of modulation in the late reverb; reduces metallic ringing." },
+                { "BassMult",  "Bass Mult: decay of the low frequencies relative to Decay (below 1x = shorter, tighter low end). Drag the BASS handle on the display." },
+                { "BassX",     "Bass Xover: frequency below which Bass Mult applies." },
+                { "HighMult",  "High Mult: decay of the high frequencies relative to Decay (below 1x = darker tail, like a real room). Drag the HIGH handle on the display." },
+                { "HighX",     "High Xover: frequency above which High Mult applies." },
+            };
+            if (auto it = spc.find (id.substring (3)); it != spc.end())
+                return it->second;
+        }
+
         // Distortion stages: d1Drive, d2Mix, ...
         if (id.length() > 2 && id[0] == 'd' && (id[1] == '1' || id[1] == '2'))
         {

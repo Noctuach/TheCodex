@@ -370,3 +370,30 @@ private:
     juce::String title;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> attachment;
 };
+
+/** Card shown over a bypassed section, with a button that switches it back on. */
+struct BypassNotice : public juce::Component
+{
+    BypassNotice() { enable.setComponentID ("pill"); addAndMakeVisible (enable); }
+    juce::String title, subtitle { "The signal passes through unchanged." };
+    juce::TextButton enable { "ENABLE" };
+    juce::Rectangle<float> card() const { return getLocalBounds().toFloat().withSizeKeepingCentre (jmin (420.0f, (float) getWidth() - 40.0f), 112.0f); }
+    void paint (juce::Graphics& g) override
+    {
+        g.setColour (Colours_::panel.withAlpha (0.72f));
+        g.fillRoundedRectangle (getLocalBounds().toFloat(), 7.0f);
+        auto c = card();
+        g.setColour (Colours_::display.withAlpha (0.95f));
+        g.fillRoundedRectangle (c, 8.0f);
+        g.setColour (Colours_::outlineHi);
+        g.drawRoundedRectangle (c, 8.0f, 1.0f);
+        g.setColour (Colours_::text);
+        g.setFont (Fonts::label (14.0f, 0.18f));
+        g.drawText (title, c.removeFromTop (38.0f), juce::Justification::centredBottom);
+        g.setColour (Colours_::textDim);
+        g.setFont (Fonts::regular (13.0f));
+        g.drawText (subtitle, c.removeFromTop (22.0f), juce::Justification::centred);
+    }
+    void resized() override { enable.setBounds (card().toNearestInt().removeFromBottom (44).withSizeKeepingCentre (120, 28)); }
+    static float jmin (float a, float b) { return a < b ? a : b; }
+};

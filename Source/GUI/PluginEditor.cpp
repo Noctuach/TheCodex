@@ -25,6 +25,7 @@ MainView::MainView (CodexProcessor& p, PropertiesFile* settingsFile)
       unit2 (p, 2, "DISTORTION 2  " + dot + "  POST-EQ"),
       scopePage (p, tunerAnalyser),
       saturationPage (p, scopePage.getHistory()),
+      spacePage (p),
       aboutOverlay (JucePlugin_VersionString)
 {
     auto& s = p.apvts;
@@ -100,7 +101,7 @@ MainView::MainView (CodexProcessor& p, PropertiesFile* settingsFile)
              &engineSwitch, &wave, &model, &tune, &phase, &clickLevel, &clickDecay, &clickTone, &tune909, &attack909, &decay909,
              &pitchEnvDisplay, &pAmount, &pAttack, &pDecay, &pSustain, &pRelease, &pCurve,
              &ampEnvDisplay, &aAttack, &aDecay, &aSustain, &aRelease, &aCurve,
-             &eqDisplay, &bandControls, &unit1, &unit2, &scopePage, &saturationPage })
+             &eqDisplay, &bandControls, &unit1, &unit2, &scopePage, &saturationPage, &spacePage })
         addAndMakeVisible (c);
     addChildComponent (engineNotice);
 
@@ -234,7 +235,8 @@ void MainView::showTab (int tab)
     unit1.setVisible (tab == 1);
     unit2.setVisible (tab == 1);
     saturationPage.setVisible (tab == 2);
-    scopePage.setVisible (tab == 3);
+    spacePage.setVisible (tab == 3);
+    scopePage.setVisible (tab == 4);
     for (int i = 0; i < (int) tabButtons.size(); ++i)
         tabButtons[(size_t) i].setToggleState (i == tab, dontSendNotification);
     updateEngineView();
@@ -287,7 +289,7 @@ void MainView::paint (Graphics& g)
     g.drawHorizontalLine (tabBar.getBottom() - 1, (float) tabBar.getX(), (float) tabBar.getRight());
     {
         // signal-flow breadcrumb, the stage of the current tab highlighted
-        const StringArray steps { "OSC", "DIST 1", "EQ", "DIST 2", "SAT", "OUT" };
+        const StringArray steps { "OSC", "DIST 1", "EQ", "DIST 2", "SAT", "SPACE", "OUT" };
         const auto font = Font (Fonts::label (12.0f, 0.16f));
         g.setFont (font);
         float x = (float) breadcrumbArea.getRight();
@@ -298,7 +300,7 @@ void MainView::paint (Graphics& g)
             const float w = ga.getBoundingBox (0, -1, true).getWidth();
             x -= w;
             const bool hi = currentTab == 0 ? (i == 0 || i == 2) : currentTab == 1 ? (i == 1 || i == 3)
-                          : currentTab == 2 ? i == 4 : i == 5;
+                          : currentTab == 2 ? i == 4 : currentTab == 3 ? i == 5 : i == 6;
             g.setColour (hi ? Colours_::accent : Colours_::textFaint);
             g.drawText (steps[i], Rectangle<float> (x, (float) tabBar.getY(), w + 2.0f, (float) tabBar.getHeight() - 2.0f), Justification::centredLeft);
             if (i > 0)
@@ -374,13 +376,13 @@ void MainView::resized()
     tabBar = r.removeFromTop (32);
     {
         auto t = tabBar;
-        const int widths[] = { 84, 136, 132, 88 };
-        for (int i = 0; i < 4; ++i)
+        const int widths[] = { 78, 128, 126, 88, 82 };
+        for (int i = 0; i < 5; ++i)
         {
             tabButtons[(size_t) i].setBounds (t.removeFromLeft (widths[i]));
             t.removeFromLeft (6);
         }
-        breadcrumbArea = t.removeFromRight (330);
+        breadcrumbArea = t.removeFromRight (360);
         t.removeFromRight (16);
         previewButton.setBounds (t.removeFromRight (30).withSizeKeepingCentre (30, 26).translated (0, -2));
         t.removeFromRight (8);
@@ -396,6 +398,7 @@ void MainView::resized()
         unit2.setBounds (u);
     }
     saturationPage.setBounds (r);
+    spacePage.setBounds (r);
     scopePage.setBounds (r);
 
     // ---- Kick page ----
