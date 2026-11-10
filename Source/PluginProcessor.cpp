@@ -506,6 +506,19 @@ void CodexProcessor::setStateInformation (const void* data, int sizeInBytes)
         if (xml->hasTagName (apvts.state.getType()))
         {
             apvts.replaceState (juce::ValueTree::fromXml (*xml));
+            // replaceState() only updates a parameter when its stored (unnormalised) value differs from the cached one,
+            // so a switch left at an in-between normalised value (hosts may send any 0..1) would not be reset.
+            // Push every stored value explicitly so the restored state is exact.
+            for (auto* prm : getParameters())
+                if (auto* rp = dynamic_cast<juce::RangedAudioParameter*> (prm))
+                {
+                    const auto child = apvts.state.getChildWithProperty ("id", rp->paramID);
+                    if (child.isValid() && child.hasProperty ("value"))
+                    {
+                        const float norm = rp->convertTo0to1 ((float) child.getProperty ("value"));
+                        if (std::abs (rp->getValue() - norm) > 1.0e-6f) rp->setValueNotifyingHost (norm);
+                    }
+                }
             undoManager.clearUndoHistory(); // restoring a session is not an undoable edit
             presets.markClean();            // the restored sound is the reference for the "*" modified marker
         }

@@ -706,6 +706,35 @@ int main (int argc, char** argv)
         proc.presets.loadPreset (7);
     }
 
+    // ---- State restore is exact even after hosts set in-between values on switches (pluginval's test) ----
+    {
+        int bad = 0;
+        juce::Random rng (77);
+        std::vector<float> saved;
+        for (auto* prm : proc.getParameters()) prm->setValueNotifyingHost (rng.nextFloat());
+        juce::MemoryBlock st;
+        proc.getStateInformation (st);
+        // what a host expects back: the value as the parameter itself represents it (switches snap to 0 / 1)
+        for (auto* prm : proc.getParameters())
+        {
+            auto* rp = dynamic_cast<juce::RangedAudioParameter*> (prm);
+            saved.push_back (rp != nullptr ? rp->convertTo0to1 (rp->convertFrom0to1 (prm->getValue())) : prm->getValue());
+        }
+        for (auto* prm : proc.getParameters()) prm->setValueNotifyingHost (rng.nextFloat());
+        proc.setStateInformation (st.getData(), (int) st.getSize());
+        int i = 0;
+        for (auto* prm : proc.getParameters())
+        {
+            if (std::abs (prm->getValue() - saved[(size_t) i]) > 0.1f) { if (++bad < 4) std::cout << "   not restored: " << prm->getName (40) << "\n"; }
+            ++i;
+        }
+        std::cout << "\nState restore after random host values: " << (bad == 0 ? "OK" : juce::String (bad) + " parameters FAILED") << "\n";
+        failures += bad > 0 ? 1 : 0;
+        proc.presets.loadPreset (0);
+        for (const auto& id : { ID::key, ID::octave, ID::keyMode })
+            if (auto* prm = proc.apvts.getParameter (id)) prm->setValueNotifyingHost (prm->getDefaultValue());
+    }
+
     // ---- Modified marker: clean after load, modified after an edit, key changes do not count ----
     {
         int bad = 0;
