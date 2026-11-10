@@ -655,6 +655,22 @@ int main (int argc, char** argv)
         proc.presets.loadPreset (7);
     }
 
+    // ---- Modified marker: clean after load, modified after an edit, key changes do not count ----
+    {
+        int bad = 0;
+        proc.presets.loadPreset (3);
+        if (proc.presets.isModified()) ++bad;
+        setParam (proc, ID::key, 5.0f);
+        if (proc.presets.isModified()) ++bad;
+        setParam (proc, ID::clip (1, "Drive"), 3.0f);
+        if (! proc.presets.isModified()) ++bad;
+        proc.presets.loadPreset (3);
+        if (proc.presets.isModified()) ++bad;
+        setParam (proc, ID::key, 0.0f);
+        std::cout << "\nModified marker: " << (bad == 0 ? "OK" : "FAILED") << "\n";
+        failures += bad;
+    }
+
     // ---- Every key, both engines ----
     std::cout << "\nKey   target Hz   synth Hz   909 Hz\n";
     for (int k = 0; k < 12; ++k)

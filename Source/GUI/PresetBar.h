@@ -45,9 +45,11 @@ public:
             for (const auto& n : users) box.addItem (n, id++);
         }
         lastName = presets.getCurrentName();
+        lastModified = presets.isModified();
         const int idx = presets.getCurrentIndex();
         if (idx >= 0) box.setSelectedId (idx + 1, juce::dontSendNotification);
-        else          box.setText (lastName, juce::dontSendNotification);
+        // a modified sound shows "*" after its name (choose the preset again to revert)
+        box.setText (lastName + (lastModified ? "  *" : ""), juce::dontSendNotification);
     }
 
     void resized() override
@@ -67,7 +69,7 @@ public:
 private:
     void timerCallback() override
     {
-        if (presets.getCurrentName() != lastName) refresh();   // host program change, undo, ...
+        if (presets.getCurrentName() != lastName || presets.isModified() != lastModified) refresh();   // program change, edits, undo
     }
 
     PresetManager& presets;
@@ -75,6 +77,7 @@ private:
                browse { "browse", Icons::browse() };
     juce::ComboBox box;
     juce::String lastName;
+    bool lastModified = false;
 };
 
 /** Row of mutually exclusive buttons bound to a choice parameter (e.g. SYNTH | 909). */

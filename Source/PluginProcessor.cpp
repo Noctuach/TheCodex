@@ -487,6 +487,7 @@ void CodexProcessor::setStateInformation (const void* data, int sizeInBytes)
         {
             apvts.replaceState (juce::ValueTree::fromXml (*xml));
             undoManager.clearUndoHistory(); // restoring a session is not an undoable edit
+            presets.markClean();            // the restored sound is the reference for the "*" modified marker
         }
 }
 

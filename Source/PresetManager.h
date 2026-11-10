@@ -31,6 +31,10 @@ public:
     bool userPresetExists (const juce::String& name) const { return getUserNames().contains (name); }
     bool isCurrentUserPreset() const { return getUserNames().contains (getCurrentName()); }
     void refreshUserPresets();
+    /** True when any sound parameter differs from the preset as it was loaded or saved (key settings excluded). */
+    bool isModified() const;
+    /** Remembers the current values as the "unmodified" reference. */
+    void markClean();
     juce::File getUserDirectory() const;
 
     static const juce::Identifier presetNameProperty;
@@ -53,5 +57,6 @@ private:
     juce::AudioProcessorValueTreeState& apvts;
     std::vector<FactoryPreset> factory;
     juce::StringArray userNames;
+    std::vector<float> cleanValues;   // parameter values at the last load / save
     juce::CriticalSection userNamesLock;   // hosts may query programs from another thread
 };

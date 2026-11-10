@@ -240,6 +240,7 @@ PresetManager::PresetManager (AudioProcessorValueTreeState& s) : apvts (s)
     refreshUserPresets();
     if (apvts.state.getProperty (presetNameProperty).toString().isEmpty())
         setCurrentName ("Init");
+    markClean();
 }
 
 StringArray PresetManager::getCategories()
@@ -340,6 +341,26 @@ String PresetManager::getCurrentName() const
     return apvts.state.getProperty (presetNameProperty, "Init").toString();
 }
 
+void PresetManager::markClean()
+{
+    cleanValues.clear();
+    for (auto* p : apvts.processor.getParameters())
+        cleanValues.push_back (p->getValue());
+}
+
+bool PresetManager::isModified() const
+{
+    const auto& params = apvts.processor.getParameters();
+    if (cleanValues.size() != (size_t) params.size()) return false;
+    for (int i = 0; i < params.size(); ++i)
+    {
+        auto* rp = dynamic_cast<RangedAudioParameter*> (params[i]);
+        if (rp != nullptr && isKeyParameter (rp->paramID)) continue;
+        if (std::abs (params[i]->getValue() - cleanValues[(size_t) i]) > 1.0e-5f) return true;
+    }
+    return false;
+}
+
 void PresetManager::loadFactory (int index)
 {
     if (! isPositiveAndBelow (index, (int) factory.size())) return;
@@ -347,6 +368,7 @@ void PresetManager::loadFactory (int index)
     for (const auto& [id, value] : factory[(size_t) index].values)
         setValue (id, value);
     setCurrentName (factory[(size_t) index].name);
+    markClean();
 }
 
 void PresetManager::loadUser (const String& name)
@@ -366,6 +388,7 @@ void PresetManager::loadUser (const String& name)
                 setValue (rp->paramID, (float) child.getProperty ("value"));
         }
     setCurrentName (name);
+    markClean();
 }
 
 bool PresetManager::saveUserPreset (const String& rawName)
@@ -373,6 +396,7 @@ bool PresetManager::saveUserPreset (const String& rawName)
     const auto name = File::createLegalFileName (rawName.trim());
     if (name.isEmpty()) return false;
     setCurrentName (name);
+    markClean();
     auto state = apvts.copyState();
     bool ok = false;
     if (auto xml = state.createXml())
