@@ -180,7 +180,9 @@ private:
             default: traces = { { 1, Colours_::accent2 } }; break;
         }
 
-        const int columns = jmax (2, (int) plot.getWidth());
+        // one column per physical pixel (HiDPI / scaled UI), so the trace stays sharp
+        const float pixelScale = jmax (1.0f, g.getInternalContext().getPhysicalPixelScaleFactor());
+        const int columns = jmax (2, (int) (plot.getWidth() * pixelScale));
         std::vector<float> mn ((size_t) jmax (columns, CodexProcessor::scopePoints)), mx (mn.size());
         bool any = false;
 
@@ -223,13 +225,32 @@ private:
             Path wave;
             auto xAt = [&] (int i) { return plot.getX() + plot.getWidth() * (float) i / (float) ((hit ? CodexProcessor::scopePoints : count) - 1); };
             auto yAt = [&] (float v) { return plot.getCentreY() - jlimit (-1.1f, 1.1f, v) * plot.getHeight() * 0.5f; };
+
+            // Zoomed in far enough that a column holds about one sample: draw the actual waveform as a crisp line
+            const double srNow = proc.getSampleRate() > 0 ? proc.getSampleRate() : 48000.0;
+            if (! hit && seconds * srNow < (double) columns * 1.5)
+            {
+                const int total = jmin (StereoHistory::size - 1, (int) (seconds * srNow));
+                Path line;
+                for (int i = 0; i <= total; ++i)
+                {
+                    const int ago = total - i;
+                    const float L = history.left (ago), R = history.right (ago);
+                    const float v = ch == 0 ? L : ch == 1 ? R : ch == 2 ? 0.5f * (L + R) : 0.5f * (L - R);
+                    const float x = plot.getX() + plot.getWidth() * (float) i / (float) total;
+                    if (i == 0) line.startNewSubPath (x, yAt (v)); else line.lineTo (x, yAt (v));
+                }
+                Colours_::strokeGlow (g, line, colour, 1.3f);
+                continue;
+            }
             wave.startNewSubPath (xAt (0), yAt (mx[0]));
             for (int i = 1; i < count; ++i) wave.lineTo (xAt (i), yAt (mx[(size_t) i]));
             for (int i = count - 1; i >= 0; --i) wave.lineTo (xAt (i), yAt (mn[(size_t) i]));
             wave.closeSubPath();
             g.setColour (colour.withAlpha (traces.size() > 1 ? 0.22f : 0.3f));
             g.fillPath (wave);
-            Colours_::strokeGlow (g, wave, colour, 1.0f);
+            g.setColour (colour);
+            g.strokePath (wave, PathStrokeType (1.0f / pixelScale * 1.2f));
         }
 
         if (! any)
@@ -330,7 +351,7 @@ private:
         }
 
         // points: the newest ~40 ms, older points fainter
-        const int n = 2048;
+        const int n = 6144;
         const float scale = size * 0.5f;
         for (int i = n - 1; i >= 0; --i)
         {
@@ -339,8 +360,8 @@ private:
             if (ms) { x = (L - R) * 0.7071f; y = (L + R) * 0.7071f; }
             else    { x = R; y = L; }
             const float px = c.x + jlimit (-1.0f, 1.0f, x) * scale, py = c.y - jlimit (-1.0f, 1.0f, y) * scale;
-            g.setColour (Colours_::accent.withAlpha (0.12f + 0.5f * (1.0f - (float) i / (float) n)));
-            g.fillRect (px - 0.75f, py - 0.75f, 1.5f, 1.5f);
+            g.setColour (Colours_::accent.withAlpha (0.08f + 0.55f * (1.0f - (float) i / (float) n)));
+            g.fillRect (px - 0.6f, py - 0.6f, 1.2f, 1.2f);
         }
 
         // correlation and width meters
@@ -426,7 +447,7 @@ public:
     }
 
 private:
-    static constexpr int fftOrder = 13, fftSize = 1 << fftOrder;
+    static constexpr int fftOrder = 14, fftSize = 1 << fftOrder;
 
     void paintContent (juce::Graphics& g, juce::Rectangle<int> area) override
     {
@@ -462,17 +483,21 @@ private:
         {
             Path p;
             bool started = false;
-            for (int x = (int) plot.getX(); x <= (int) plot.getRight(); x += 2)
+            const float step = 1.0f / jmax (1.0f, g.getInternalContext().getPhysicalPixelScaleFactor());
+            for (float xf = plot.getX(); xf <= plot.getRight(); xf += step)
             {
-                const float f = 20.0f * std::pow (1000.0f, ((float) x - plot.getX()) / plot.getWidth());
-                const float bin = f / (float) (sr / fftSize);
+                const float x = xf;
+                const float f = 20.0f * std::pow (1000.0f, (x - plot.getX()) / plot.getWidth());
+                const float fNext = 20.0f * std::pow (1000.0f, (x + step - plot.getX()) / plot.getWidth());
+                const float bin = f / (float) (sr / fftSize), binNext = fNext / (float) (sr / fftSize);
                 const int i = jlimit (1, fftSize / 2 - 2, (int) bin);
                 const float frac = jlimit (0.0f, 1.0f, bin - (float) i);
                 float v = jmap (frac, db[(size_t) i], db[(size_t) i + 1]);
+                for (int k = i + 1; k < jmin (fftSize / 2 - 1, (int) binNext); ++k) v = jmax (v, db[(size_t) k]);   // many bins per pixel: peak
                 v += slopeDb * std::log2 (f / 1000.0f);   // tilt around 1 kHz
                 const float y = jlimit (plot.getY(), plot.getBottom(), dy (v));
-                if (! started) { p.startNewSubPath ((float) x, closed ? plot.getBottom() : y); if (closed) p.lineTo ((float) x, y); started = true; }
-                else p.lineTo ((float) x, y);
+                if (! started) { p.startNewSubPath (x, closed ? plot.getBottom() : y); if (closed) p.lineTo (x, y); started = true; }
+                else p.lineTo (x, y);
             }
             if (closed) { p.lineTo (plot.getRight(), plot.getBottom()); p.closeSubPath(); }
             return p;
@@ -603,7 +628,7 @@ public:
             addAndMakeVisible (c);
         pullL.resize (32768);
         pullR.resize (32768);
-        startTimerHz (30);
+        startTimerHz (60);
     }
 
     const StereoHistory& getHistory() const { return history; }

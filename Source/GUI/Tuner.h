@@ -14,7 +14,7 @@ public:
     {
         pullBuffer.resize (32768);
         ring.assign (ringSize, 0.0f);
-        startTimerHz (20);
+        startTimerHz (30);
     }
 
     float getTargetNote() const { return proc.getTargetNote(); }

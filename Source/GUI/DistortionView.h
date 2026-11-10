@@ -147,7 +147,7 @@ public:
         addChildComponent (bypassNotice);
         onParam = s.getRawParameterValue (ID::clip (stage, "On"));
 
-        startTimerHz (30);
+        startTimerHz (60);
     }
 
     void paint (juce::Graphics& g) override

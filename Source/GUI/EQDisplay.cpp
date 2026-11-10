@@ -81,7 +81,7 @@ EQDisplay::EQDisplay (CodexProcessor& p, int eqIndex) : eqIdx (eqIndex), proc (p
     addAndMakeVisible (analyzerMenuButton);
     setWantsKeyboardFocus (true);
 
-    startTimerHz (30);
+    startTimerHz (60);
 }
 
 void EQDisplay::resized()

@@ -113,7 +113,7 @@ MainView::MainView (CodexProcessor& p, PropertiesFile* settingsFile)
     setTooltipsEnabled (settings == nullptr || settings->getBoolValue (tooltipsKey, true));
     setSize (baseWidth, baseHeight);
     showTab (0);
-    startTimerHz (30);
+    startTimerHz (60);
 }
 
 void MainView::setTooltipsEnabled (bool enabled)

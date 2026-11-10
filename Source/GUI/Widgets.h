@@ -93,7 +93,7 @@ public:
 };
 
 /** Draws the actual ADSR shape (with curve) from live parameter values. */
-class EnvelopeDisplay : public juce::Component, private juce::Timer
+class EnvelopeDisplay : public juce::Component, public juce::SettableTooltipClient, private juce::Timer
 {
 public:
     EnvelopeDisplay (juce::AudioProcessorValueTreeState& s, const juce::String& a, const juce::String& d,
@@ -102,7 +102,63 @@ public:
     {
         params = { s.getRawParameterValue (a), s.getRawParameterValue (d), s.getRawParameterValue (sus),
                    s.getRawParameterValue (r), s.getRawParameterValue (curve) };
-        startTimerHz (30);
+        rangedParams = { s.getParameter (a), s.getParameter (d), s.getParameter (sus), s.getParameter (r), s.getParameter (curve) };
+        setTooltip ("Drag the points: attack (left peak), decay + sustain (corner), release (end), curve (middle of the decay). "
+                    "Shift: fine. Double-click a point: reset.");
+        startTimerHz (60);
+    }
+
+    // ---- direct editing: drag the envelope's points ----
+    void mouseMove (const juce::MouseEvent& e) override
+    {
+        const int h = hitNode (e.position);
+        if (h != hover) { hover = h; repaint(); }
+        setMouseCursor (h >= 0 ? juce::MouseCursor::DraggingHandCursor : juce::MouseCursor::NormalCursor);
+    }
+    void mouseExit (const juce::MouseEvent&) override { hover = -1; repaint(); }
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        dragging = hitNode (e.position);
+        if (dragging < 0) return;
+        lastPos = e.position;
+        for (int i : nodeParams (dragging)) rangedParams[(size_t) i]->beginChangeGesture();
+    }
+    void mouseDrag (const juce::MouseEvent& e) override
+    {
+        if (dragging < 0) return;
+        const float fine = e.mods.isShiftDown() ? 0.15f : 1.0f;
+        const auto d = (e.position - lastPos) * fine;
+        lastPos = e.position;
+        auto nudge = [this] (int i, float delta)
+        {
+            auto* p = rangedParams[(size_t) i];
+            p->setValueNotifyingHost (juce::jlimit (0.0f, 1.0f, p->getValue() + delta));
+        };
+        const float w = juce::jmax (40.0f, inner().getWidth()), h = juce::jmax (20.0f, inner().getHeight());
+        switch (dragging)
+        {
+            case 0: nudge (0, d.x / w * 1.2f); break;                         // attack time
+            case 1: nudge (1, d.x / w * 1.2f); nudge (2, -d.y / h); break;     // decay time + sustain level
+            case 2: nudge (3, d.x / w * 1.2f); break;                         // release time
+            case 3: nudge (4, -d.y / h * 1.5f); break;                         // curve
+            default: break;
+        }
+    }
+    void mouseUp (const juce::MouseEvent&) override
+    {
+        if (dragging >= 0)
+            for (int i : nodeParams (dragging)) rangedParams[(size_t) i]->endChangeGesture();
+        dragging = -1;
+    }
+    void mouseDoubleClick (const juce::MouseEvent& e) override
+    {
+        const int n = hitNode (e.position);
+        if (n < 0) return;
+        for (int i : nodeParams (n))
+        {
+            auto* p = rangedParams[(size_t) i];
+            p->beginChangeGesture(); p->setValueNotifyingHost (p->getDefaultValue()); p->endChangeGesture();
+        }
     }
 
     void paint (juce::Graphics& g) override
@@ -124,7 +180,7 @@ public:
         g.setColour (Colours_::outline);
         g.drawRoundedRectangle (area.reduced (0.5f), 6.0f, 1.0f);
 
-        area = area.reduced (9.0f, 9.0f);
+        area = inner();
 
         const float A = cached[0], D = cached[1], S = cached[2], R = cached[3], C = cached[4];
         // sqrt time scaling keeps short and long stages readable at once
@@ -165,7 +221,35 @@ public:
         g.drawVerticalLine ((int) noteOffX, area.getY(), area.getBottom());
         g.setFont (Fonts::label (10.0f, 0.15f));
         g.drawText ("NOTE OFF", juce::Rectangle<float> (noteOffX + 4.0f, area.getY() - 3.0f, 60.0f, 12.0f), juce::Justification::centredLeft);
+
+        // draggable points
+        for (int n = 0; n < 4; ++n)
+        {
+            const auto pt = nodes[(size_t) n];
+            const bool hi = n == hover || n == dragging;
+            const float r = n == 3 ? 3.5f : 4.5f;
+            if (hi) { g.setColour (colour.withAlpha (0.25f)); g.fillEllipse (juce::Rectangle<float> (r * 4, r * 4).withCentre (pt)); }
+            g.setColour (n == 3 ? Colours_::display : colour);
+            g.fillEllipse (juce::Rectangle<float> (r * 2, r * 2).withCentre (pt));
+            g.setColour (n == 3 ? colour : Colours_::display);
+            g.drawEllipse (juce::Rectangle<float> (r * 2, r * 2).withCentre (pt), 1.2f);
+        }
+        if (dragging >= 0 || hover >= 0)
+        {
+            const int n = dragging >= 0 ? dragging : hover;
+            const juce::String names[] = { "Attack", "Decay / Sustain", "Release", "Curve" };
+            juce::String txt = names[n] + "  ";
+            for (int i : nodeParams (n)) txt << rangedParams[(size_t) i]->getCurrentValueAsText() << "  ";
+            g.setFont (Fonts::medium (11.5f));
+            auto box = juce::Rectangle<float> (180.0f, 18.0f).withCentre (nodes[(size_t) n].translated (0, -18.0f)).constrainedWithin (area);
+            g.setColour (Colours_::panelTop.withAlpha (0.92f));
+            g.fillRoundedRectangle (box, 4.0f);
+            g.setColour (Colours_::text);
+            g.drawText (txt.trim(), box, juce::Justification::centred);
+        }
     }
+
+    void resized() override { updateNodes(); }
 
 private:
     void timerCallback() override
@@ -176,12 +260,43 @@ private:
             const float v = params[i]->load();
             if (! juce::exactlyEqual (v, cached[i])) { cached[i] = v; changed = true; }
         }
-        if (changed) repaint();
+        if (changed) { updateNodes(); repaint(); }
+    }
+
+    juce::Rectangle<float> inner() const { return getLocalBounds().toFloat().reduced (9.0f, 9.0f); }
+    void updateNodes()
+    {
+        const auto area = inner();
+        const float A = juce::jmax (0.0f, cached[0]), D = juce::jmax (0.0f, cached[1]), S = juce::jlimit (0.0f, 1.0f, cached[2]), R = juce::jmax (0.0f, cached[3]), C = cached[4];
+        const float wa = std::sqrt (A), wd = std::sqrt (D), wr = std::sqrt (R);
+        const float ws = (wa + wd + wr) * 0.25f + 1.0f, total = wa + wd + ws + wr;
+        auto X = [&] (float u) { return area.getX() + u / total * area.getWidth(); };
+        auto Y = [&] (float lvl) { return area.getBottom() - lvl * area.getHeight(); };
+        nodes[0] = { X (wa), Y (1.0f) };
+        nodes[1] = { X (wa + wd), Y (S) };
+        nodes[2] = { X (total), Y (0.0f) };
+        nodes[3] = { X (wa + 0.5f * wd), Y (S + (1.0f - S) * CurveEnvelope::shapeFor (0.5f, C)) };
+    }
+    int hitNode (juce::Point<float> p) const
+    {
+        int best = -1;
+        float bestD = 11.0f;
+        for (int n = 0; n < 4; ++n)
+            if (const float d = nodes[(size_t) n].getDistanceFrom (p); d < bestD) { bestD = d; best = n; }
+        return best;
+    }
+    static std::vector<int> nodeParams (int node)
+    {
+        switch (node) { case 0: return { 0 }; case 1: return { 1, 2 }; case 2: return { 3 }; default: return { 4 }; }
     }
 
     juce::Colour colour;
     std::array<std::atomic<float>*, 5> params {};
+    std::array<juce::RangedAudioParameter*, 5> rangedParams {};
     std::array<float, 5> cached { -1, -1, -1, -1, -1 };
+    std::array<juce::Point<float>, 4> nodes {};
+    int hover = -1, dragging = -1;
+    juce::Point<float> lastPos;
 };
 
 /** Vertical peak meter with hold marker (red above 0 dBFS). */

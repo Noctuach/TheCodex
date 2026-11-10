@@ -87,7 +87,7 @@ public:
     //==========================================================================
     // Hit-synced scope capture: min/max of Left, Right, Mid and Side for each display point
     // (written by the audio thread from each note-on, read by the GUI).
-    static constexpr int scopePoints = 800;
+    static constexpr int scopePoints = 3200;   // hit capture resolution (min/max per point)
     enum ScopeChannel { ScopeLeft = 0, ScopeRight, ScopeMid, ScopeSide, numScopeChannels };
     std::array<std::array<float, scopePoints>, numScopeChannels> scopeMin {}, scopeMax {};
     std::atomic<int> scopeWritten { 0 }, scopeGeneration { 0 };

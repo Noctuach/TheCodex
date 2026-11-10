@@ -77,7 +77,7 @@ public:
     {
         fftData.assign (fftSize * 2, 0.0f);
         spectrum.assign (fftSize / 2, -150.0f);
-        startTimerHz (30);
+        startTimerHz (60);
     }
 
     std::function<void (int)> onBandSelected;
