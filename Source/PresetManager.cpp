@@ -130,6 +130,21 @@ PresetManager::PresetManager (AudioProcessorValueTreeState& s) : apvts (s)
          .clip (1, CD::Diode, 24.0f, -9.0f, 0.1f).band (1, LowCut, 32.0f).band (3, Bell, 450.0f, 5.0f, 1.2f)
          .band (4, Notch, 1500.0f, 0.0f, 3.0f).clip (2, CD::HardClip, 12.0f, -6.0f).character (1, 0.25f));
 
+    // Output levels matched to about -3 dBFS peak in the key of F (measured with tools/CodexRender),
+    // so switching presets does not jump in volume.
+    const std::map<String, float> outputLevels {
+        { "Oldskool Raw", 0.3f }, { "Euphoric Tail", -1.3f }, { "Early Hardstyle", 0.4f }, { "Punchy Tok", -1.8f },
+        { "Zaag Kick", 1.4f }, { "Rotterdam Gabber", -0.2f }, { "909 Clean", -3.7f }, { "909 Oldskool Hardstyle", 1.4f },
+        { "909 Euphoric", -0.9f }, { "909 Rawstyle", -0.8f }, { "909 Gabber Overdrive", 1.6f }, { "909 Tok", -3.3f },
+        { "909 Boom Tail", -0.2f }, { "909 Fuzz Box", 1.7f }, { "909 Bitcrushed", 1.9f }, { "909 Hard Attack Raw", -0.1f } };
+    for (auto& preset : factory)
+        if (auto it = outputLevels.find (preset.name); it != outputLevels.end())
+        {
+            auto& v = preset.values;
+            v.erase (std::remove_if (v.begin(), v.end(), [] (const auto& kv) { return kv.first == ID::outGain; }), v.end());
+            v.push_back ({ ID::outGain, it->second });
+        }
+
     refreshUserPresets();
     if (apvts.state.getProperty (presetNameProperty).toString().isEmpty())
         setCurrentName ("Init");
