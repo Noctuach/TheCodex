@@ -1,14 +1,22 @@
 # Codex
 
 **A free hardstyle kick synthesizer.** Codex builds kicks the way they were made before sample packs: a swept oscillator
-(or a synthesized 909), distortion, EQ, distortion again and multiband saturation. There are no samples; every kick is
-generated in real time, in the key of your track.
+(or a synthesized 909), distortion, EQ, distortion again, multiband saturation, a multiband compressor and a room reverb.
+There are no samples; every kick is generated in real time, in the key of your track.
+
+```
+OSC / 909 -> DISTORTION 1 -> EQ -> DISTORTION 2 -> SATURATION -> COMPRESSOR -> SPACE -> OUTPUT
+```
 
 ![Codex: kick page with mid/side EQ](docs/screenshot.png)
 
-| Distortion | Saturation | Scope |
+| Distortion | Saturation | Compressor |
 |---|---|---|
-| ![Distortion page](docs/screenshot-distortion.png) | ![Saturation page](docs/screenshot-saturation.png) | ![Scope page](docs/screenshot-scope.png) |
+| ![Distortion page](docs/screenshot-distortion.png) | ![Saturation page](docs/screenshot-saturation.png) | ![Compressor page](docs/screenshot-compressor.png) |
+
+| Space | Scope |
+|---|---|
+| ![Space page](docs/screenshot-space.png) | ![Scope page](docs/screenshot-scope.png) |
 
 Formats: **VST3** (Windows, macOS, Linux), **AU** (macOS) and a **Standalone** app.
 
@@ -48,7 +56,6 @@ distortion, so you can see your kick is in key. It turns green within 10 cents o
 | Save | Saves a user preset (`Documents/Codex/Presets/*.cdxpreset`). |
 | Key / Oct | Root note, **F to E** (F1 = 43.65 Hz … E2 = 82.41 Hz), plus an octave shift. Presets never change the key. |
 | Key Mode | *Fixed Key* plays the selected key from any MIDI note; *Follow MIDI* plays the note you press. |
-| KICK | Plays the kick in the selected key. |
 | Output | Final output level, with a stereo meter. |
 | Menu | Save/delete presets, open the preset folder, interface size (75–200 %), tooltips on/off, About. |
 | ROOT / play | Tuner readout of the output's root note, and a play button that previews the kick in the selected key. |
@@ -60,11 +67,11 @@ distortion, so you can see your kick is in key. It turns green within 10 cents o
 | **Source: 909** | Synthesized 909-style bass drum. *909 Model* (Classic, Long Tail, Punch, Deep, Hard Attack, Gabber, Early Hardstyle, Boom, Driven, Short Tok) plus the original's *Tune* (sweep depth), *Attack* (click) and *Decay*. |
 | **Pitch Envelope** | ADSR for the pitch sweep, with *Amount* (semitones above the root) and *Curve*. Inactive in 909 mode. |
 | **Amp Envelope** | ADSR for volume with *Curve*. In 909 mode it acts as a gate (attack and release only). |
-| **Equalizer** | 6 bands, 10 shapes: Bell, Low/High Shelf, Low/High Cut, Notch, Band Pass, Tilt Shelf, Flat Tilt, All Pass. Slopes 6–96 dB/oct. Each band has a **stereo placement** (Stereo, Left, Right, **Mid**, **Side**); the display draws a result curve per channel group. Right-click a node to **split** a band into L+R or M+S. *Gain Scale* scales all gains at once. Analyzer with Pre/Post/Freeze and range/speed/tilt settings; display range 3/6/12/30 dB (expands automatically). |
+| **Equalizer** | Up to **24 bands** (the Pro-Q 4 limit): double-click the display or press **+ ADD** to add one, **DELETE** (or the Delete key) to remove it, the power button or Alt-click to bypass it; only bands in use are shown. 10 shapes: Bell, Low/High Shelf, Low/High Cut, Notch, Band Pass, Tilt Shelf, Flat Tilt, All Pass. Slopes 6–96 dB/oct. Each band has a **stereo placement** (Stereo, Left, Right, **Mid**, **Side**); the display draws a result curve per channel group. Right-click a node to **split** a band into L+R or M+S. *Gain Scale* scales all gains at once. Analyzer with Pre/Post/Freeze and range/speed/tilt settings; display range 3/6/12/30 dB (expands automatically). |
 
 **EQ mouse controls:** drag a node for frequency/gain (Shift: fine, Ctrl/Cmd + vertical drag: Q) · mouse wheel: Q, or slope on
 cut filters (Ctrl/Cmd + wheel: gain) · Alt-click or double-click a node: on/off · double-click empty space: new band (far left = low
-cut, far right = high cut, bottom = notch, elsewhere = bell) · right-click a node: shape, slope, stereo placement, split, reset ·
+cut, far right = high cut, bottom = notch, elsewhere = bell) · right-click a node: shape, slope, stereo placement, split, reset, delete · Delete / Backspace: delete the selected band ·
 hover the display to read the frequency and note.
 
 ### Distortion page
@@ -78,6 +85,9 @@ Two full distortion units, one **before** and one **after** the EQ:
 | Output | *Mix* (dry/wet), *Output*. |
 | Options | *Oversampling* (Off/2x/4x/8x) and *DC Filter*. |
 
+A bypassed unit is dimmed and shows an **ENABLE** card, so a switched-off stage cannot go unnoticed (the *909 Clean* preset
+bypasses both units on purpose; every other preset switches them back on).
+
 ### Saturation page
 Multiband saturation after Distortion 2, modelled on the feature set of classic multiband saturators:
 
@@ -86,6 +96,25 @@ Multiband saturation after Distortion 2, modelled on the feature set of classic 
 | Bands | 1–6 bands. Hover the top of the display and click **+** to split a band; the **×** in the band panel removes it. Drag crossover lines to move them, click a crossover handle for the slope (6/12/24/48 dB/oct, Linkwitz-Riley, phase-aligned so bands sum flat). Drag a band's **level handle** for level (Alt-drag: drive, Ctrl/Cmd-click: reset, wheel: level). M / S / B badges: mute, solo, bypass (Ctrl/Cmd-click: exclusive). |
 | Per band | *Style* (20 styles: Tube, Tape, Transformer, Amp, Clip, FX), *Drive* (output level compensated automatically) with *Drive Pan*, *Mix*, *Level* with *Level Pan*, *Feedback* + *Feedback Freq* (dies away when the input stops), *Dynamics* (right: compression, left: gating), *Tone*: Bass, Mid, Treble, Presence. |
 | Global | Power, *Channel Mode* (Stereo or Mid/Side), *Oversampling* (Off/2x/4x/8x), *Input*, *Mix*, *Output*. |
+
+### Compressor page
+Multiband compressor after the Saturation stage, modelled on the controls of FabFilter Pro-C 3 and the LA-3A:
+
+| Group | Controls |
+|---|---|
+| Display | Scrolling input (grey) and output (blue) levels with each band's gain change. Drag the dashed **threshold** line; drag inside the **knee display** above the threshold to set the ratio. The band strip below shows live gain change per band; drag its dividers to move the crossovers (24 dB/oct Linkwitz-Riley, phase-aligned). |
+| Per band | *Direction*: **Downward** (classic), **Upward** (brings quiet parts up, e.g. the tail) or **Both** (the threshold becomes a target level). *Threshold*, *Ratio* (1:1 to ∞), *Knee* (0–48 dB), *Range* (maximum gain change), *Attack*, *Release*, *Gain*; Mute / Solo / Bypass. |
+| Global | *Style*: Clean, Punch, Smooth, Bus, Mastering, Classic, Vari-Mu, Opto, **T4 Opto (LA-3A)** (fixed ~10 ms attack, two-stage program-dependent release; *Compress / Limit* switch), Pumping, TTM (upward + downward). *Bands* (1–4), *Lookahead* (Off – 10 ms, reported as latency), *Hold*, *SC High-Pass*, *Mix* (parallel), *Output*, *Auto Gain*. |
+
+### Space page
+Stereo room reverb at the end of the chain, for width and ambience. The layout follows ValhallaRoom:
+
+| Group | Controls |
+|---|---|
+| Main | *Mode* (Room, Large Room, Chamber, Hall, Plate, Warehouse), *Mix*, *Predelay*, *Decay* (RT60), *Depth* (early ↔ late), *High Cut*, *Low Cut* (keeps the sub out of the reverb), *Width*, *Ducking* (reverb dips while the kick hits). |
+| Early | *Size*, *Cross*, *Send* (into the late reverb), *Diffusion*, *Mod Rate*, *Mod Depth*. |
+| Late | *Size*, *Cross*, *Diffusion*, *Mod Rate*, *Mod Depth* (8-line modulated feedback delay network). |
+| Decay EQ | *Bass Mult/Xover*, *High Mult/Xover*: decay of the lows and highs relative to *Decay*. The display shows the decay time across the spectrum; drag the BASS / HIGH handles. |
 
 ### Scope page
 | Panel | What it shows |
@@ -135,12 +164,18 @@ Source/
   PresetManager.*       factory and user presets
   PluginProcessor.*     MIDI, the processing chain, scope capture
   DSP/                  KickVoice (synth + 909 engines), Kick909 models, CurveEnvelope,
-                        ClipDistortion, ParametricEQ, PitchDetector
-  GUI/                  look-and-feel, widgets, EQ, distortion units, tuner, scope, overlays, editor
+                        ClipDistortion, ParametricEQ, MultibandSaturator, Compressor,
+                        SpaceReverb, PitchDetector
+  GUI/                  look-and-feel, widgets, EQ, distortion, saturation, compressor, space,
+                        tuner, scope, overlays, editor
 Resources/Fonts/        Barlow (SIL Open Font License)
 docs/                   screenshots, research notes, release checklist
 tools/Render.cpp        offline test tool
 ```
+
+## Contributing
+See [CONTRIBUTING.md](CONTRIBUTING.md). Repository rule: **files are never deleted**; deprecated files stay in place
+with a note. Changes are listed in [CHANGELOG.md](CHANGELOG.md).
 
 ## Credits and licences
 - Built with [JUCE](https://juce.com).
