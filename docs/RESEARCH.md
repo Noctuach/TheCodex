@@ -94,3 +94,58 @@ The official manuals were supplied, so the EQ and saturation sections were check
 - Styles: Tube, Tape, Amplifier, Transformer, Smudge, Breakdown, Foldback, Rectify, Destroy. *Codex: 20 original styles in matching categories (Clip and FX cover foldback, rectify, smear, sub fuzz and a "Wreck" bit-crush/sample-rate/clip style).*
 - Input/output: High Quality oversampling, Channel Mode Stereo or Mid/Side, input and output level, mix, restricted feedback (feedback reduced when the input is silent). *Codex: oversampling up to 8x, everything else included.*
 - Not included: linear-phase crossovers, "Superb" 32x oversampling, the modulation system (XLFO, envelopes, MIDI sources, XY controllers), band presets.
+
+## Distortion engine: synth-style workflow (Serum reference)
+Feedback from testing was that the distortion "isn't comparable to Serum 2 yet". Xfer's own manual could not be
+fetched from this build environment, so the comparison is based on the well-known layout of Serum's distortion
+module: a set of curve modes (tube, clip, diode, folds, zero-square, downsample, asymmetric, rectify, a drawable
+X-Shaper), a resonant LP / BP / HP filter that can sit before or after the curve, Drive and Mix. What Codex added:
+
+| Area | Before | Now |
+|---|---|---|
+| Filter | fixed 12 dB low-pass before / high-pass after | resonant **Pre / Post** filter: LP 12/24, BP, HP 12/24, Notch (zero-delay SVF, Simper / Cytomic topology, safe under fast modulation; 24 dB modes use one resonant stage like an analog cascade; resonance gain compensation) |
+| Curves | 12 fixed curves | + Diode 2, Zero-Square, Downsample, **X-Shaper** and **X-Shaper (Asym)** (8 points per half, Catmull-Rom, drawn in the transfer display, preset curves) |
+| Aliasing | oversampling only (up to 8x) | **first-order antiderivative anti-aliasing** (Parker, Zambon, Välimäki, Bilbao: "Reducing the aliasing of nonlinear waveshaping using continuous-time convolution", DAFx-16) on every curve, plus 16x |
+
+Measured with `tools/Render.cpp` (5 kHz sine, hard clip at +24 dB, aliasing that lands below 20 kHz, relative to the
+harmonics; Blackman-Harris window, double-precision test tone):
+
+| Oversampling | without ADAA | with ADAA |
+|---|---|---|
+| Off | -15.5 dB | -27.9 dB |
+| 2x | -30.6 dB | -51.2 dB |
+| 4x | -39.8 dB | -63.7 dB |
+| 8x | -60.6 dB | -89.1 dB |
+| 16x | -67.6 dB | -91.1 dB |
+
+ADAA is implemented with a tabulated antiderivative per curve (cubic Hermite with the curve itself as the derivative,
+linear extension beyond the table for saturating curves, wrapped for the periodic folds), so it works for every
+mode including user-drawn X-Shaper curves.
+
+## Compressor: FabFilter Pro-C 3 and the Teletronix / UAD LA-3A as references
+From the Pro-C 3 manual (provided): the style list (Clean, Versatile, Smooth, Punch, Upward, TTM, Op-El, Vari-Mu,
+Classic, Opto, Vocal, Mastering, Bus, Pumping), Threshold / Ratio / Knee (0-72 dB) / Range, Attack / Release /
+Lookahead / Hold, Auto Gain, wet/dry. Codex implements the styles that matter for kicks (Clean, Punch, Smooth, Bus,
+Mastering, Classic, Vari-Mu, Opto, Pumping, TTM) and, as requested, **downward, upward and two-way** compression per
+band with up to 4 bands. From the LA-3A: a T4 optical cell style with a fixed ~10 ms attack, a two-stage
+program-dependent release (fast first half, then 0.5-5 s depending on how long the cell was lit) and the
+Compress / Limit switch. Static curves are verified to 0.1 dB in the test suite.
+
+## Reverb: ValhallaRoom as a reference
+Controls follow ValhallaRoom's layout (Mix, Predelay, Decay, High Cut, Depth, Early: Size / Cross / Send / Diffusion /
+Mod, Late: Size / Cross / Diffusion / Mod, Decay EQ: Bass / High multipliers and crossovers, modes). The late field is
+an 8-line Hadamard feedback delay network with modulated delays and a 3-band decay filter per line; measured RT60
+matches the Decay setting within 6 %. Kick-specific additions: Low Cut (keeps the sub out of the reverb), Width and
+Ducking. Sources: valhalladsp.com (ValhallaRoom manual pages), MusicRadar's ValhallaRoom review.
+
+## EQ processing modes: Pro-Q 4 as a reference
+Zero Latency (minimum phase), Natural Phase (here: the same filters at 2x with half-band IIR resampling, so cramping
+near Nyquist disappears) and Linear Phase (FIR built from the exact IIR magnitude, Blackman-windowed, with a 2x2
+matrix so Mid / Side / Left / Right bands work too; resolution Low to Maximum). Tests confirm identical magnitude in
+all three modes and a symmetric impulse response in Linear Phase.
+
+## Premium workflow features (overnight round)
+Modelled on what dedicated kick synthesizers offer: breakpoint (draw) envelopes for pitch and amp, a clean sub layer
+with automatic phase alignment, drag-the-kick-into-the-DAW export, macros, A/B compare, a categorised preset browser
+with favourites, an oversampled output clipper and a CPU readout. Typical presets use 2-3 % of one CPU core; the
+absolute worst case (every module on at maximum quality, two 24-band linear-phase EQs, 16x oversampling) about 50 %.
