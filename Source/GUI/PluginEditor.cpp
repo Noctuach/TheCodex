@@ -27,6 +27,7 @@ MainView::MainView (CodexProcessor& p, PropertiesFile* settingsFile)
       saturationPage (p, scopePage.getHistory()),
       spacePage (p),
       compressorPage (p),
+      eq2Page (p),
       aboutOverlay (JucePlugin_VersionString)
 {
     auto& s = p.apvts;
@@ -102,7 +103,7 @@ MainView::MainView (CodexProcessor& p, PropertiesFile* settingsFile)
              &engineSwitch, &wave, &model, &tune, &phase, &clickLevel, &clickDecay, &clickTone, &tune909, &attack909, &decay909,
              &pitchEnvDisplay, &pAmount, &pAttack, &pDecay, &pSustain, &pRelease, &pCurve,
              &ampEnvDisplay, &aAttack, &aDecay, &aSustain, &aRelease, &aCurve,
-             &eqDisplay, &bandControls, &unit1, &unit2, &scopePage, &saturationPage, &spacePage, &compressorPage })
+             &eqDisplay, &bandControls, &unit1, &unit2, &scopePage, &saturationPage, &spacePage, &compressorPage, &eq2Page })
         addAndMakeVisible (c);
     addChildComponent (engineNotice);
 
@@ -237,8 +238,9 @@ void MainView::showTab (int tab)
     unit2.setVisible (tab == 1);
     saturationPage.setVisible (tab == 2);
     compressorPage.setVisible (tab == 3);
-    spacePage.setVisible (tab == 4);
-    scopePage.setVisible (tab == 5);
+    eq2Page.setVisible (tab == 4);
+    spacePage.setVisible (tab == 5);
+    scopePage.setVisible (tab == 6);
     for (int i = 0; i < (int) tabButtons.size(); ++i)
         tabButtons[(size_t) i].setToggleState (i == tab, dontSendNotification);
     updateEngineView();
@@ -289,9 +291,10 @@ void MainView::paint (Graphics& g)
     // Tab bar
     g.setColour (Colours_::outline);
     g.drawHorizontalLine (tabBar.getBottom() - 1, (float) tabBar.getX(), (float) tabBar.getRight());
+    if (breadcrumbArea.getWidth() > 0)
     {
         // signal-flow breadcrumb, the stage of the current tab highlighted
-        const StringArray steps { "OSC", "DIST", "EQ", "DIST", "SAT", "COMP", "SPACE" };
+        const StringArray steps { "OSC", "DIST", "EQ", "DIST", "SAT", "COMP", "EQ", "SPACE" };
         const auto font = Font (Fonts::label (12.0f, 0.16f));
         g.setFont (font);
         float x = (float) breadcrumbArea.getRight();
@@ -302,7 +305,7 @@ void MainView::paint (Graphics& g)
             const float w = ga.getBoundingBox (0, -1, true).getWidth();
             x -= w;
             const bool hi = currentTab == 0 ? (i == 0 || i == 2) : currentTab == 1 ? (i == 1 || i == 3)
-                          : currentTab == 2 ? i == 4 : currentTab == 3 ? i == 5 : currentTab == 4 ? i == 6 : false;
+                          : currentTab == 2 ? i == 4 : currentTab == 3 ? i == 5 : currentTab == 4 ? i == 6 : currentTab == 5 ? i == 7 : false;
             g.setColour (hi ? Colours_::accent : Colours_::textFaint);
             g.drawText (steps[i], Rectangle<float> (x, (float) tabBar.getY(), w + 2.0f, (float) tabBar.getHeight() - 2.0f), Justification::centredLeft);
             if (i > 0)
@@ -378,13 +381,14 @@ void MainView::resized()
     tabBar = r.removeFromTop (32);
     {
         auto t = tabBar;
-        const int widths[] = { 64, 116, 116, 124, 74, 72 };
-        for (int i = 0; i < 6; ++i)
+        const int widths[] = { 60, 112, 112, 120, 56, 70, 68 };
+        for (int i = 0; i < 7; ++i)
         {
             tabButtons[(size_t) i].setBounds (t.removeFromLeft (widths[i]));
             t.removeFromLeft (6);
         }
-        breadcrumbArea = t.removeFromRight (300);
+        // the tabs follow the signal chain, so the breadcrumb is only drawn when there is room for it
+        breadcrumbArea = t.getWidth() > 640 ? t.removeFromRight (380) : juce::Rectangle<int> (t.getRight(), t.getY(), 0, t.getHeight());
         t.removeFromRight (16);
         previewButton.setBounds (t.removeFromRight (30).withSizeKeepingCentre (30, 26).translated (0, -2));
         t.removeFromRight (8);
@@ -402,6 +406,7 @@ void MainView::resized()
     saturationPage.setBounds (r);
     spacePage.setBounds (r);
     compressorPage.setBounds (r);
+    eq2Page.setBounds (r);
     scopePage.setBounds (r);
 
     // ---- Kick page ----

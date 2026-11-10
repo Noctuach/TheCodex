@@ -6,6 +6,7 @@
 #include "../Source/PluginProcessor.h"
 #include "../Source/DSP/PitchDetector.h"
 #include "../Source/GUI/PluginEditor.h"
+#include "../Source/DSP/EqEngine.h"
 
 static void setParam (CodexProcessor& p, const juce::String& id, float value)
 {
@@ -148,23 +149,23 @@ int main (int argc, char** argv)
         int bad = 0;
         proc.presets.loadPreset (0);
         auto& st = proc.apvts;
-        for (int b = 0; b < Params::numBands; ++b) EQDisplay::deleteBand (st, b);
+        for (int b = 0; b < Params::numBands; ++b) EQDisplay::deleteBand (st, 0, b);
         int added = 0;
         for (int i = 0; i < Params::numBands; ++i)
-            added += EQDisplay::addBand (st, eq::BandType::Bell, 30.0f * std::pow (2.0f, (float) i * 0.4f), i % 2 ? 1.5f : -1.5f, 2.0f) >= 0 ? 1 : 0;
-        if (added != 24 || EQDisplay::numPresent (st) != 24) ++bad;
-        if (EQDisplay::addBand (st, eq::BandType::Bell, 1000.0f) != -1) ++bad;            // 25th band refused
+            added += EQDisplay::addBand (st, 0, eq::BandType::Bell, 30.0f * std::pow (2.0f, (float) i * 0.4f), i % 2 ? 1.5f : -1.5f, 2.0f) >= 0 ? 1 : 0;
+        if (added != 24 || EQDisplay::numPresent (st, 0) != 24) ++bad;
+        if (EQDisplay::addBand (st, 0, eq::BandType::Bell, 1000.0f) != -1) ++bad;            // 25th band refused
         const auto full = render (proc, 1);
         const float peak = full.getMagnitude (0, 0, full.getNumSamples());
         if (! std::isfinite (peak) || peak > 4.0f) ++bad;
-        EQDisplay::setBandOn (st, 3, false);                                                // bypass keeps it
-        if (! EQDisplay::isPresent (st, 3) || EQDisplay::numPresent (st) != 24) ++bad;
-        EQDisplay::deleteBand (st, 3);                                                      // delete frees the slot
-        if (EQDisplay::isPresent (st, 3) || EQDisplay::firstFreeBand (st) != 3) ++bad;
+        EQDisplay::setBandOn (st, 0, 3, false);                                                // bypass keeps it
+        if (! EQDisplay::isPresent (st, 0, 3) || EQDisplay::numPresent (st, 0) != 24) ++bad;
+        EQDisplay::deleteBand (st, 0, 3);                                                      // delete frees the slot
+        if (EQDisplay::isPresent (st, 0, 3) || EQDisplay::firstFreeBand (st, 0) != 3) ++bad;
         // State from before "Used" existed: a band that is only switched On must still be present
-        for (int b = 0; b < Params::numBands; ++b) EQDisplay::deleteBand (st, b);
+        for (int b = 0; b < Params::numBands; ++b) EQDisplay::deleteBand (st, 0, b);
         setParam (proc, ID::band (2, "On"), 1.0f);
-        if (! EQDisplay::isPresent (st, 2) || EQDisplay::numPresent (st) != 1) ++bad;
+        if (! EQDisplay::isPresent (st, 0, 2) || EQDisplay::numPresent (st, 0) != 1) ++bad;
         std::cout << "\nEQ 24 bands (add, limit, bypass, delete, legacy state): " << (bad == 0 ? "OK" : "FAILED")
                   << "  (24-band peak " << juce::String (juce::Decibels::gainToDecibels (peak), 1) << " dBFS)\n";
         failures += bad;
@@ -327,6 +328,80 @@ int main (int argc, char** argv)
             if (cp.getLatencyInSamples() != (int) std::round (0.002 * sr)) ++bad;
         }
         std::cout << "Compressor checks: " << (bad == 0 ? "OK" : "FAILED") << "\n";
+        failures += bad;
+    }
+
+    // ---- EQ processing modes (Zero Latency / Natural Phase / Linear Phase) and EQ 2 ----
+    {
+        int bad = 0;
+        auto sineGain = [] (eq::EqEngine& e, float f, bool side, int latency)
+        {
+            const int n = (int) (sr * 1.0);
+            juce::AudioBuffer<float> b (2, n);
+            for (int i = 0; i < n; ++i)
+            {
+                const float v = 0.25f * std::sin (juce::MathConstants<float>::twoPi * f * (float) i / (float) sr);
+                b.setSample (0, i, v); b.setSample (1, i, side ? -v : v);
+            }
+            for (int pos = 0; pos < n; pos += 256) e.process (b.getWritePointer (0, pos), b.getWritePointer (1, pos), std::min (256, n - pos));
+            juce::ignoreUnused (latency);
+            return juce::Decibels::gainToDecibels (b.getMagnitude (0, n - (int) (0.3 * sr), (int) (0.25 * sr)) / 0.25f);
+        };
+        auto settle = [] (eq::EqEngine& e)
+        {
+            for (int i = 0; i < 500 && ! e.isLinearUpToDate(); ++i) juce::Thread::sleep (10);
+            juce::AudioBuffer<float> z (2, 256);
+            for (int i = 0; i < 200; ++i) { z.clear(); e.process (z.getWritePointer (0), z.getWritePointer (1), 256); juce::Thread::sleep (1); }
+        };
+        std::cout << "\nEQ processing modes      +6 dB bell @ 200 Hz   side low cut (50 Hz S / M)   latency\n";
+        for (int mode = 0; mode < 3; ++mode)
+        {
+            eq::EqEngine e; e.prepare (sr, 256);
+            eq::BandSettings bell; bell.on = true; bell.type = eq::BandType::Bell; bell.freq = 200.0f; bell.gainDb = 6.0f; bell.q = 1.0f;
+            eq::BandSettings cut;  cut.on = true; cut.type = eq::BandType::LowCut; cut.freq = 150.0f; cut.slope = 5; cut.placement = eq::Placement::Side;
+            e.setBand (0, bell); e.setBand (1, cut);
+            e.setMode (mode, 1);
+            settle (e);
+            const float g200 = sineGain (e, 200.0f, false, 0);
+            const float s50 = sineGain (e, 50.0f, true, 0), m50 = sineGain (e, 50.0f, false, 0);
+            const int lat = e.getLatencyInSamples();
+            std::cout << "  " << juce::String (eq::processingModeNames()[mode]).paddedRight (' ', 22) << juce::String (g200, 2).paddedLeft (' ', 8) << " dB"
+                      << juce::String (s50, 1).paddedLeft (' ', 16) << " / " << juce::String (m50, 1) << " dB" << juce::String (lat).paddedLeft (' ', 14) << " samples\n";
+            if (std::abs (g200 - 6.0f) > 0.3f || s50 > -30.0f || std::abs (m50 - 0.4f) > 0.3f) ++bad;   // 0.4 dB = skirt of the bell at 50 Hz
+            if (mode == 0 && lat != 0) ++bad;
+            if (mode == 2 && lat != eq::firLength (1, sr) / 2) ++bad;
+        }
+        // linear phase: impulse response symmetric around the latency (no phase shift)
+        {
+            eq::EqEngine e; e.prepare (sr, 256);
+            eq::BandSettings bell; bell.on = true; bell.type = eq::BandType::Bell; bell.freq = 120.0f; bell.gainDb = 9.0f; bell.q = 0.8f;
+            e.setBand (0, bell); e.setMode (2, 0); settle (e);
+            const int lat = e.getLatencyInSamples(), n = lat * 2 + 512;
+            juce::AudioBuffer<float> b (2, n); b.clear(); b.setSample (0, 0, 1.0f); b.setSample (1, 0, 1.0f);
+            for (int pos = 0; pos < n; pos += 256) e.process (b.getWritePointer (0, pos), b.getWritePointer (1, pos), std::min (256, n - pos));
+            float asym = 0.0f, peak = 0.0f;
+            for (int k = 1; k < lat; ++k) asym = std::max (asym, std::abs (b.getSample (0, lat + k) - b.getSample (0, lat - k)));
+            for (int i = 0; i < n; ++i) peak = std::max (peak, std::abs (b.getSample (0, i)));
+            const bool peakAtLatency = std::abs (b.getSample (0, lat)) >= peak * 0.999f;
+            std::cout << "  Linear phase impulse: peak at the latency " << (peakAtLatency ? "yes" : "NO") << ", max asymmetry " << asym << "\n";
+            if (! peakAtLatency || asym > 1.0e-3f) ++bad;
+        }
+        // EQ 2 in the plugin: a band changes the output; latency is reported for linear phase
+        {
+            proc.presets.loadPreset (8);
+            const auto before = render (proc, 1);
+            EQDisplay::addBand (proc.apvts, 1, eq::BandType::LowCut, 200.0f);
+            const auto after = render (proc, 1);
+            const float d = juce::Decibels::gainToDecibels (after.getRMSLevel (0, 0, after.getNumSamples()) / before.getRMSLevel (0, 0, before.getNumSamples()));
+            setParam (proc, ID::eqMode (1), 2.0f);
+            render (proc, 1);
+            const int lat = proc.getLatencySamples();
+            std::cout << "  EQ 2 low cut at 200 Hz changes the kick by " << juce::String (d, 2) << " dB; linear-phase EQ 2 latency " << lat << " samples\n";
+            if (std::abs (d) < 0.2f || lat < eq::firLength (1, sr) / 2) ++bad;
+            proc.presets.loadPreset (8);
+            if (EQDisplay::numPresent (proc.apvts, 1) != 0 || proc.apvts.getRawParameterValue (ID::eqMode (1))->load() != 0.0f) { ++bad; std::cout << "   preset did not reset EQ 2\n"; }
+        }
+        std::cout << "EQ mode checks: " << (bad == 0 ? "OK" : "FAILED") << "\n";
         failures += bad;
     }
 
@@ -649,7 +724,7 @@ int main (int argc, char** argv)
         auto stereoAudio = render (proc, 1);
         snapshot (proc, stereoAudio, outDir.getChildFile ("ui_stereo_eq.png"), 0);
         snapshot (proc, stereoAudio, outDir.getChildFile ("ui_saturation.png"), 2);
-        snapshot (proc, stereoAudio, outDir.getChildFile ("ui_scope.png"), 5);
+        snapshot (proc, stereoAudio, outDir.getChildFile ("ui_scope.png"), 6);
         writeWav (stereoAudio, outDir.getChildFile ("stereo_demo.wav"));
         proc.presets.loadPreset (10);
     }
@@ -657,8 +732,14 @@ int main (int argc, char** argv)
     setParam (proc, ID::cmp ("On"), 1.0f); setParam (proc, ID::cmp ("Bands"), 3.0f);
     snapshot (proc, render (proc, 3), outDir.getChildFile ("ui_compressor.png"), 3);
     proc.presets.loadPreset (8);
+    EQDisplay::addBand (proc.apvts, 1, eq::BandType::LowCut, 35.0f);
+    EQDisplay::addBand (proc.apvts, 1, eq::BandType::Bell, 2800.0f, 3.0f, 0.8f);
+    EQDisplay::addBand (proc.apvts, 1, eq::BandType::HighShelf, 9000.0f, -4.0f);
+    setParam (proc, ID::eqMode (1), 2.0f);
+    snapshot (proc, render (proc, 1), outDir.getChildFile ("ui_eq2.png"), 4);
+    proc.presets.loadPreset (8);
     setParam (proc, ID::spc ("On"), 1.0f);
-    snapshot (proc, render (proc, 1), outDir.getChildFile ("ui_space.png"), 4);
+    snapshot (proc, render (proc, 1), outDir.getChildFile ("ui_space.png"), 5);
     setParam (proc, ID::spc ("On"), 0.0f);
     snapshot (proc, render (proc, 1), outDir.getChildFile ("ui_about.png"), 0, 1);
     snapshot (proc, render (proc, 1), outDir.getChildFile ("ui_save.png"), 0, 2);

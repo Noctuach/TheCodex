@@ -47,6 +47,13 @@ namespace ID
     inline juce::String clip (int stage, const char* suffix) { return "d" + juce::String (stage) + suffix; }
     // EQ bands: "b1Freq" ... "b6Slope"
     inline juce::String band (int bandIndex, const char* suffix) { return "b" + juce::String (bandIndex + 1) + suffix; }
+    // Two equalisers: EQ 1 (between the distortions) uses "b1Freq" ..., EQ 2 (post, before Space) uses "q1Freq" ...
+    constexpr int numEqs = 2;
+    inline juce::String eqBand (int eq, int bandIndex, const char* suffix) { return (eq == 0 ? "b" : "q") + juce::String (bandIndex + 1) + suffix; }
+    inline juce::String eqScaleFor (int eq) { return eq == 0 ? eqScale : juce::String ("eq2Scale"); }
+    inline juce::String eqMode (int eq) { return eq == 0 ? juce::String ("eqMode") : juce::String ("eq2Mode"); }
+    inline juce::String eqRes (int eq)  { return eq == 0 ? juce::String ("eqRes") : juce::String ("eq2Res"); }
+    inline juce::String eqOn (int eq)   { return eq == 0 ? juce::String ("eqOn") : juce::String ("eq2On"); }
     // Saturation: global "satOn", "satBands", ... and per band "s1Style" ... "s6Bypass"
     inline juce::String sat (const char* suffix) { return juce::String ("sat") + suffix; }
     inline juce::String satBand (int bandIndex, const char* suffix) { return "s" + juce::String (bandIndex + 1) + suffix; }

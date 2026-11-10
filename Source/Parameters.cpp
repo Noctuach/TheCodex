@@ -5,6 +5,7 @@
 #include "DSP/MultibandSaturator.h"
 #include "DSP/SpaceReverb.h"
 #include "DSP/Compressor.h"
+#include "DSP/EqEngine.h"
 
 using namespace juce;
 
@@ -126,22 +127,30 @@ AudioProcessorValueTreeState::ParameterLayout Params::createLayout()
     const int   defTypes[] = { 0, 1, 2, 2, 2, 5 };
     const float defFreqs[] = { 30.0f, 60.0f, 200.0f, 1000.0f, 4000.0f, 16000.0f };
 
-    for (int b = 0; b < Params::numBands; ++b)
+    for (int e = 0; e < ID::numEqs; ++e)
     {
-        const String n = "Band " + String (b + 1) + " ";
-        // "Used": the band exists on the display (it can still be bypassed with "On").
-        // A band counts as present when Used or On is set, so older states without Used still load.
-        addBool (l, ID::band (b, "Used"), n + "Used", false);
-        addBool (l, ID::band (b, "On"), n + "On", false);
-        addChoice (l, ID::band (b, "Type"), n + "Type", bandTypes, b < 6 ? defTypes[b] : 2);
-        addFloat (l, ID::band (b, "Freq"), n + "Freq", skewed (20.0f, 20000.0f, 640.0f), b < 6 ? defFreqs[b] : 1000.0f, hzText);
-        addFloat (l, ID::band (b, "Gain"), n + "Gain", { -30.0f, 30.0f, 0.01f }, 0.0f, dbText);
-        addFloat (l, ID::band (b, "Q"), n + "Q", skewed (0.1f, 18.0f, 1.0f), 0.707f, [] (float v) { return String (v, 2); });
-        addChoice (l, ID::band (b, "Slope"), n + "Slope", slopes, eq::defaultSlope);
-        addChoice (l, ID::band (b, "Place"), n + "Stereo Placement", { "Stereo", "Left", "Right", "Mid", "Side" }, 0);
+        const String eqName = e == 0 ? "" : "EQ 2 ";
+        for (int b = 0; b < Params::numBands; ++b)
+        {
+            const String n = eqName + "Band " + String (b + 1) + " ";
+            const bool classic = e == 0 && b < 6;   // EQ 1 bands 1-6 keep their original defaults
+            // "Used": the band exists on the display (it can still be bypassed with "On").
+            // A band counts as present when Used or On is set, so older states without Used still load.
+            addBool (l, ID::eqBand (e, b, "Used"), n + "Used", false);
+            addBool (l, ID::eqBand (e, b, "On"), n + "On", false);
+            addChoice (l, ID::eqBand (e, b, "Type"), n + "Type", bandTypes, classic ? defTypes[b] : 2);
+            addFloat (l, ID::eqBand (e, b, "Freq"), n + "Freq", skewed (20.0f, 20000.0f, 640.0f), classic ? defFreqs[b] : 1000.0f, hzText);
+            addFloat (l, ID::eqBand (e, b, "Gain"), n + "Gain", { -30.0f, 30.0f, 0.01f }, 0.0f, dbText);
+            addFloat (l, ID::eqBand (e, b, "Q"), n + "Q", skewed (0.1f, 18.0f, 1.0f), 0.707f, [] (float v) { return String (v, 2); });
+            addChoice (l, ID::eqBand (e, b, "Slope"), n + "Slope", slopes, eq::defaultSlope);
+            addChoice (l, ID::eqBand (e, b, "Place"), n + "Stereo Placement", { "Stereo", "Left", "Right", "Mid", "Side" }, 0);
+        }
+        const String g = e == 0 ? "EQ " : "EQ 2 ";
+        addFloat (l, ID::eqScaleFor (e), g + "Gain Scale", { 0.0f, 2.0f }, 1.0f, pctText);
+        addBool (l, ID::eqOn (e), g + "On", true);
+        addChoice (l, ID::eqMode (e), g + "Processing Mode", eq::processingModeNames(), 0);
+        addChoice (l, ID::eqRes (e), g + "Linear Phase Resolution", eq::resolutionNames(), 1);
     }
-
-    addFloat (l, ID::eqScale, "EQ Gain Scale", { 0.0f, 2.0f }, 1.0f, pctText);
 
     // ---------------- Saturation (multiband) ----------------
     addBool (l, ID::sat ("On"), "Saturation On", false);

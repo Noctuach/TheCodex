@@ -5,6 +5,7 @@
 #include "EQDisplay.h"
 #include "SpaceView.h"
 #include "CompressorView.h"
+#include "Eq2View.h"
 #include "Tuner.h"
 #include "PresetBar.h"
 #include "DistortionView.h"
@@ -25,7 +26,7 @@ public:
     void paint (juce::Graphics&) override;
     void resized() override;
 
-    void showTab (int tab);   // 0 = KICK, 1 = DISTORTION, 2 = SATURATION, 3 = COMPRESSOR, 4 = SPACE, 5 = SCOPE
+    void showTab (int tab);   // 0 = KICK, 1 = DISTORTION, 2 = SATURATION, 3 = COMPRESSOR, 4 = EQ 2, 5 = SPACE, 6 = SCOPE
     void openAbout() { aboutOverlay.open(); }
     void openSaveDialog() { presetBar.onSaveRequested(); }
     std::function<void (float)> onScaleRequested;
@@ -52,8 +53,8 @@ private:
     PressButton previewButton { "preview", Icons::play() };
     HeaderKnob outGain { "Output" };
     LevelMeter meterL, meterR;
-    std::array<juce::TextButton, 6> tabButtons { juce::TextButton ("KICK"), juce::TextButton ("DISTORTION"), juce::TextButton ("SATURATION"),
-                                                 juce::TextButton ("COMPRESSOR"), juce::TextButton ("SPACE"), juce::TextButton ("SCOPE") };
+    std::array<juce::TextButton, 7> tabButtons { juce::TextButton ("KICK"), juce::TextButton ("DISTORTION"), juce::TextButton ("SATURATION"),
+                                                 juce::TextButton ("COMPRESSOR"), juce::TextButton ("EQ 2"), juce::TextButton ("SPACE"), juce::TextButton ("SCOPE") };
     TunerAnalyser tunerAnalyser;
     TunerChip tunerChip;
 
@@ -78,6 +79,7 @@ private:
     SaturationPage saturationPage;
     SpacePage spacePage;
     CompressorPage compressorPage;
+    Eq2Page eq2Page;
 
     /** Shown over the pitch-envelope panel while the 909 engine is active. */
     struct EngineNotice : public juce::Component

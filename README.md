@@ -5,7 +5,7 @@
 There are no samples; every kick is generated in real time, in the key of your track.
 
 ```
-OSC / 909 -> DISTORTION 1 -> EQ -> DISTORTION 2 -> SATURATION -> COMPRESSOR -> SPACE -> OUTPUT
+OSC / 909 -> DISTORTION 1 -> EQ 1 -> DISTORTION 2 -> SATURATION -> COMPRESSOR -> EQ 2 -> SPACE -> OUTPUT
 ```
 
 ![Codex: kick page with mid/side EQ](docs/screenshot.png)
@@ -14,9 +14,9 @@ OSC / 909 -> DISTORTION 1 -> EQ -> DISTORTION 2 -> SATURATION -> COMPRESSOR -> S
 |---|---|---|
 | ![Distortion page](docs/screenshot-distortion.png) | ![Saturation page](docs/screenshot-saturation.png) | ![Compressor page](docs/screenshot-compressor.png) |
 
-| Space | Scope |
-|---|---|
-| ![Space page](docs/screenshot-space.png) | ![Scope page](docs/screenshot-scope.png) |
+| EQ 2 | Space | Scope |
+|---|---|---|
+| ![EQ 2 page](docs/screenshot-eq2.png) | ![Space page](docs/screenshot-space.png) | ![Scope page](docs/screenshot-scope.png) |
 
 Formats: **VST3** (Windows, macOS, Linux), **AU** (macOS) and a **Standalone** app.
 
@@ -69,6 +69,11 @@ distortion, so you can see your kick is in key. It turns green within 10 cents o
 | **Amp Envelope** | ADSR for volume with *Curve*. In 909 mode it acts as a gate (attack and release only). |
 | **Equalizer** | Up to **24 bands** (the Pro-Q 4 limit): double-click the display or press **+ ADD** to add one, **DELETE** (or the Delete key) to remove it, the power button or Alt-click to bypass it; only bands in use are shown. 10 shapes: Bell, Low/High Shelf, Low/High Cut, Notch, Band Pass, Tilt Shelf, Flat Tilt, All Pass. Slopes 6–96 dB/oct. Each band has a **stereo placement** (Stereo, Left, Right, **Mid**, **Side**); the display draws a result curve per channel group. Right-click a node to **split** a band into L+R or M+S. *Gain Scale* scales all gains at once. Analyzer with Pre/Post/Freeze and range/speed/tilt settings; display range 3/6/12/30 dB (expands automatically). |
 
+**Processing mode** (both EQs, top right of the display, as in Pro-Q 4): *Zero Latency* (minimum phase, no delay),
+*Natural Phase* (analog-matched response up to the top of the spectrum, a few samples of latency) or *Linear Phase*
+(no phase shift, the waveform keeps its shape; latency depends on the *Resolution*: Low, Medium, High, Very High, Maximum).
+The latency is reported to the host.
+
 **EQ mouse controls:** drag a node for frequency/gain (Shift: fine, Ctrl/Cmd + vertical drag: Q) · mouse wheel: Q, or slope on
 cut filters (Ctrl/Cmd + wheel: gain) · Alt-click or double-click a node: on/off · double-click empty space: new band (far left = low
 cut, far right = high cut, bottom = notch, elsewhere = bell) · right-click a node: shape, slope, stereo placement, split, reset, delete · Delete / Backspace: delete the selected band ·
@@ -96,6 +101,11 @@ Multiband saturation after Distortion 2, modelled on the feature set of classic 
 | Bands | 1–6 bands. Hover the top of the display and click **+** to split a band; the **×** in the band panel removes it. Drag crossover lines to move them, click a crossover handle for the slope (6/12/24/48 dB/oct, Linkwitz-Riley, phase-aligned so bands sum flat). Drag a band's **level handle** for level (Alt-drag: drive, Ctrl/Cmd-click: reset, wheel: level). M / S / B badges: mute, solo, bypass (Ctrl/Cmd-click: exclusive). |
 | Per band | *Style* (20 styles: Tube, Tape, Transformer, Amp, Clip, FX), *Drive* (output level compensated automatically) with *Drive Pan*, *Mix*, *Level* with *Level Pan*, *Feedback* + *Feedback Freq* (dies away when the input stops), *Dynamics* (right: compression, left: gating), *Tone*: Bass, Mid, Treble, Presence. |
 | Global | Power, *Channel Mode* (Stereo or Mid/Side), *Oversampling* (Off/2x/4x/8x), *Input*, *Mix*, *Output*. |
+
+### EQ 2 page
+A second, independent 24-band equaliser after the Compressor and before Space, for final shaping. Same shapes, stereo
+placement, processing modes and mouse controls as EQ 1; the *Pre* analyzer shows the signal going into EQ 2. The power
+button bypasses the whole EQ.
 
 ### Compressor page
 Multiband compressor after the Saturation stage, modelled on the controls of FabFilter Pro-C 3 and the LA-3A:

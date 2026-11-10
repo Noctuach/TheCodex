@@ -33,7 +33,7 @@ namespace
 }
 
 //==============================================================================
-EQDisplay::EQDisplay (CodexProcessor& p) : proc (p), apvts (p.apvts)
+EQDisplay::EQDisplay (CodexProcessor& p, int eqIndex) : eqIdx (eqIndex), proc (p), apvts (p.apvts)
 {
     fftData.assign ((size_t) fftSize * 2, 0.0f);
     pullBuffer.assign (32768, 0.0f);
@@ -53,7 +53,19 @@ EQDisplay::EQDisplay (CodexProcessor& p) : proc (p), apvts (p.apvts)
         b->setClickingTogglesState (true);
         addAndMakeVisible (b);
     }
-    preButton.setTooltip ("Pre: spectrum going into the EQ (after Distortion 1)");
+    preButton.setTooltip (eqIdx == 0 ? "Pre: spectrum going into the EQ (after Distortion 1)" : "Pre: spectrum going into EQ 2 (after the Compressor)");
+
+    // Processing mode (Pro-Q 4): Zero Latency / Natural Phase / Linear Phase, plus the linear-phase resolution
+    modeBox.addItemList (eq::processingModeNames(), 1);
+    resBox.addItemList (eq::resolutionNames(), 1);
+    modeAttachment = std::make_unique<AudioProcessorValueTreeState::ComboBoxAttachment> (apvts, ID::eqMode (eqIdx), modeBox);
+    resAttachment = std::make_unique<AudioProcessorValueTreeState::ComboBoxAttachment> (apvts, ID::eqRes (eqIdx), resBox);
+    modeBox.setTooltip (Help::forParameter (ID::eqMode (eqIdx)));
+    resBox.setTooltip (Help::forParameter (ID::eqRes (eqIdx)));
+    modeBox.onChange = [this] { resBox.setVisible (modeBox.getSelectedItemIndex() == 2); };
+    addAndMakeVisible (modeBox);
+    addChildComponent (resBox);
+    resBox.setVisible (modeBox.getSelectedItemIndex() == 2);
     postButton.setTooltip ("Post: spectrum after the whole chain");
     freezeButton.setTooltip ("Freeze: the spectrum stops falling and builds up a maximum over time");
     postButton.setToggleState (true, dontSendNotification);
@@ -76,6 +88,8 @@ void EQDisplay::resized()
 {
     plot = getLocalBounds().toFloat().reduced (1.0f).withTrimmedBottom (16.0f).withTrimmedRight (30.0f);
     rangeBox.setBounds (getWidth() - 96, 6, 88, 24);
+    modeBox.setBounds (rangeBox.getX() - 146, 6, 138, 24);
+    resBox.setBounds (modeBox.getX() - 112, 6, 104, 24);
     auto row = Rectangle<int> (8, 6, 260, 22);
     preButton.setBounds (row.removeFromLeft (52)); row.removeFromLeft (4);
     postButton.setBounds (row.removeFromLeft (56)); row.removeFromLeft (4);
@@ -89,7 +103,7 @@ float EQDisplay::gainToY (float db) const { return jmap (db, -displayRange, disp
 float EQDisplay::yToGain (float y) const  { return jmap (y, plot.getBottom(), plot.getY(), -displayRange, displayRange); }
 float EQDisplay::analyzerDbToY (float db) const { return jmap (db, -analyzerRange, 6.0f, plot.getBottom(), plot.getY()); }
 
-RangedAudioParameter* EQDisplay::param (int b, const char* suffix) const { return apvts.getParameter (ID::band (b, suffix)); }
+RangedAudioParameter* EQDisplay::param (int b, const char* suffix) const { return apvts.getParameter (ID::eqBand (eqIdx, b, suffix)); }
 
 void EQDisplay::setParam (int b, const char* suffix, float value)
 {
@@ -107,11 +121,11 @@ void EQDisplay::setParamGesture (int b, const char* suffix, float value)
     }
 }
 
-float EQDisplay::gainScale() const { return apvts.getRawParameterValue (ID::eqScale)->load(); }
+float EQDisplay::gainScale() const { return apvts.getRawParameterValue (ID::eqScaleFor (eqIdx))->load(); }
 
 eq::BandSettings EQDisplay::readBand (int b, bool scaled) const
 {
-    auto v = [this, b] (const char* sfx) { return apvts.getRawParameterValue (ID::band (b, sfx))->load(); };
+    auto v = [this, b] (const char* sfx) { return apvts.getRawParameterValue (ID::eqBand (eqIdx, b, sfx))->load(); };
     eq::BandSettings s;
     s.on        = v ("On") > 0.5f;
     s.type      = (eq::BandType) (int) v ("Type");
@@ -146,7 +160,7 @@ int EQDisplay::hitTestNode (Point<float> pt) const
 //==============================================================================
 void EQDisplay::updateSpectrum (bool preEq, Spectrum& sp)
 {
-    auto& fifo = preEq ? proc.analyzerPre : proc.analyzer;
+    auto& fifo = preEq ? (eqIdx == 0 ? proc.analyzerPre : proc.analyzerPre2) : proc.analyzer;
     const int got = fifo.pull (pullBuffer.data(), (int) pullBuffer.size());
     if (got >= fftSize)
         std::copy (pullBuffer.begin() + (got - fftSize), pullBuffer.begin() + got, sp.ring.begin());
@@ -526,13 +540,13 @@ void EQDisplay::mouseDown (const MouseEvent& e)
     // Alt-click: bypass / enable the band (Pro-Q behaviour)
     if (e.mods.isAltDown())
     {
-        setBandOn (apvts, b, ! readBand (b).on);
+        setBandOn (apvts, eqIdx, b, ! readBand (b).on);
         repaint();
         return;
     }
 
     if (! readBand (b).on)
-        setBandOn (apvts, b, true);   // grabbing a bypassed node switches it on
+        setBandOn (apvts, eqIdx, b, true);   // grabbing a bypassed node switches it on
 
     beginDrag (b);
     qDrag = e.mods.isCommandDown();
@@ -595,7 +609,7 @@ void EQDisplay::mouseDoubleClick (const MouseEvent& e)
 
     if (b >= 0)
     {
-        setBandOn (apvts, b, ! readBand (b).on);
+        setBandOn (apvts, eqIdx, b, ! readBand (b).on);
         return;
     }
     if (! plot.contains (e.position))
@@ -610,7 +624,7 @@ void EQDisplay::mouseDoubleClick (const MouseEvent& e)
     else if (relY > 0.88f) t = eq::BandType::Notch;
 
     const float gain = t == eq::BandType::Bell ? jlimit (-maxDb, maxDb, yToGain (e.position.y) / jmax (0.05f, gainScale())) : 0.0f;
-    const int i = addBand (apvts, t, jlimit (minFreq, maxFreq, xToFreq (e.position.x)), gain, 1.0f);
+    const int i = addBand (apvts, eqIdx, t, jlimit (minFreq, maxFreq, xToFreq (e.position.x)), gain, 1.0f);
     if (i >= 0)
     {
         selected = i;
@@ -623,7 +637,7 @@ bool EQDisplay::keyPressed (const KeyPress& k)
     if ((k == KeyPress::deleteKey || k == KeyPress::backspaceKey) && present (selected))
     {
         if (auto* um = apvts.undoManager) um->beginNewTransaction ("Delete EQ band");
-        deleteBand (apvts, selected);
+        deleteBand (apvts, eqIdx, selected);
         return true;
     }
     return false;
@@ -654,30 +668,30 @@ void EQDisplay::mouseWheelMove (const MouseEvent& e, const MouseWheelDetails& w)
 }
 
 //==============================================================================
-bool EQDisplay::isPresent (AudioProcessorValueTreeState& s, int b)
+bool EQDisplay::isPresent (AudioProcessorValueTreeState& s, int eqIdx, int b)
 {
     if (b < 0 || b >= Params::numBands) return false;
-    return s.getRawParameterValue (ID::band (b, "Used"))->load() > 0.5f
-        || s.getRawParameterValue (ID::band (b, "On"))->load() > 0.5f;
+    return s.getRawParameterValue (ID::eqBand (eqIdx, b, "Used"))->load() > 0.5f
+        || s.getRawParameterValue (ID::eqBand (eqIdx, b, "On"))->load() > 0.5f;
 }
 
-int EQDisplay::numPresent (AudioProcessorValueTreeState& s)
+int EQDisplay::numPresent (AudioProcessorValueTreeState& s, int eqIdx)
 {
     int n = 0;
-    for (int b = 0; b < Params::numBands; ++b) n += isPresent (s, b) ? 1 : 0;
+    for (int b = 0; b < Params::numBands; ++b) n += isPresent (s, eqIdx, b) ? 1 : 0;
     return n;
 }
 
-int EQDisplay::firstFreeBand (AudioProcessorValueTreeState& s, int exclude)
+int EQDisplay::firstFreeBand (AudioProcessorValueTreeState& s, int eqIdx, int exclude)
 {
     for (int b = 0; b < Params::numBands; ++b)
-        if (b != exclude && ! isPresent (s, b)) return b;
+        if (b != exclude && ! isPresent (s, eqIdx, b)) return b;
     return -1;
 }
 
-static void setGesture (AudioProcessorValueTreeState& s, int b, const char* sfx, float value)
+static void setGesture (AudioProcessorValueTreeState& s, int eqIdx, int b, const char* sfx, float value)
 {
-    if (auto* p = s.getParameter (ID::band (b, sfx)))
+    if (auto* p = s.getParameter (ID::eqBand (eqIdx, b, sfx)))
     {
         p->beginChangeGesture();
         p->setValueNotifyingHost (p->convertTo0to1 (value));
@@ -685,30 +699,30 @@ static void setGesture (AudioProcessorValueTreeState& s, int b, const char* sfx,
     }
 }
 
-void EQDisplay::setBandOn (AudioProcessorValueTreeState& s, int b, bool on)
+void EQDisplay::setBandOn (AudioProcessorValueTreeState& s, int eqIdx, int b, bool on)
 {
-    setGesture (s, b, "Used", 1.0f);
-    setGesture (s, b, "On", on ? 1.0f : 0.0f);
+    setGesture (s, eqIdx, b, "Used", 1.0f);
+    setGesture (s, eqIdx, b, "On", on ? 1.0f : 0.0f);
 }
 
-int EQDisplay::addBand (AudioProcessorValueTreeState& s, eq::BandType t, float freq, float gain, float q)
+int EQDisplay::addBand (AudioProcessorValueTreeState& s, int eqIdx, eq::BandType t, float freq, float gain, float q)
 {
-    const int i = firstFreeBand (s);
+    const int i = firstFreeBand (s, eqIdx);
     if (i < 0) return -1;
     if (auto* um = s.undoManager) um->beginNewTransaction ("Add EQ band");
-    resetBand (s, i);
-    setGesture (s, i, "Type", (float) t);
-    setGesture (s, i, "Freq", freq);
-    if (eq::typeUsesGain (t)) setGesture (s, i, "Gain", gain);
-    if (! eq::typeUsesSlope (t)) setGesture (s, i, "Q", q);
-    setBandOn (s, i, true);
+    resetBand (s, eqIdx, i);
+    setGesture (s, eqIdx, i, "Type", (float) t);
+    setGesture (s, eqIdx, i, "Freq", freq);
+    if (eq::typeUsesGain (t)) setGesture (s, eqIdx, i, "Gain", gain);
+    if (! eq::typeUsesSlope (t)) setGesture (s, eqIdx, i, "Q", q);
+    setBandOn (s, eqIdx, i, true);
     return i;
 }
 
-void EQDisplay::resetBand (AudioProcessorValueTreeState& s, int b)
+void EQDisplay::resetBand (AudioProcessorValueTreeState& s, int eqIdx, int b)
 {
     for (auto* sfx : { "Used", "On", "Type", "Freq", "Gain", "Q", "Slope", "Place" })
-        if (auto* p = s.getParameter (ID::band (b, sfx)))
+        if (auto* p = s.getParameter (ID::eqBand (eqIdx, b, sfx)))
         {
             p->beginChangeGesture();
             p->setValueNotifyingHost (p->getDefaultValue());
@@ -716,22 +730,22 @@ void EQDisplay::resetBand (AudioProcessorValueTreeState& s, int b)
         }
 }
 
-void EQDisplay::splitBand (AudioProcessorValueTreeState& s, int from, bool midSide)
+void EQDisplay::splitBand (AudioProcessorValueTreeState& s, int eqIdx, int from, bool midSide)
 {
-    const int target = firstFreeBand (s, from);
+    const int target = firstFreeBand (s, eqIdx, from);
     if (target < 0) return;
 
     if (auto* um = s.undoManager) um->beginNewTransaction ("Split EQ band");
     for (auto* sfx : { "Type", "Freq", "Gain", "Q", "Slope", "Used", "On" })
-        if (auto* p = s.getParameter (ID::band (target, sfx)))
+        if (auto* p = s.getParameter (ID::eqBand (eqIdx, target, sfx)))
         {
             p->beginChangeGesture();
-            p->setValueNotifyingHost (s.getParameter (ID::band (from, sfx))->getValue());
+            p->setValueNotifyingHost (s.getParameter (ID::eqBand (eqIdx, from, sfx))->getValue());
             p->endChangeGesture();
         }
-    auto place = [&s] (int b, eq::Placement pl)
+    auto place = [&s, eqIdx] (int b, eq::Placement pl)
     {
-        if (auto* p = s.getParameter (ID::band (b, "Place")))
+        if (auto* p = s.getParameter (ID::eqBand (eqIdx, b, "Place")))
         {
             p->beginChangeGesture();
             p->setValueNotifyingHost (p->convertTo0to1 ((float) pl));
@@ -753,7 +767,7 @@ void EQDisplay::showBandMenu (int b)
     for (int p = 0; p < 5; ++p)
         placement.addItem (40 + p, placementName ((eq::Placement) p), true, (int) s.placement == p);
 
-    const bool freeBand = firstFreeBand (apvts, b) >= 0;
+    const bool freeBand = firstFreeBand (apvts, eqIdx, b) >= 0;
 
     menu.addSectionHeader ("Band " + String (b + 1));
     menu.addSubMenu ("Shape", shapes);
@@ -773,32 +787,32 @@ void EQDisplay::showBandMenu (int b)
     {
         if (safe == nullptr || result == 0) return;
         auto& d = *safe;
-        if (result >= 1 && result <= eq::numBandTypes) { d.setParamGesture (b, "Type", (float) (result - 1)); setBandOn (d.apvts, b, true); }
+        if (result >= 1 && result <= eq::numBandTypes) { d.setParamGesture (b, "Type", (float) (result - 1)); setBandOn (d.apvts, d.eqIdx, b, true); }
         else if (result >= 20 && result < 20 + eq::numSlopes) d.setParamGesture (b, "Slope", (float) (result - 20));
         else if (result >= 40 && result <= 44) d.setParamGesture (b, "Place", (float) (result - 40));
-        else if (result == 50 || result == 51) splitBand (d.apvts, b, result == 51);
+        else if (result == 50 || result == 51) splitBand (d.apvts, d.eqIdx, b, result == 51);
         else if (result == 52) d.setParamGesture (b, "Place", 0.0f);
-        else if (result == 30) setBandOn (d.apvts, b, ! d.readBand (b).on);
+        else if (result == 30) setBandOn (d.apvts, d.eqIdx, b, ! d.readBand (b).on);
         else if (result == 31) d.setParamGesture (b, "Gain", 0.0f);
         else if (result == 32)
         {
             // keep the band where it is, just reset its settings
             const float f = d.readBand (b, false).freq;
-            resetBand (d.apvts, b);
+            resetBand (d.apvts, d.eqIdx, b);
             d.setParamGesture (b, "Type", (float) eq::BandType::Bell);
             d.setParamGesture (b, "Freq", f);
-            setBandOn (d.apvts, b, true);
+            setBandOn (d.apvts, d.eqIdx, b, true);
         }
         else if (result == 33)
         {
             if (auto* um = d.apvts.undoManager) um->beginNewTransaction ("Delete EQ band");
-            deleteBand (d.apvts, b);
+            deleteBand (d.apvts, d.eqIdx, b);
         }
     });
 }
 
 //==============================================================================
-BandControls::BandControls (AudioProcessorValueTreeState& s) : apvts (s)
+BandControls::BandControls (AudioProcessorValueTreeState& s, int eqIndex) : eqIdx (eqIndex), apvts (s)
 {
     prevButton.setTooltip ("Previous band");
     nextButton.setTooltip ("Next band");
@@ -811,32 +825,32 @@ BandControls::BandControls (AudioProcessorValueTreeState& s) : apvts (s)
     {
         // Place the new band an octave above the selected one, or at 1 kHz
         float f = 1000.0f;
-        if (EQDisplay::isPresent (apvts, band))
-            f = jlimit (20.0f, 20000.0f, apvts.getRawParameterValue (ID::band (band, "Freq"))->load() * 2.0f);
-        const int b = EQDisplay::addBand (apvts, eq::BandType::Bell, f);
+        if (EQDisplay::isPresent (apvts, eqIdx, band))
+            f = jlimit (20.0f, 20000.0f, apvts.getRawParameterValue (ID::eqBand (eqIdx, band, "Freq"))->load() * 2.0f);
+        const int b = EQDisplay::addBand (apvts, eqIdx, eq::BandType::Bell, f);
         if (b >= 0) select (b);
     };
     deleteButton.setTooltip ("Delete band: removes the selected band (Delete / Backspace on the display)");
     deleteButton.onClick = [this]
     {
         if (auto* um = apvts.undoManager) um->beginNewTransaction ("Delete EQ band");
-        EQDisplay::deleteBand (apvts, band);
+        EQDisplay::deleteBand (apvts, eqIdx, band);
         step (1);
     };
 
     onButton.setTooltip ("Band bypass: switch the selected band off without deleting it (Alt-click a node on the display)");
-    onButton.onClick = [this] { EQDisplay::setBandOn (apvts, band, onButton.getToggleState()); };
+    onButton.onClick = [this] { EQDisplay::setBandOn (apvts, eqIdx, band, onButton.getToggleState()); };
     resetButton.setTooltip ("Reset band: return the selected band to a flat bell, keeping its frequency");
     resetButton.onClick = [this]
     {
-        const float f = apvts.getRawParameterValue (ID::band (band, "Freq"))->load();
+        const float f = apvts.getRawParameterValue (ID::eqBand (eqIdx, band, "Freq"))->load();
         if (auto* um = apvts.undoManager) um->beginNewTransaction ("Reset EQ band");
-        EQDisplay::resetBand (apvts, band);
-        if (auto* p = apvts.getParameter (ID::band (band, "Freq"))) p->setValueNotifyingHost (p->convertTo0to1 (f));
-        if (auto* p = apvts.getParameter (ID::band (band, "Type"))) p->setValueNotifyingHost (p->convertTo0to1 ((float) eq::BandType::Bell));
-        EQDisplay::setBandOn (apvts, band, true);
+        EQDisplay::resetBand (apvts, eqIdx, band);
+        if (auto* p = apvts.getParameter (ID::eqBand (eqIdx, band, "Freq"))) p->setValueNotifyingHost (p->convertTo0to1 (f));
+        if (auto* p = apvts.getParameter (ID::eqBand (eqIdx, band, "Type"))) p->setValueNotifyingHost (p->convertTo0to1 ((float) eq::BandType::Bell));
+        EQDisplay::setBandOn (apvts, eqIdx, band, true);
     };
-    gainScale.attach (apvts, ID::eqScale);
+    gainScale.attach (apvts, ID::eqScaleFor (eqIdx));
     gainScale.slider.setTooltip ("Gain Scale: scales the gain of all Bell, Shelf and Tilt bands at once (100 % = as set, 0 % = flat, 200 % = double)");
 
     for (Component* c : std::initializer_list<Component*> { &prevButton, &nextButton, &addButton, &deleteButton, &onButton, &resetButton,
@@ -852,7 +866,7 @@ void BandControls::step (int direction)
     for (int i = 1; i <= Params::numBands; ++i)
     {
         const int b = ((band + direction * i) % Params::numBands + Params::numBands) % Params::numBands;
-        if (EQDisplay::isPresent (apvts, b)) { select (b); return; }
+        if (EQDisplay::isPresent (apvts, eqIdx, b)) { select (b); return; }
     }
 }
 
@@ -863,12 +877,12 @@ void BandControls::setBand (int b)
 
     // The power button is driven manually (see timerCallback) so bypassing keeps the band present
     onButton.setClickingTogglesState (true);
-    type.attach (apvts, ID::band (b, "Type"));
-    slope.attach (apvts, ID::band (b, "Slope"));
-    placement.attach (apvts, ID::band (b, "Place"));
-    freq.attach (apvts, ID::band (b, "Freq"));
-    gain.attach (apvts, ID::band (b, "Gain"));
-    q.attach (apvts, ID::band (b, "Q"));
+    type.attach (apvts, ID::eqBand (eqIdx, b, "Type"));
+    slope.attach (apvts, ID::eqBand (eqIdx, b, "Slope"));
+    placement.attach (apvts, ID::eqBand (eqIdx, b, "Place"));
+    freq.attach (apvts, ID::eqBand (eqIdx, b, "Freq"));
+    gain.attach (apvts, ID::eqBand (eqIdx, b, "Gain"));
+    q.attach (apvts, ID::eqBand (eqIdx, b, "Q"));
 
     const auto col = Colours_::band (b);
     for (auto* k : { &freq, &gain, &q })
@@ -879,22 +893,22 @@ void BandControls::setBand (int b)
 
 void BandControls::timerCallback()
 {
-    const bool isOn = apvts.getRawParameterValue (ID::band (band, "On"))->load() > 0.5f;
+    const bool isOn = apvts.getRawParameterValue (ID::eqBand (eqIdx, band, "On"))->load() > 0.5f;
     if (onButton.getToggleState() != isOn) onButton.setToggleState (isOn, dontSendNotification);
 
-    const int count = EQDisplay::numPresent (apvts);
-    const bool has = EQDisplay::isPresent (apvts, band);
+    const int count = EQDisplay::numPresent (apvts, eqIdx);
+    const bool has = EQDisplay::isPresent (apvts, eqIdx, band);
     addButton.setEnabled (count < Params::numBands);
     prevButton.setEnabled (count > 1 || (count == 1 && ! has));
     nextButton.setEnabled (prevButton.isEnabled());
     if (! has && count > 0) step (1);   // the selected band was deleted elsewhere
 
     // Grey out the controls that do not apply to the selected shape (or everything without a band)
-    const auto t = (eq::BandType) (int) apvts.getRawParameterValue (ID::band (band, "Type"))->load();
-    const int sl = (int) apvts.getRawParameterValue (ID::band (band, "Slope"))->load();
+    const auto t = (eq::BandType) (int) apvts.getRawParameterValue (ID::eqBand (eqIdx, band, "Type"))->load();
+    const int sl = (int) apvts.getRawParameterValue (ID::eqBand (eqIdx, band, "Slope"))->load();
     const bool usesSlope = eq::typeUsesSlope (t), usesGain = eq::typeUsesGain (t);
     const bool usesQ = ! (usesSlope && sl == 0) && t != eq::BandType::FlatTilt;
-    const bool present = EQDisplay::isPresent (apvts, band);
+    const bool present = EQDisplay::isPresent (apvts, eqIdx, band);
     auto enable = [] (Component& c, bool on) { if (c.isEnabled() != on) { c.setEnabled (on); c.setAlpha (on ? 1.0f : 0.35f); } };
     enable (onButton, present);
     enable (deleteButton, present);
@@ -914,7 +928,7 @@ void BandControls::paint (Graphics& g)
     g.setColour (Colours_::textDim);
     g.setFont (Fonts::label (11.5f, 0.14f));
     g.drawText ("BAND", Rectangle<int> (1, 0, 200, 16), Justification::centredLeft);
-    g.drawText (String (EQDisplay::numPresent (apvts)) + " / " + String (Params::numBands),
+    g.drawText (String (EQDisplay::numPresent (apvts, eqIdx)) + " / " + String (Params::numBands),
                 Rectangle<int> (1, 0, 200, 16), Justification::centredRight);
     g.drawText ("GLOBAL", toolsArea.withHeight (16), Justification::centredLeft);
 

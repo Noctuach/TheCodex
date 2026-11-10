@@ -128,8 +128,17 @@ namespace Help
                 return it->second;
         }
 
-        // EQ bands: b1Freq, ...
-        if (id.length() > 2 && id[0] == 'b')
+        if (id == "eqMode" || id == "eq2Mode")
+            return "Processing Mode (as in Pro-Q 4): Zero Latency = minimum-phase filters, no delay. Natural Phase = filters matched to their analog response up to the top of the spectrum, small latency. Linear Phase = no phase shift at all (the kick's waveform keeps its shape), adds latency; the resolution sets how accurate the low end is.";
+        if (id == "eqRes" || id == "eq2Res")
+            return "Linear Phase Resolution: length of the linear-phase filter. Higher = more accurate low-frequency filters (important for kicks) but more latency (Medium is about 85 ms at 48 kHz).";
+        if (id == "eqOn" || id == "eq2On")
+            return id == "eqOn" ? "EQ On/Off: bypass the whole equaliser." : "EQ 2 On/Off: the second equaliser after the Compressor, before Space. Use it for final shaping.";
+        if (id == "eq2Scale")
+            return "Gain Scale: scales the gain of all Bell, Shelf and Tilt bands of EQ 2 at once.";
+
+        // EQ bands: b1Freq (EQ 1), q1Freq (EQ 2), ...
+        if (id.length() > 2 && (id[0] == 'b' || id[0] == 'q') && juce::CharacterFunctions::isDigit (id[1]))
         {
             const auto sfx = id.substring (2);
             static const std::map<juce::String, juce::String> band {

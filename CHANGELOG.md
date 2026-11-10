@@ -4,6 +4,9 @@ All notable changes to Codex. Versions follow [Semantic Versioning](https://semv
 
 ## [Unreleased]
 ### Added
+- **EQ 2 tab**: a second 24-band equaliser after the Compressor (before Space).
+- **EQ processing modes** (Pro-Q 4): Zero Latency, Natural Phase (2x oversampled, analog-matched response) and
+  Linear Phase (FIR with a 2x2 matrix for mid/side and left/right bands; resolution Low to Maximum), for both EQs.
 - **Compressor tab**: multiband (1–4 bands) downward, upward and two-way compression. Styles modelled on FabFilter
   Pro-C 3 (Clean, Punch, Smooth, Bus, Mastering, Classic, Vari-Mu, Opto, Pumping, TTM) plus an LA-3A-style
   T4 Opto with Compress / Limit. Threshold, ratio, knee, range, attack, release, hold, lookahead, side-chain high-pass,
@@ -14,6 +17,7 @@ All notable changes to Codex. Versions follow [Semantic Versioning](https://semv
 - Distortion units show a clear **BYPASSED** state with an ENABLE button.
 
 ### Changed
+- Tabs follow the signal chain: Kick, Distortion, Saturation, Compressor, EQ 2, Space, Scope.
 - Smaller Drive knobs in the distortion units and the saturation band panel.
 - The host's tail length follows the reverb decay.
 

@@ -7,6 +7,7 @@
 #include "DSP/MultibandSaturator.h"
 #include "DSP/SpaceReverb.h"
 #include "DSP/Compressor.h"
+#include "DSP/EqEngine.h"
 #include "PresetManager.h"
 
 /** Lock-free single-producer/single-consumer sample FIFO feeding the spectrum analyzer. */
@@ -94,7 +95,7 @@ public:
     std::atomic<float> scopeCapturedSeconds { 0.5f }; // window of the current capture
 
     /** Mid signal for the EQ analyzer and the tuner; left/right for the scope page. */
-    AnalyzerFifo analyzer, analyzerPre, tunerFeed, scopeFeedL, scopeFeedR;   // analyzerPre: EQ input (mid)
+    AnalyzerFifo analyzer, analyzerPre, analyzerPre2, tunerFeed, scopeFeedL, scopeFeedR;   // analyzerPre(2): EQ 1 / EQ 2 input (mid)
 
     /** MIDI note of the selected key (F1..E2, shifted by the octave setting). */
     int getKeyNote() const;
@@ -112,7 +113,7 @@ private:
 
     KickVoice voice;
     ClipDistortion clip1, clip2;
-    eq::ParametricEQ<Params::numBands> equaliser;
+    std::array<eq::EqEngine, ID::numEqs> equalisers;   // [0] between the distortions, [1] post (before Space)
     sat::MultibandSaturator saturator;
     space::SpaceReverb reverb;
     comp::MultibandCompressor compressor;
@@ -136,7 +137,8 @@ private:
     std::atomic<float> *aAttack, *aDecay, *aSustain, *aRelease, *aCurve;
     std::atomic<float> *outGainParam, *eqScaleParam;
     ClipParams clipParams[2];
-    BandParams bandParams[Params::numBands];
+    BandParams bandParams[ID::numEqs][Params::numBands];
+    std::atomic<float>* eqScaleParams[ID::numEqs] {}, * eqOnParams[ID::numEqs] {}, * eqModeParams[ID::numEqs] {}, * eqResParams[ID::numEqs] {};
     std::atomic<float>* spcParams[25] {};
     std::atomic<float>* cmpGlobal[13] {};
     std::atomic<float>* cmpBandParams[comp::maxBands][11] {};

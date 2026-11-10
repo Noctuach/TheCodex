@@ -18,7 +18,9 @@ class CodexProcessor;
 class EQDisplay : public juce::Component, private juce::Timer
 {
 public:
-    explicit EQDisplay (CodexProcessor&);
+    /** eqIndex: 0 = EQ 1 (between the distortions), 1 = EQ 2 (post). */
+    EQDisplay (CodexProcessor&, int eqIndex = 0);
+    const int eqIdx;
 
     std::function<void (int)> onBandSelected;
     void setSelectedBand (int b) { selected = b; repaint(); }
@@ -34,18 +36,18 @@ public:
     void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
 
     /** Copies band `from` into the first free band and gives the pair complementary placements. */
-    static void splitBand (juce::AudioProcessorValueTreeState&, int from, bool midSide);
+    static void splitBand (juce::AudioProcessorValueTreeState&, int eqIdx, int from, bool midSide);
     /** Returns a band to its defaults, which removes it from the display. */
-    static void resetBand (juce::AudioProcessorValueTreeState&, int b);
-    static void deleteBand (juce::AudioProcessorValueTreeState& s, int b) { resetBand (s, b); }
+    static void resetBand (juce::AudioProcessorValueTreeState&, int eqIdx, int b);
+    static void deleteBand (juce::AudioProcessorValueTreeState& s, int eqIdx, int b) { resetBand (s, eqIdx, b); }
     /** A band is present on the display when it is in use or switched on (older states have no "Used"). */
-    static bool isPresent (juce::AudioProcessorValueTreeState&, int b);
-    static int  numPresent (juce::AudioProcessorValueTreeState&);
-    static int  firstFreeBand (juce::AudioProcessorValueTreeState&, int exclude = -1);
+    static bool isPresent (juce::AudioProcessorValueTreeState&, int eqIdx, int b);
+    static int  numPresent (juce::AudioProcessorValueTreeState&, int eqIdx);
+    static int  firstFreeBand (juce::AudioProcessorValueTreeState&, int eqIdx, int exclude = -1);
     /** Creates a band in the first free slot; returns its index or -1 when all 24 are in use. */
-    static int  addBand (juce::AudioProcessorValueTreeState&, eq::BandType, float freq, float gain = 0.0f, float q = 1.0f);
+    static int  addBand (juce::AudioProcessorValueTreeState&, int eqIdx, eq::BandType, float freq, float gain = 0.0f, float q = 1.0f);
     /** Bypass / enable while keeping the band on the display. */
-    static void setBandOn (juce::AudioProcessorValueTreeState&, int b, bool on);
+    static void setBandOn (juce::AudioProcessorValueTreeState&, int eqIdx, int b, bool on);
     bool keyPressed (const juce::KeyPress&) override;
 
 private:
@@ -62,7 +64,7 @@ private:
     juce::Point<float> nodePosition (int b) const;
     int hitTestNode (juce::Point<float>) const;
 
-    bool present (int b) const { return isPresent (apvts, b); }
+    bool present (int b) const { return isPresent (apvts, eqIdx, b); }
     juce::RangedAudioParameter* param (int b, const char* suffix) const;
     void setParam (int b, const char* suffix, float value);
     void setParamGesture (int b, const char* suffix, float value);
@@ -88,7 +90,8 @@ private:
 
     static constexpr float maxDb = 30.0f, minFreq = 20.0f, maxFreq = 20000.0f;   // maxDb = parameter range
     float displayRange = 12.0f;   // visible range (auto-expands beyond the chosen one)
-    juce::ComboBox rangeBox;
+    juce::ComboBox rangeBox, modeBox, resBox;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> modeAttachment, resAttachment;
 
     // Analyzer
     struct Spectrum
@@ -112,7 +115,8 @@ private:
 class BandControls : public juce::Component, private juce::Timer
 {
 public:
-    explicit BandControls (juce::AudioProcessorValueTreeState&);
+    BandControls (juce::AudioProcessorValueTreeState&, int eqIndex = 0);
+    const int eqIdx;
 
     std::function<void (int)> onBandSelected;
     void setBand (int b);

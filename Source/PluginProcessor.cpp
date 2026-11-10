@@ -28,9 +28,16 @@ CodexProcessor::CodexProcessor()
                           c ("ShelfF"), c ("ShelfG"), c ("Mix"), c ("Out"), c ("DC"), c ("OS"), c ("Spatial") };
     }
 
-    for (int b = 0; b < Params::numBands; ++b)
-        bandParams[b] = { p (ID::band (b, "On")), p (ID::band (b, "Type")), p (ID::band (b, "Freq")),
-                          p (ID::band (b, "Gain")), p (ID::band (b, "Q")), p (ID::band (b, "Slope")), p (ID::band (b, "Place")) };
+    for (int e = 0; e < ID::numEqs; ++e)
+    {
+        for (int b = 0; b < Params::numBands; ++b)
+            bandParams[e][b] = { p (ID::eqBand (e, b, "On")), p (ID::eqBand (e, b, "Type")), p (ID::eqBand (e, b, "Freq")), p (ID::eqBand (e, b, "Gain")),
+                                 p (ID::eqBand (e, b, "Q")), p (ID::eqBand (e, b, "Slope")), p (ID::eqBand (e, b, "Place")) };
+        eqScaleParams[e] = p (ID::eqScaleFor (e));
+        eqOnParams[e] = p (ID::eqOn (e));
+        eqModeParams[e] = p (ID::eqMode (e));
+        eqResParams[e] = p (ID::eqRes (e));
+    }
 
     {
         const char* spc[] = { "On", "Mode", "Mix", "PreDelay", "Decay", "HighCut", "LowCut", "Depth", "Width", "Duck",
@@ -77,7 +84,7 @@ void CodexProcessor::prepareToPlay (double sampleRate, int)
     updateParameters();
     clip1.prepare (sampleRate, chunkSize);
     clip2.prepare (sampleRate, chunkSize);
-    equaliser.prepare (sampleRate);
+    for (auto& e : equalisers) e.prepare (sampleRate, chunkSize);
     saturator.prepare (sampleRate, chunkSize);
     reverb.prepare (sampleRate);
     compressor.prepare (sampleRate);
@@ -92,7 +99,8 @@ void CodexProcessor::prepareToPlay (double sampleRate, int)
 void CodexProcessor::updateLatency()
 {
     const int latency = juce::roundToInt (clip1.getLatencyInSamples() + clip2.getLatencyInSamples()
-                                          + saturator.getLatencyInSamples() + compressor.getLatencyInSamples());
+                                          + saturator.getLatencyInSamples() + compressor.getLatencyInSamples()
+                                          + equalisers[0].getLatencyInSamples() + equalisers[1].getLatencyInSamples());
     if (latency != getLatencySamples())
         setLatencySamples (latency);
 }
@@ -148,11 +156,12 @@ void CodexProcessor::updateParameters()
         clips[i]->setSettings (cs);
     }
 
+    for (int e = 0; e < ID::numEqs; ++e)
     for (int b = 0; b < Params::numBands; ++b)
     {
-        const auto& bp = bandParams[b];
+        const auto& bp = bandParams[e][b];
         eq::BandSettings bs;
-        bs.on     = bp.on->load() > 0.5f;
+        bs.on     = bp.on->load() > 0.5f && eqOnParams[e]->load() > 0.5f;
         bs.type   = (eq::BandType) (int) bp.type->load();
         bs.freq   = bp.freq->load();
         bs.gainDb = bp.gain->load();
@@ -160,8 +169,10 @@ void CodexProcessor::updateParameters()
         bs.slope  = (int) bp.slope->load();
         bs.placement = (eq::Placement) (int) bp.place->load();
         if (eq::typeUsesGain (bs.type))
-            bs.gainDb *= eqScaleParam->load();   // Gain Scale
-        equaliser.setBand (b, bs);
+            bs.gainDb *= eqScaleParams[e]->load();   // Gain Scale
+        equalisers[(size_t) e].setBand (b, bs);
+        if (b == Params::numBands - 1)
+            equalisers[(size_t) e].setMode ((int) eqModeParams[e]->load(), (int) eqResParams[e]->load());
     }
 
     sat::Settings ss;
@@ -320,14 +331,17 @@ void CodexProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiB
         }
         std::copy (l, l + n, r);
 
-        // Old-school chain: distort -> EQ -> distort again -> multiband saturation -> compressor -> space (stereo from here on)
+        // Old-school chain: distort -> EQ -> distort again -> multiband saturation -> compressor -> EQ 2 -> space (stereo from here on)
         clip1.process (l, r, n);
         for (int i = 0; i < n; ++i) m[i] = 0.5f * (l[i] + r[i]);
         analyzerPre.push (m, n);           // spectrum before the EQ (for the EQ display)
-        equaliser.process (l, r, n);
+        equalisers[0].process (l, r, n);
         clip2.process (l, r, n);
         saturator.process (l, r, n);
         compressor.process (l, r, n);      // multiband up / down compression (off by default)
+        for (int i = 0; i < n; ++i) m[i] = 0.5f * (l[i] + r[i]);
+        analyzerPre2.push (m, n);          // spectrum before EQ 2
+        equalisers[1].process (l, r, n);   // EQ 2 (post), empty by default
         reverb.process (l, r, n);          // Space: stereo room reverb (off by default)
 
         for (int i = 0; i < n; ++i)
