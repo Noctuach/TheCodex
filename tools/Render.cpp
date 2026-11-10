@@ -447,9 +447,14 @@ int main (int argc, char** argv)
         setParam (proc, ID::macro (2), 0.0f);
         const auto shortTail = render (proc, 1);
         setParam (proc, ID::macro (2), 0.5f);
+        // Punch on a noise-free synth kick (the 909's attack noise would randomise the zero crossings)
+        proc.presets.loadPreset (0);
+        setParam (proc, ID::clickLevel, 0.0f);
+        const auto punchBase = render (proc, 1);
         setParam (proc, ID::macro (0), 1.0f);
         const auto punchy = render (proc, 1);
         setParam (proc, ID::macro (0), 0.5f);
+        proc.presets.loadPreset (7);
         const auto again = render (proc, 1);
         proc.presets.loadPreset (2);   // Oldskool Raw: Width acts on the distortion (Spatial)
         const auto distorted = render (proc, 1);
@@ -469,7 +474,7 @@ int main (int argc, char** argv)
             int c = 0; for (int i = 1; i < (int) (0.008 * sr); ++i) c += (b.getSample (0, i - 1) < 0.0f) != (b.getSample (0, i) < 0.0f) ? 1 : 0;
             return (float) c;
         };
-        const float pBase = crossings (base), pPunch = crossings (punchy);
+        const float pBase = crossings (punchBase), pPunch = crossings (punchy);
         const float diff = std::abs (rmsDb (base, 0.0, 0.6) - rmsDb (again, 0.0, 0.6));
         std::cout << "\nMacros: tail level " << juce::String (tShort, 1) << " / " << juce::String (tBase, 1) << " / " << juce::String (tLong, 1)
                   << " dB (Tail -100 / 0 / +100 %), zero crossings in 8 ms " << pBase << " -> " << pPunch
