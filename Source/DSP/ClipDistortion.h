@@ -115,6 +115,7 @@ public:
         for (auto& f : svf) f.reset();
         dcX = { 0.0f, 0.0f }; dcY = { 0.0f, 0.0f };
         holdCount = { 0, 0 }; holdValue = { 0.0f, 0.0f };
+        for (auto& pm : phase) pm.reset();
         adaaPrev = { 0.0, 0.0 }; adaaPrevF = { 0.0, 0.0 };
     }
 
@@ -386,6 +387,7 @@ private:
             {
                 loFilter[ch].c = eq::design (lp, rate).stages[0];
                 hiFilter[ch].c = eq::design (hp, rate).stages[0];
+                phase[ch].setCutoffs (rate, s.loFilterHz, s.hiFilterHz);
                 shelf[ch].c    = eq::design (sh, rate).stages[0];
             }
             loActive = s.loFilterHz < 19900.0f;
@@ -474,10 +476,21 @@ private:
             const float driveSpread = 1.0f + 0.6f * sp, offsetSpread = 0.3f * sp;
             for (int ch = 0; ch < 2; ++ch)
             {
-                const float dry = chans[ch][i];
+                const float in = chans[ch][i];
                 const float chDrive  = ch == 0 ? d * driveSpread : d / driveSpread;
                 const float chOffset = ch == 0 ? off + offsetSpread : off - offsetSpread;
-                float w = loActive ? loFilter[ch].process (dry) : dry;
+                auto& pm = phase[ch];
+                const bool adaa = mode != Downsample && mode != Bitcrush;
+                // Dry path, phase-matched to the wet path so the Mix knob never comb-filters: the same all-pass phase as
+                // the Linkwitz-Riley Lo / Hi filters, plus the half-sample delay of the anti-aliasing. A bypassed unit stays untouched.
+                float dry = in;
+                if (settings.enabled)
+                {
+                    if (loActive) dry = pm.allpassLo (dry);
+                    if (hiActive) dry = pm.allpassHi (dry);
+                    if (adaa)     dry = pm.halfSample (dry);
+                }
+                float w = loActive ? pm.lowPassLR2 (in) : in;
                 if (filterPos == 1) w = runFilter (ch, w);
                 if (mode == Downsample)
                 {
@@ -508,7 +521,7 @@ private:
                     w = harden (y - shapeFor (mode, chOffset, &curve), chr);
                 }
                 if (filterPos == 2) w = runFilter (ch, w);
-                if (hiActive)    w = hiFilter[ch].process (w);
+                if (hiActive)    w = pm.highPassLR2 (w);
                 if (shelfActive) w = shelf[ch].process (w);
                 chans[ch][i] = (dry + m * (w - dry)) * og;
             }
@@ -538,6 +551,44 @@ private:
 
     juce::SmoothedValue<float> drive, boost, mix, outGain, offset, character, spatial;
     eq::Biquad loFilter[2], hiFilter[2], shelf[2];
+
+    /**
+        Linkwitz-Riley (2nd order) Lo / Hi filters for the wet path and the matching all-passes for the dry path.
+        LR2 low-pass and the inverted LR2 high-pass both have exactly the phase of a 1st-order all-pass at the same
+        cutoff, so dry and wet stay in phase at every frequency and the Mix knob blends without notches.
+    */
+    struct PhaseMatch
+    {
+        struct OnePole { float G = 0.5f, s = 0.0f; float lp (float x) noexcept { const float v = (x - s) * G; const float y = v + s; s = y + v; return y; } };
+        OnePole lo1, lo2, loAp, hi1, hi2, hiAp;
+        float frac1 = 0.0f, fracY = 0.0f;
+
+        void setCutoffs (double rate, float loHz, float hiHz)
+        {
+            auto g = [rate] (float hz)
+            {
+                const double t = std::tan (juce::MathConstants<double>::pi * juce::jlimit (5.0, rate * 0.49, (double) hz) / rate);
+                return (float) (t / (1.0 + t));
+            };
+            lo1.G = lo2.G = loAp.G = g (loHz);
+            hi1.G = hi2.G = hiAp.G = g (hiHz);
+        }
+        void reset() { for (auto* p : { &lo1, &lo2, &loAp, &hi1, &hi2, &hiAp }) p->s = 0.0f; frac1 = fracY = 0.0f; }
+
+        float lowPassLR2 (float x) noexcept  { return lo2.lp (lo1.lp (x)); }
+        float highPassLR2 (float x) noexcept { const float a = x - hi1.lp (x); return -(a - hi2.lp (a)); }   // inverted: in phase with the all-pass
+        float allpassLo (float x) noexcept   { return 2.0f * loAp.lp (x) - x; }
+        float allpassHi (float x) noexcept   { return 2.0f * hiAp.lp (x) - x; }
+        /** 1st-order Thiran all-pass: half a sample of delay, flat magnitude (matches first-order ADAA's delay). */
+        float halfSample (float x) noexcept
+        {
+            constexpr float a = 1.0f / 3.0f;
+            const float y = a * x + frac1 - a * fracY;
+            frac1 = x; fracY = y;
+            return y;
+        }
+    };
+    std::array<PhaseMatch, 2> phase;
     bool loActive = false, hiActive = false, shelfActive = false;
     double lastFilterRate = 0.0;
     float lastLo = -1.0f, lastHi = -1.0f, lastShelfHz = -1.0f, lastShelfDb = -100.0f;

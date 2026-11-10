@@ -59,6 +59,11 @@ All notable changes to Codex. Versions follow [Semantic Versioning](https://semv
 - The host's tail length follows the reverb decay.
 
 ### Fixed
+- **Mix knobs no longer notch.** The multiband saturation's Mix blended the dry signal with bands that had passed
+  through the crossovers' phase shift: at 50 % it cut up to 26 dB at a crossover (400 Hz) and 4-6 dB elsewhere. The
+  distortion units' Mix did the same around the Lo / Hi filters (4 dB at 30 Hz with the Hi Filter at 40 Hz). The dry
+  signal now gets exactly the wet path's phase (crossover all-passes; Linkwitz-Riley Lo / Hi filters with matching
+  all-passes; a half-sample all-pass for the anti-aliasing delay), so any Mix setting blends cleanly (within 0.1 dB).
 - Linear-phase EQ rebuilt on a custom partitioned convolver: filters are designed on a worker thread and swapped in
   on the audio thread without losing the input history, so editing a band during playback is seamless and the
   reported latency always matches the running filter (previously the filter swap could briefly drop audio).

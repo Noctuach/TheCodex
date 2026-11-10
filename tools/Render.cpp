@@ -976,6 +976,76 @@ int main (int argc, char** argv)
             if (std::abs (punchB - punchA) > 1.5f || tailB < tailA + 3.0f) ++bad;
             proc.presets.loadPreset (0);
         }
+        // Mix must not comb-filter: at low level (almost linear) any mix setting must stay between the dry and wet response
+        {
+            auto response = [] (ClipDistortion::Settings st, float mix, float f)
+            {
+                st.mix = mix;
+                const int N = 1 << 14, pre = 16384;
+                ClipDistortion d; d.prepare (sr, 256); d.setSettings (st); d.reset(); d.setSettings (st);
+                juce::AudioBuffer<float> b (2, N + pre);
+                for (int i = 0; i < b.getNumSamples(); ++i)
+                { const float v = 0.01f * (float) std::sin (juce::MathConstants<double>::twoPi * f * i / sr); b.setSample (0, i, v); b.setSample (1, i, v); }
+                for (int p = 0; p < b.getNumSamples(); p += 256) d.process (b.getWritePointer (0, p), b.getWritePointer (1, p), std::min (256, b.getNumSamples() - p));
+                return juce::Decibels::gainToDecibels (b.getRMSLevel (0, pre, N) / (0.01f * 0.70710678f));
+            };
+            struct Case { const char* name; ClipDistortion::Settings s; };
+            std::vector<Case> cases;
+            auto base = [] { ClipDistortion::Settings s; s.mode = ClipDistortion::Tanh; s.driveDb = 0.0f; s.outDb = 0.0f; return s; };
+            { auto s = base(); cases.push_back ({ "defaults (4x)", s }); }
+            { auto s = base(); s.oversampling = 0; cases.push_back ({ "oversampling off", s }); }
+            { auto s = base(); s.hiFilterHz = 40.0f; cases.push_back ({ "Hi Filter 40 Hz", s }); }
+            { auto s = base(); s.loFilterHz = 9000.0f; cases.push_back ({ "Lo Filter 9 kHz", s }); }
+            { auto s = base(); s.filterPos = 1; s.filterType = 2; s.filterHz = 180.0f; s.filterRes = 0.55f; cases.push_back ({ "Pre band-pass 180 Hz", s }); }
+            { auto s = base(); s.shelfDb = -6.0f; cases.push_back ({ "Shelf -6 dB", s }); }
+            const float freqs[] = { 30.0f, 45.0f, 60.0f, 90.0f, 150.0f, 400.0f, 1000.0f, 3000.0f, 8000.0f, 15000.0f };
+            std::cout << "  Mix 50 % vs the dry / wet responses (dB below the quieter of the two; > 1 dB = a notch):\n    ";
+            for (float f : freqs) std::cout << juce::String (f < 1000 ? juce::String ((int) f) : juce::String ((int) (f / 1000)) + "k").paddedLeft (' ', 6);
+            std::cout << "\n";
+            for (auto& c : cases)
+            {
+                std::cout << "    ";
+                float worst = 0.0f;
+                for (float f : freqs)
+                {
+                    const float dry = response (c.s, 0.0f, f), wet = response (c.s, 1.0f, f), half = response (c.s, 0.5f, f);
+                    // equal-gain sum of two signals can never be quieter than the average level if they are in phase
+                    const float floorDb = juce::Decibels::gainToDecibels (0.5f * (juce::Decibels::decibelsToGain (dry) + juce::Decibels::decibelsToGain (wet)));
+                    const float dip = floorDb - half;
+                    worst = std::max (worst, dip);
+                    std::cout << juce::String (dip, 1).paddedLeft (' ', 6);
+                }
+                std::cout << "   " << c.name << "\n";
+                // a resonant band-pass blended with the dry signal is a filter effect by nature: reported, not failed
+                if (worst > 0.5f && juce::String (c.name).startsWith ("Pre band-pass") == false) ++bad;
+            }
+        }
+        // multiband saturation: the global Mix must not notch around the crossovers either
+        {
+            auto satResponse = [] (float mix, float f)
+            {
+                sat::Settings st; st.enabled = true; st.numBands = 4; st.mix = mix; st.oversampling = 0;
+                for (auto& b : st.bands) { b.driveDb = 0.0f; b.style = 0; }
+                sat::MultibandSaturator m; m.prepare (sr, 256); m.setSettings (st);
+                const int N = 1 << 14, pre = 16384;
+                juce::AudioBuffer<float> b (2, N + pre);
+                for (int i = 0; i < b.getNumSamples(); ++i)
+                { const float v = 0.01f * (float) std::sin (juce::MathConstants<double>::twoPi * f * i / sr); b.setSample (0, i, v); b.setSample (1, i, v); }
+                for (int p = 0; p < b.getNumSamples(); p += 256) m.process (b.getWritePointer (0, p), b.getWritePointer (1, p), std::min (256, b.getNumSamples() - p));
+                return juce::Decibels::gainToDecibels (b.getRMSLevel (0, pre, N) / (0.01f * 0.70710678f));
+            };
+            float worst = 0.0f;
+            std::cout << "  Saturation global Mix 50 % (dB below the dry / wet average) at 4 bands, crossovers 120 / 400 / 1200 Hz:\n    ";
+            for (float f : { 60.0f, 120.0f, 250.0f, 400.0f, 800.0f, 1200.0f, 3000.0f })
+            {
+                const float dry = satResponse (0.0f, f), wet = satResponse (1.0f, f), half = satResponse (0.5f, f);
+                const float avg = juce::Decibels::gainToDecibels (0.5f * (juce::Decibels::decibelsToGain (dry) + juce::Decibels::decibelsToGain (wet)));
+                worst = std::max (worst, avg - half);
+                std::cout << (int) f << " Hz " << juce::String (avg - half, 1) << "   ";
+            }
+            std::cout << "\n";
+            if (worst > 0.5f) ++bad;
+        }
         std::cout << "Distortion engine checks: " << (bad == 0 ? "OK" : "FAILED") << "\n";
         failures += bad;
     }

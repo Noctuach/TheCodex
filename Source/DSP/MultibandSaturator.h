@@ -318,11 +318,13 @@ namespace sat
         {
             std::array<Crossover, maxBands - 1> xover {};
             std::array<std::array<Allpass, maxBands - 1>, maxBands - 1> allpass {};
+            std::array<Allpass, maxBands - 1> dryPhase {};   // the crossover network's phase, for a notch-free global Mix
             std::array<BandState, maxBands> bands {};
             void reset()
             {
                 for (auto& x : xover) x.reset();
                 for (auto& row : allpass) for (auto& a : row) a.reset();
+                for (auto& a : dryPhase) a.reset();
                 for (auto& b : bands) b.reset();
             }
         };
@@ -377,6 +379,9 @@ namespace sat
                             a.slope = s.slope;
                             designCrossover (s.slope, xf[(size_t) j], rate, a.lp, a.hp);
                         }
+                        auto& dp = ch.dryPhase[(size_t) j];
+                        dp.slope = s.slope;
+                        designCrossover (s.slope, xf[(size_t) j], rate, dp.lp, dp.hp);
                     }
                     if (s.slope != last.slope || s.numBands != last.numBands) ch.reset();
                 }
@@ -515,7 +520,11 @@ namespace sat
                             peaks[(size_t) b] = std::max (peaks[(size_t) b], std::abs (y));
                         }
                     }
-                    out[(size_t) c] = input + gm * (sum - input);
+                    // the bands' sum carries the crossovers' all-pass phase: give the dry signal the same phase
+                    // so the global Mix blends without notches around the crossover frequencies
+                    float dryAligned = input;
+                    for (int j = 0; j < nb - 1; ++j) dryAligned = ch.dryPhase[(size_t) j].process (dryAligned);   // always run: no state jumps when Mix moves
+                    out[(size_t) c] = dryAligned + gm * (sum - dryAligned);
                 }
 
                 if (ms) out = { out[0] + out[1], out[0] - out[1] };
