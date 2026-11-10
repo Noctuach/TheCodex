@@ -6,6 +6,7 @@
 #include "SpaceView.h"
 #include "CompressorView.h"
 #include "Eq2View.h"
+#include "DrawEnvelopeEditor.h"
 #include "Tuner.h"
 #include "PresetBar.h"
 #include "DistortionView.h"
@@ -66,6 +67,9 @@ private:
 
     // Envelopes
     EnvelopeDisplay pitchEnvDisplay, ampEnvDisplay;
+    DrawEnvelopeEditor pitchDrawEditor, ampDrawEditor;
+    SegmentedChoice pitchModeSwitch, ampModeSwitch;
+    void updateEnvelopeModes();
     Knob pAmount { "Amount" }, pAttack { "Attack" }, pDecay { "Decay" }, pSustain { "Sustain" }, pRelease { "Release" }, pCurve { "Curve" };
     Knob aAttack { "Attack" }, aDecay { "Decay" }, aSustain { "Sustain" }, aRelease { "Release" }, aCurve { "Curve" };
 

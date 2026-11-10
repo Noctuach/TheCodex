@@ -33,6 +33,8 @@ namespace Help
             { ID::aSustain,   "Amp Sustain: Level held while the note is down. With the 909 engine this is fixed at 100 %." },
             { ID::aRelease,   "Amp Release: Fade-out after the note is released. The note length controls the length of the tail." },
             { ID::aCurve,     "Amp Curve: Shape of decay and release. Higher values drop faster at first." },
+            { "pEnvMode", "Pitch Envelope Mode: ADSR (knobs) or DRAW (breakpoints: drag points and curves in the display, double-click to add or delete). In Draw mode, Amount still sets the depth in semitones." },
+            { "aEnvMode", "Amp Envelope Mode: ADSR (knobs) or DRAW (breakpoints). In Draw mode the drawn curve shapes the hit; Release still fades the note out when the key is released." },
             { ID::outGain,    "Output: Final output level. Watch the meter: the peak marker turns red above 0 dB." },
         };
         if (auto it = tips.find (id); it != tips.end())
@@ -102,6 +104,10 @@ namespace Help
             if (auto it = spc.find (id.substring (3)); it != spc.end())
                 return it->second;
         }
+
+        if ((id.startsWith ("p") || id.startsWith ("a")) && id.length() >= 3 && (id[1] == 'T' || id[1] == 'L' || id[1] == 'B' || id.substring (1) == "Pts")
+            && (id.substring (1) == "Pts" || juce::CharacterFunctions::isDigit (id[2])))
+            return "Drawn envelope point: edit it directly in the envelope display (Draw mode).";
 
         // Distortion stages: d1Drive, d2Mix, ...
         if (id.length() > 2 && id[0] == 'd' && (id[1] == '1' || id[1] == '2'))

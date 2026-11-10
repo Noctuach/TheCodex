@@ -20,6 +20,10 @@ MainView::MainView (CodexProcessor& p, PropertiesFile* settingsFile)
       engineSwitch (*p.apvts.getParameter (ID::engine), { "SYNTH", "909" }, Help::forParameter (ID::engine)),
       pitchEnvDisplay (p.apvts, ID::pAttack, ID::pDecay, ID::pSustain, ID::pRelease, ID::pCurve, Colours_::accent2),
       ampEnvDisplay (p.apvts, ID::aAttack, ID::aDecay, ID::aSustain, ID::aRelease, ID::aCurve, Colours_::accent),
+      pitchDrawEditor (p.apvts, 'p', Colours_::accent2, "st"),
+      ampDrawEditor (p.apvts, 'a', Colours_::accent, "%"),
+      pitchModeSwitch (*p.apvts.getParameter (ID::envMode ('p')), { "ADSR", "DRAW" }, Help::forParameter (ID::envMode ('p'))),
+      ampModeSwitch (*p.apvts.getParameter (ID::envMode ('a')), { "ADSR", "DRAW" }, Help::forParameter (ID::envMode ('a'))),
       eqDisplay (p), bandControls (p.apvts),
       unit1 (p, 1, "DISTORTION 1  " + dot + "  PRE-EQ"),
       unit2 (p, 2, "DISTORTION 2  " + dot + "  POST-EQ"),
@@ -79,6 +83,9 @@ MainView::MainView (CodexProcessor& p, PropertiesFile* settingsFile)
     attack909.attach (s, ID::attack909);
     decay909.attach (s, ID::decay909);
     engineSwitch.onChange = [this] (int) { updateEngineView(); };
+    pitchModeSwitch.onChange = [this] (int) { updateEngineView(); };
+    ampModeSwitch.onChange = [this] (int) { updateEngineView(); };
+    pitchDrawEditor.levelToText = [this] (float level) { return level * proc.apvts.getRawParameterValue (ID::pAmount)->load(); };
 
     // ---- Envelopes ----
     pAmount.attach (s, ID::pAmount);
@@ -103,6 +110,7 @@ MainView::MainView (CodexProcessor& p, PropertiesFile* settingsFile)
              &engineSwitch, &wave, &model, &tune, &phase, &clickLevel, &clickDecay, &clickTone, &tune909, &attack909, &decay909,
              &pitchEnvDisplay, &pAmount, &pAttack, &pDecay, &pSustain, &pRelease, &pCurve,
              &ampEnvDisplay, &aAttack, &aDecay, &aSustain, &aRelease, &aCurve,
+             &pitchDrawEditor, &ampDrawEditor, &pitchModeSwitch, &ampModeSwitch,
              &eqDisplay, &bandControls, &unit1, &unit2, &scopePage, &saturationPage, &spacePage, &compressorPage, &eq2Page })
         addAndMakeVisible (c);
     addChildComponent (engineNotice);
@@ -206,17 +214,25 @@ void MainView::updateEngineView()
         clickLevel.setBounds (cell[3]); clickDecay.setBounds (cell[4]); clickTone.setBounds (cell[5]);
     }
 
+    // Envelope modes: ADSR or Draw (breakpoints). In Draw mode only Amount (pitch) and Release (amp) still apply.
+    const bool pitchDraw = pitchModeSwitch.getIndex() == 1, ampDraw = ampModeSwitch.getIndex() == 1 && ! is909;
+    pitchEnvDisplay.setVisible (kickTab && ! pitchDraw);
+    pitchDrawEditor.setVisible (kickTab && pitchDraw);
+    ampEnvDisplay.setVisible (kickTab && ! ampDraw);
+    ampDrawEditor.setVisible (kickTab && ampDraw);
+    pitchModeSwitch.setVisible (kickTab && ! is909);
+    ampModeSwitch.setVisible (kickTab && ! is909);
+    auto enable = [] (Component& c, bool on, float offAlpha) { c.setEnabled (on); c.setAlpha (on ? 1.0f : offAlpha); };
+
     // The 909 has its own pitch sweep; the amp ADSR only gates it (attack + release)
-    for (Component* c : std::initializer_list<Component*> { &pitchEnvDisplay, &pAmount, &pAttack, &pDecay, &pSustain, &pRelease, &pCurve })
-    {
-        c->setEnabled (! is909);
-        c->setAlpha (is909 ? 0.2f : 1.0f);
-    }
+    for (Component* c : std::initializer_list<Component*> { &pitchEnvDisplay, &pitchDrawEditor, &pAmount })
+        enable (*c, ! is909, 0.2f);
+    for (Component* c : std::initializer_list<Component*> { &pAttack, &pDecay, &pSustain, &pRelease, &pCurve })
+        enable (*c, ! is909 && ! pitchDraw, is909 ? 0.2f : 0.3f);
     for (Component* c : std::initializer_list<Component*> { &aDecay, &aSustain, &ampEnvDisplay })
-    {
-        c->setEnabled (! is909);
-        c->setAlpha (is909 ? 0.3f : 1.0f);
-    }
+        enable (*c, ! is909 && ! ampDraw, 0.3f);
+    enable (aAttack, ! ampDraw, 0.3f);
+    // aCurve shapes the release in both modes
     engineNotice.setVisible (is909 && kickTab);
     repaint();
 }
@@ -226,6 +242,7 @@ std::vector<Component*> MainView::kickTabComponents()
     return { &engineSwitch, &tune, &phase,
              &pitchEnvDisplay, &pAmount, &pAttack, &pDecay, &pSustain, &pRelease, &pCurve,
              &ampEnvDisplay, &aAttack, &aDecay, &aSustain, &aRelease, &aCurve,
+             &pitchModeSwitch, &ampModeSwitch,
              &eqDisplay, &bandControls };
 }
 
@@ -432,6 +449,10 @@ void MainView::resized()
     engineNotice.setBounds (pitchArea.withTrimmedTop (29).reduced (1));
     layoutEnv (pitchArea, pitchEnvDisplay, { &pAmount, &pAttack, &pDecay, &pSustain, &pRelease, &pCurve });
     layoutEnv (ampArea, ampEnvDisplay, { &aAttack, &aDecay, &aSustain, &aRelease, &aCurve });
+    pitchDrawEditor.setBounds (pitchEnvDisplay.getBounds());
+    ampDrawEditor.setBounds (ampEnvDisplay.getBounds());
+    pitchModeSwitch.setBounds (pitchArea.withHeight (28).removeFromRight (116).reduced (5, 4));
+    ampModeSwitch.setBounds (ampArea.withHeight (28).removeFromRight (116).reduced (5, 4));
 
     {
         auto c = eqArea.reduced (10).withTrimmedTop (30);

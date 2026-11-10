@@ -37,6 +37,10 @@ namespace ID
     inline const juce::String aSustain { "aSustain" };
     inline const juce::String aRelease { "aRelease" };
     inline const juce::String aCurve   { "aCurve" };
+    // Envelope mode (ADSR / Draw) and breakpoints: env = "p" (pitch) or "a" (amp); "pEnvMode", "pPts", "pT3", "pL3", "pB3"
+    inline juce::String envMode (char env) { return juce::String::charToString ((juce::juce_wchar) env) + "EnvMode"; }
+    inline juce::String envPoints (char env) { return juce::String::charToString ((juce::juce_wchar) env) + "Pts"; }
+    inline juce::String envPoint (char env, char what, int index) { return juce::String::charToString ((juce::juce_wchar) env) + juce::String::charToString ((juce::juce_wchar) what) + juce::String (index + 1); }
 
     // Output
     inline const juce::String outGain { "outGain" };

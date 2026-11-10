@@ -58,6 +58,18 @@ CodexProcessor::CodexProcessor()
         for (int b = 0; b < comp::maxBands; ++b)
             for (int i = 0; i < 11; ++i) cmpBandParams[b][i] = p (ID::cmpBand (b, bp[i]));
     }
+    for (int e = 0; e < 2; ++e)
+    {
+        const char env = e == 0 ? 'p' : 'a';
+        drawModes[e] = p (ID::envMode (env));
+        drawCounts[e] = p (ID::envPoints (env));
+        for (int i = 0; i < DrawEnvelope::maxPoints; ++i)
+        {
+            drawT[e][i] = p (ID::envPoint (env, 'T', i));
+            drawL[e][i] = p (ID::envPoint (env, 'L', i));
+            drawB[e][i] = p (ID::envPoint (env, 'B', i));
+        }
+    }
     satOn = p (ID::sat ("On")); satBands = p (ID::sat ("Bands")); satSlope = p (ID::sat ("Slope"));
     satOs = p (ID::sat ("OS")); satMix = p (ID::sat ("Mix")); satOut = p (ID::sat ("Out"));
     satIn = p (ID::sat ("In")); satMode = p (ID::sat ("Mode"));
@@ -134,8 +146,18 @@ void CodexProcessor::updateParameters()
     voice.setSettings (s);
 
     voice.pitchEnv.setParameters (pAttack->load(), pDecay->load(), pSustain->load(), pRelease->load(), pCurve->load());
-    if (s.engine == KickVoice::Engine909) // amp ADSR is a gate: attack + release only
-        voice.ampEnv.setParameters (aAttack->load(), 1.0f, 1.0f, aRelease->load(), aCurve->load());
+    voice.pitchDrawMode = drawModes[0]->load() > 0.5f;
+    voice.ampDrawMode = drawModes[1]->load() > 0.5f && s.engine == KickVoice::SynthEngine;
+    for (int e = 0; e < 2; ++e)
+    {
+        DrawEnvelope::Shape shape;
+        shape.count = (int) drawCounts[e]->load();
+        for (int i = 0; i < DrawEnvelope::maxPoints; ++i)
+            shape.points[(size_t) i] = { drawT[e][i]->load(), drawL[e][i]->load(), drawB[e][i]->load() };
+        (e == 0 ? voice.pitchDraw : voice.ampDraw).setShape (shape);
+    }
+    if (s.engine == KickVoice::Engine909 || voice.ampDrawMode) // amp ADSR is a gate: attack + release only
+        voice.ampEnv.setParameters (voice.ampDrawMode ? 0.0f : aAttack->load(), 1.0f, 1.0f, aRelease->load(), aCurve->load());
     else
         voice.ampEnv.setParameters (aAttack->load(), aDecay->load(), aSustain->load(), aRelease->load(), aCurve->load());
 

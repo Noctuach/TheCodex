@@ -4,6 +4,9 @@ All notable changes to Codex. Versions follow [Semantic Versioning](https://semv
 
 ## [Unreleased]
 ### Added
+- **Draw envelopes**: pitch and amp envelopes can switch from ADSR to DRAW mode: up to 8 breakpoints with a bend per
+  segment, edited directly in the display (drag points and bend handles, double-click to add/delete, right-click for
+  shapes). Pitch Amount and the amp Release still apply.
 - **Distortion engine upgrade** (synth-style workflow):
   - Resonant **Pre / Post filter** per unit (Low Pass 12/24, Band Pass, High Pass 12/24, Notch), zero-delay SVF that
     stays clean under fast changes; response strip under the transfer display (drag: frequency + resonance).

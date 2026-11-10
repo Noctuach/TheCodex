@@ -1,6 +1,7 @@
 #pragma once
 #include "CurveEnvelope.h"
 #include "Kick909.h"
+#include "DrawEnvelope.h"
 #include <juce_core/juce_core.h>
 #include <cmath>
 
@@ -34,12 +35,16 @@ public:
     };
 
     CurveEnvelope pitchEnv, ampEnv;
+    DrawEnvelope pitchDraw, ampDraw;
+    bool pitchDrawMode = false, ampDrawMode = false;   // draw mode: breakpoints instead of ADSR (synth engine)
 
     void prepare (double sr)
     {
         sampleRate = sr;
         pitchEnv.setSampleRate (sr);
         ampEnv.setSampleRate (sr);
+        pitchDraw.setSampleRate (sr);
+        ampDraw.setSampleRate (sr);
         reset();
     }
 
@@ -47,6 +52,8 @@ public:
     {
         pitchEnv.reset();
         ampEnv.reset();
+        pitchDraw.reset();
+        ampDraw.reset();
         clickEnv = pulseEnv = env909 = fast909 = slow909 = 0.0f;
         phase = 0.0;
         hpState = hpPrevIn = 0.0f;
@@ -92,6 +99,8 @@ public:
         phase = settings.startPhaseDeg / 360.0;   // hard phase reset: identical punch on every hit
         pitchEnv.noteOn();
         ampEnv.noteOn();
+        pitchDraw.noteOn();
+        ampDraw.noteOn();
         clickEnv = 1.0f;
         pulseEnv = 1.0f;
         env909 = fast909 = slow909 = 1.0f;
@@ -115,6 +124,8 @@ public:
     {
         if (settings.engine == Engine909)
             return (ampEnv.isActive() && env909 > 1.0e-5f) || clickEnv > 1.0e-5f;
+        if (ampDrawMode && ampDraw.isFinished() && ampDraw.lastLevel() < 1.0e-5f)
+            return clickEnv > 1.0e-5f;   // the drawn amp envelope has ended at silence
         return ampEnv.isActive() || clickEnv > 1.0e-5f;
     }
 
@@ -153,8 +164,9 @@ private:
         {
             if (! isActive()) { out[i] = 0.0f; continue; }
 
-            const float pEnv = pitchEnv.next();
-            const float aEnv = ampEnv.next();
+            // Draw mode: breakpoints shape the hit; the ADSR still provides the release (as a gate) on note-off
+            const float pEnv = pitchDrawMode ? pitchDraw.next() : pitchEnv.next();
+            const float aEnv = ampDrawMode ? ampDraw.next() * ampEnv.next() : ampEnv.next();
             const float osc = oscillator (phase);
             advancePhase (settings.tuneSemis + pEnv * settings.pitchAmountSemis);
 

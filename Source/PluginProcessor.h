@@ -142,6 +142,8 @@ private:
     BandParams bandParams[ID::numEqs][Params::numBands];
     std::atomic<float>* eqScaleParams[ID::numEqs] {}, * eqOnParams[ID::numEqs] {}, * eqModeParams[ID::numEqs] {}, * eqResParams[ID::numEqs] {};
     std::atomic<float>* spcParams[25] {};
+    std::atomic<float>* drawModes[2] {}, * drawCounts[2] {};
+    std::atomic<float>* drawT[2][DrawEnvelope::maxPoints] {}, * drawL[2][DrawEnvelope::maxPoints] {}, * drawB[2][DrawEnvelope::maxPoints] {};
     std::atomic<float>* cmpGlobal[13] {};
     std::atomic<float>* cmpBandParams[comp::maxBands][11] {};
     std::atomic<float> *satOn, *satBands, *satSlope, *satOs, *satMix, *satOut, *satIn, *satMode;

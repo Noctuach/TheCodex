@@ -7,6 +7,7 @@
 #include "../Source/DSP/PitchDetector.h"
 #include "../Source/GUI/PluginEditor.h"
 #include "../Source/DSP/EqEngine.h"
+#include "../Source/DSP/DrawEnvelope.h"
 
 static void setParam (CodexProcessor& p, const juce::String& id, float value)
 {
@@ -403,6 +404,34 @@ int main (int argc, char** argv)
         }
         std::cout << "EQ mode checks: " << (bad == 0 ? "OK" : "FAILED") << "\n";
         failures += bad;
+    }
+
+    // ---- Drawn (breakpoint) envelopes ----
+    {
+        int bad = 0;
+        proc.presets.loadPreset (0);
+        setParam (proc, ID::envMode ('p'), 1.0f);
+        setParam (proc, ID::envMode ('a'), 1.0f);
+        const auto audio = render (proc, 1);
+        const float target = juce::MidiMessage::getMidiNoteInHertz (Params::keyBaseNote);
+        const float tail = measurePitch (audio, 0.36, 0.40);   // default pitch drawing lands on the root at 320 ms
+        const float early = measurePitch (audio, 0.03, 0.05);
+        // after note-off (0.35 s) the release gate fades the drawn amp envelope out
+        const float lateRms = audio.getRMSLevel (0, (int) (0.55 * sr), (int) (0.05 * sr));
+        std::cout << "\nDraw envelopes: early pitch " << juce::String (early, 1) << " Hz, tail pitch " << juce::String (tail, 2)
+                  << " Hz (target " << juce::String (target, 2) << "), level after note-off " << juce::String (juce::Decibels::gainToDecibels (lateRms), 1) << " dBFS\n";
+        if (std::abs (1200.0f * std::log2 (tail / target)) > 25.0f || early < target * 1.5f) ++bad;
+        // DrawEnvelope maths: bend 0 is linear, positive bend drops faster, last level holds
+        DrawEnvelope::Shape sh; sh.count = 2; sh.points[0] = { 0.0f, 1.0f, 0.0f }; sh.points[1] = { 100.0f, 0.0f, 0.0f };
+        const float lin = DrawEnvelope::valueAt (sh, 50.0f);
+        sh.points[0].bend = 0.8f;
+        const float bent = DrawEnvelope::valueAt (sh, 50.0f), held = DrawEnvelope::valueAt (sh, 500.0f);
+        std::cout << "  linear midpoint " << lin << ", bent midpoint " << bent << ", after last point " << held << "\n";
+        if (std::abs (lin - 0.5f) > 1.0e-4f || bent > 0.2f || held != 0.0f) ++bad;
+        std::cout << "Draw envelope checks: " << (bad == 0 ? "OK" : "FAILED") << "\n";
+        failures += bad;
+        proc.presets.loadPreset (0);
+        if (proc.apvts.getRawParameterValue (ID::envMode ('p'))->load() > 0.5f) { ++failures; std::cout << "   preset did not reset envelope mode\n"; }
     }
 
     // ---- Every key, both engines ----
@@ -826,6 +855,9 @@ int main (int argc, char** argv)
     // ---- GUI snapshots ----
     proc.presets.loadPreset (2);  // Oldskool Raw (synth)
     snapshot (proc, render (proc, 1), outDir.getChildFile ("ui_synth.png"));
+    setParam (proc, ID::envMode ('p'), 1.0f);
+    setParam (proc, ID::envMode ('a'), 1.0f);
+    snapshot (proc, render (proc, 1), outDir.getChildFile ("ui_draw_envelopes.png"));
     proc.presets.loadPreset (8);  // 909 Oldskool Hardstyle
     snapshot (proc, render (proc, 1), outDir.getChildFile ("ui_909.png"));
     proc.presets.loadPreset (10); // 909 Rawstyle

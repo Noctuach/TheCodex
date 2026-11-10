@@ -6,6 +6,7 @@
 #include "DSP/SpaceReverb.h"
 #include "DSP/Compressor.h"
 #include "DSP/EqEngine.h"
+#include "DSP/DrawEnvelope.h"
 
 using namespace juce;
 
@@ -94,6 +95,26 @@ AudioProcessorValueTreeState::ParameterLayout Params::createLayout()
     addFloat (l, ID::aSustain, "Amp Sustain", { 0.0f, 1.0f }, 0.7f, pctText);
     addFloat (l, ID::aRelease, "Amp Release", skewed (1.0f, 5000.0f, 400.0f), 150.0f, msText);
     addFloat (l, ID::aCurve, "Amp Curve", skewed (1.0f, 10.0f, 3.0f), 2.0f, [] (float v) { return String (v, 2); });
+
+    // ---------------- Drawn envelopes (breakpoints) ----------------
+    {
+        // defaults: a classic hardstyle pitch drop, and a full-body amp curve
+        const float pT[] = { 0, 25, 110, 320, 600, 900, 1200, 1500 }, pL[] = { 1.0f, 0.42f, 0.1f, 0.0f, 0, 0, 0, 0 }, pB[] = { 0.55f, 0.45f, 0.3f, 0, 0, 0, 0, 0 };
+        const float aT[] = { 0, 1, 450, 1100, 1400, 1700, 2000, 2300 }, aL[] = { 0.0f, 1.0f, 0.82f, 0.0f, 0, 0, 0, 0 }, aB[] = { 0, 0.15f, 0.35f, 0, 0, 0, 0, 0 };
+        for (char env : { 'p', 'a' })
+        {
+            const String n = env == 'p' ? "Pitch Env " : "Amp Env ";
+            addChoice (l, ID::envMode (env), n + "Mode", { "ADSR", "Draw" }, 0);
+            l.add (std::make_unique<AudioParameterInt> (ParameterID { ID::envPoints (env), 1 }, n + "Points", 2, DrawEnvelope::maxPoints, env == 'p' ? 4 : 4));
+            for (int i = 0; i < DrawEnvelope::maxPoints; ++i)
+            {
+                const String pn = n + "Point " + String (i + 1) + " ";
+                addFloat (l, ID::envPoint (env, 'T', i), pn + "Time", skewed (0.0f, 4000.0f, 300.0f), env == 'p' ? pT[i] : aT[i], msText);
+                addFloat (l, ID::envPoint (env, 'L', i), pn + "Level", { 0.0f, 1.0f }, env == 'p' ? pL[i] : aL[i], pctText);
+                addFloat (l, ID::envPoint (env, 'B', i), pn + "Bend", { -1.0f, 1.0f }, env == 'p' ? pB[i] : aB[i], [] (float v) { return String (v, 2); });
+            }
+        }
+    }
 
     // ---------------- Clip distortion stages ----------------
     const StringArray clipModes = ClipDistortion::modeNames();
