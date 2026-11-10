@@ -157,6 +157,68 @@ PresetManager::PresetManager (AudioProcessorValueTreeState& s) : apvts (s)
          .set (ID::satBand (2, "Style"), 9.0f).set (ID::satBand (2, "Drive"), 6.0f).set (ID::satBand (2, "Treble"), -4.0f)
          .set (ID::satBand (2, "Level"), -6.0f));
 
+    // ---- Showcases for the newer features (appended: program numbers of older presets stay the same) ----
+    auto drawEnv = [] (Builder& b, char env, std::initializer_list<std::array<float, 3>> pts)
+    {
+        b.set (ID::envMode (env), 1.0f).set (ID::envPoints (env), (float) pts.size());
+        int i = 0;
+        for (auto& p : pts)
+        {
+            b.set (ID::envPoint (env, 'T', i), p[0]).set (ID::envPoint (env, 'L', i), p[1]).set (ID::envPoint (env, 'B', i), p[2]);
+            ++i;
+        }
+    };
+
+    {   // resonant band-pass before a hard clip: the distortion screams around 220 Hz
+        Builder b; b.synth (0, 52.0f, 70.0f, 5.0f).amp (650.0f, 0.75f, 110.0f);
+        drawEnv (b, 'p', { { 0, 1.0f, 0.85f }, { 12, 0.3f, 0.6f }, { 70, 0.05f, 0.2f }, { 200, 0.0f, 0.0f } });
+        b.clip (1, CD::HardClip, 30.0f, -10.0f).set (ID::clip (1, "FltPos"), 1.0f).set (ID::clip (1, "FltType"), 2.0f)
+         .set (ID::clip (1, "FltFreq"), 220.0f).set (ID::clip (1, "FltRes"), 0.55f)
+         .band (1, LowCut, 30.0f).band (3, Bell, 400.0f, 4.0f, 1.0f).band (4, Bell, 1600.0f, -4.0f, 1.5f)
+         .clip (2, CD::Diode2, 12.0f, -6.0f).set (ID::clip (2, "FltPos"), 2.0f).set (ID::clip (2, "FltType"), 1.0f)
+         .set (ID::clip (2, "FltFreq"), 9000.0f).set (ID::clip (2, "FltRes"), 0.1f)
+         .set (ID::cmp ("On"), 1.0f).set (ID::cmp ("Style"), 1.0f).set (ID::cmpBand (0, "Thr"), -14.0f).set (ID::cmpBand (0, "Ratio"), 3.0f)
+         .set (ID::cmpBand (0, "Att"), 8.0f).set (ID::cmpBand (0, "Rel"), 90.0f);
+        add ("Screech Rawstyle", b);
+    }
+    {   // drawn transfer curve with a fold: hollow, zaag-like body
+        Builder b; b.synth (1, 46.0f, 100.0f, 4.0f).amp (900.0f, 0.8f, 150.0f)
+         .clip (1, CD::XShaper, 14.0f, -6.0f).band (3, Bell, 350.0f, 5.0f, 0.9f).clip (2, CD::HardClip, 12.0f, -7.0f);
+        const float ys[] = { 0.55f, 0.95f, 0.75f, 0.35f, 0.6f, 0.95f, 1.0f, 1.0f };
+        for (int k = 0; k < 8; ++k) b.set (ID::clip (1, ("XP" + String (k + 1)).toRawUTF8()), ys[k]);
+        add ("X-Shaped Zaag", b);
+    }
+    {   // long euphoric tail with a hall around it; the low end stays dry and mono
+        Builder b; b.synth (2, 38.0f, 160.0f, 3.5f).amp (1600.0f, 0.85f, 320.0f).click (0.1f, 4.0f, 3500.0f)
+         .clip (1, CD::SoftClip, 12.0f, -4.0f).band (3, Bell, 160.0f, 3.0f, 1.0f).clip (2, CD::Tube, 6.0f, -3.0f)
+         .set (ID::spc ("On"), 1.0f).set (ID::spc ("Mode"), 3.0f).set (ID::spc ("Mix"), 0.16f).set (ID::spc ("Decay"), 2.2f)
+         .set (ID::spc ("Width"), 1.5f).set (ID::spc ("LowCut"), 280.0f).set (ID::spc ("PreDelay"), 18.0f);
+        add ("Euphoric Wide Hall", b);
+    }
+    {   // upward compression on the mids brings the grit of the tail forward
+        Builder b; b.kick909 (2, 0.55f, 0.6f, 0.6f).set (ID::aRelease, 120.0f)
+         .clip (1, CD::Overdrive, 22.0f, -8.0f).band (3, Bell, 380.0f, 5.0f, 1.0f).clip (2, CD::HardClip, 10.0f, -6.0f)
+         .set (ID::cmp ("On"), 1.0f).set (ID::cmp ("Bands"), 3.0f).set (ID::cmp ("X1"), 150.0f).set (ID::cmp ("X2"), 2500.0f)
+         .set (ID::cmpBand (1, "Dir"), 1.0f).set (ID::cmpBand (1, "Thr"), -24.0f).set (ID::cmpBand (1, "Ratio"), 3.0f).set (ID::cmpBand (1, "Range"), 12.0f)
+         .set (ID::cmpBand (0, "Thr"), -12.0f).set (ID::cmpBand (0, "Ratio"), 2.5f);
+        add ("Upward Tail Crunch", b);
+    }
+    {   // drawn pitch and amp envelopes, post low-pass on the second distortion
+        Builder b; b.synth (0, 48.0f, 100.0f, 4.0f);
+        drawEnv (b, 'p', { { 0, 1.0f, 0.7f }, { 18, 0.5f, -0.2f }, { 60, 0.42f, 0.6f }, { 190, 0.0f, 0.0f } });
+        drawEnv (b, 'a', { { 0, 0.0f, 0.0f }, { 1, 1.0f, 0.6f }, { 60, 0.7f, 0.0f }, { 700, 0.65f, 0.4f }, { 1300, 0.0f, 0.0f } });
+        b.clip (1, CD::Tanh, 24.0f, -8.0f).band (1, LowCut, 28.0f).band (2, Bell, 110.0f, -4.0f, 2.0f).band (3, Bell, 300.0f, 6.0f, 1.0f)
+         .clip (2, CD::HardClip, 12.0f, -6.0f).set (ID::clip (2, "FltPos"), 2.0f).set (ID::clip (2, "FltType"), 1.0f)
+         .set (ID::clip (2, "FltFreq"), 6000.0f).set (ID::clip (2, "FltRes"), 0.3f);
+        add ("Drawn Modern Hardstyle", b);
+    }
+    {   // sample-rate reduction blended in: gritty hardcore crunch
+        Builder b; b.synth (0, 60.0f, 60.0f, 5.0f).amp (450.0f, 0.5f, 90.0f)
+         .clip (1, CD::Downsample, 20.0f, -4.0f, 0.0f, 0.5f).band (2, Bell, 150.0f, 6.0f, 1.0f)
+         .clip (2, CD::HardClip, 16.0f, -8.0f);
+        add ("Downsampled Hardcore", b);
+    }
+
     // Output levels matched to about -3 dBFS peak in the key of F (measured with tools/CodexRender),
     // so switching presets does not jump in volume.
     const std::map<String, float> outputLevels {
@@ -164,7 +226,9 @@ PresetManager::PresetManager (AudioProcessorValueTreeState& s) : apvts (s)
         { "Zaag Kick", 1.4f }, { "Rotterdam Gabber", -0.2f }, { "909 Clean", -3.7f }, { "909 Oldskool Hardstyle", 1.4f },
         { "909 Euphoric", -0.9f }, { "909 Rawstyle", -0.8f }, { "909 Gabber Overdrive", 1.6f }, { "909 Tok", -3.3f },
         { "909 Boom Tail", -0.2f }, { "909 Fuzz Box", 1.7f }, { "909 Bitcrushed", 1.9f }, { "909 Hard Attack Raw", -0.1f },
-        { "909 Wide Rawstyle", 3.0f }, { "Saturated Euphoric", -4.0f } };
+        { "909 Wide Rawstyle", 3.0f }, { "Saturated Euphoric", -4.0f },
+        { "Screech Rawstyle", 0.6f }, { "X-Shaped Zaag", 0.7f }, { "Euphoric Wide Hall", -1.0f }, { "Upward Tail Crunch", -8.4f },
+        { "Drawn Modern Hardstyle", -0.6f }, { "Downsampled Hardcore", 2.3f } };
     for (auto& preset : factory)
         if (auto it = outputLevels.find (preset.name); it != outputLevels.end())
         {
@@ -176,6 +240,28 @@ PresetManager::PresetManager (AudioProcessorValueTreeState& s) : apvts (s)
     refreshUserPresets();
     if (apvts.state.getProperty (presetNameProperty).toString().isEmpty())
         setCurrentName ("Init");
+}
+
+StringArray PresetManager::getCategories()
+{
+    return { "Init", "Hardstyle", "Rawstyle", "Euphoric", "Early Hardstyle", "Hardcore", "Tok", "FX" };
+}
+
+String PresetManager::getFactoryCategory (int index) const
+{
+    if (index < 0 || index >= (int) factory.size()) return {};
+    static const std::map<String, String> categories {
+        { "Init", "Init" }, { "Oldskool Raw", "Rawstyle" }, { "Euphoric Tail", "Euphoric" }, { "Early Hardstyle", "Early Hardstyle" },
+        { "Punchy Tok", "Tok" }, { "Zaag Kick", "Hardstyle" }, { "Rotterdam Gabber", "Hardcore" }, { "909 Clean", "Init" },
+        { "909 Oldskool Hardstyle", "Early Hardstyle" }, { "909 Euphoric", "Euphoric" }, { "909 Rawstyle", "Rawstyle" },
+        { "909 Gabber Overdrive", "Hardcore" }, { "909 Tok", "Tok" }, { "909 Boom Tail", "Hardstyle" }, { "909 Fuzz Box", "FX" },
+        { "909 Bitcrushed", "FX" }, { "909 Hard Attack Raw", "Rawstyle" }, { "909 Wide Rawstyle", "Rawstyle" },
+        { "Saturated Euphoric", "Euphoric" }, { "Screech Rawstyle", "Rawstyle" }, { "X-Shaped Zaag", "Hardstyle" },
+        { "Euphoric Wide Hall", "Euphoric" }, { "Upward Tail Crunch", "Hardstyle" }, { "Drawn Modern Hardstyle", "Hardstyle" },
+        { "Downsampled Hardcore", "Hardcore" } };
+    const auto& name = factory[(size_t) index].name;
+    if (auto it = categories.find (name); it != categories.end()) return it->second;
+    return "Hardstyle";
 }
 
 StringArray PresetManager::getFactoryNames() const

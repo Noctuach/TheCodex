@@ -13,6 +13,9 @@ public:
 
     int getNumFactory() const { return (int) factory.size(); }
     juce::StringArray getFactoryNames() const;
+    /** Style category of a factory preset (Hardstyle, Rawstyle, Euphoric, ...). */
+    juce::String getFactoryCategory (int index) const;
+    static juce::StringArray getCategories();
     juce::StringArray getUserNames() const;
 
     /** Combined list: factory presets first, then user presets. */

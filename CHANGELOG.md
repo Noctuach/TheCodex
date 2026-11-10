@@ -4,6 +4,14 @@ All notable changes to Codex. Versions follow [Semantic Versioning](https://semv
 
 ## [Unreleased]
 ### Added
+- **Preset browser**: search, style categories (Hardstyle, Rawstyle, Euphoric, Early Hardstyle, Hardcore, Tok, FX),
+  favourites (stored in your settings), click to audition, double-click / Enter to load. Opens from the grid button
+  next to the preset name or the menu.
+- **Macros**: Punch, Dirt, Tail and Width knobs in the new footer; each sweeps several parameters at once on top of the
+  preset (centre = as the preset is set).
+- **A/B compare** (with copy) and a **CPU** readout in the footer.
+- Six new factory presets that use the new features: Screech Rawstyle, X-Shaped Zaag, Euphoric Wide Hall,
+  Upward Tail Crunch, Drawn Modern Hardstyle, Downsampled Hardcore.
 - **Draw envelopes**: pitch and amp envelopes can switch from ADSR to DRAW mode: up to 8 breakpoints with a bend per
   segment, edited directly in the display (drag points and bend handles, double-click to add/delete, right-click for
   shapes). Pitch Amount and the amp Release still apply.

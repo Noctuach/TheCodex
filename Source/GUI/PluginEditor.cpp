@@ -32,6 +32,7 @@ MainView::MainView (CodexProcessor& p, PropertiesFile* settingsFile)
       spacePage (p),
       compressorPage (p),
       eq2Page (p),
+      browserOverlay (p.presets, settingsFile),
       aboutOverlay (JucePlugin_VersionString)
 {
     auto& s = p.apvts;
@@ -140,6 +141,8 @@ MainView::MainView (CodexProcessor& p, PropertiesFile* settingsFile)
     addChildComponent (engineNotice);
 
     addChildComponent (saveOverlay);
+    addChildComponent (browserOverlay);
+    presetBar.onBrowseRequested = [this] { browserOverlay.open(); };
     addChildComponent (aboutOverlay);
 
     setTooltipsEnabled (settings == nullptr || settings->getBoolValue (tooltipsKey, true));
@@ -179,6 +182,7 @@ void MainView::showMainMenu()
 
     const auto presetName = proc.presets.getCurrentName();
     menu.addSectionHeader ("Presets");
+    menu.addItem (9, "Browse presets...");
     menu.addItem (1, "Save preset...");
     menu.addItem (2, "Delete \"" + presetName + "\"", proc.presets.isCurrentUserPreset());
     menu.addItem (3, "Open preset folder");
@@ -201,6 +205,7 @@ void MainView::showMainMenu()
             switch (r)
             {
                 case 1: v.presetBar.onSaveRequested(); break;
+                case 9: v.browserOverlay.open(); break;
                 case 2: v.proc.presets.deleteUserPreset (v.proc.presets.getCurrentName()); v.presetBar.refresh(); break;
                 case 3: v.proc.presets.getUserDirectory().startAsProcess(); break;
                 case 4: v.proc.presets.refreshUserPresets(); v.presetBar.refresh(); break;
@@ -541,6 +546,7 @@ void MainView::resized()
     }
 
     saveOverlay.setBounds (getLocalBounds());
+    browserOverlay.setBounds (getLocalBounds());
     aboutOverlay.setBounds (getLocalBounds());
 }
 

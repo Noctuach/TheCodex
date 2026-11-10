@@ -60,6 +60,16 @@ distortion, so you can see your kick is in key. It turns green within 10 cents o
 | Menu | Save/delete presets, open the preset folder, interface size (75–200 %), tooltips on/off, About. |
 | ROOT / play | Tuner readout of the output's root note, and a play button that previews the kick in the selected key. |
 
+### Footer
+| Control | What it does |
+|---|---|
+| Macros | **Punch** (sweep depth and speed, click), **Dirt** (±12 dB drive on both distortion units), **Tail** (body and tail length), **Width** (stereo distortion and reverb width). Centre = the preset as it is; the preset itself is never changed. |
+| A / B | Two versions of your sound: edits go to the selected slot, **COPY** copies it to the other slot. The key stays the same. |
+| CPU | Share of the audio time Codex uses. |
+
+The **grid button** next to the preset name opens the preset browser: search, categories, favourites (click the star),
+click to audition, double-click or Enter to load.
+
 ### Kick page
 | Section | Controls |
 |---|---|

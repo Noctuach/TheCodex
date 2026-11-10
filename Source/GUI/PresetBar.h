@@ -6,7 +6,7 @@
 class PresetBar : public juce::Component, private juce::Timer
 {
 public:
-    std::function<void()> onSaveRequested;
+    std::function<void()> onSaveRequested, onBrowseRequested;
 
     explicit PresetBar (PresetManager& pm) : presets (pm)
     {
@@ -17,6 +17,8 @@ public:
         prev.onClick = [this] { presets.previous(); refresh(); };
         next.onClick = [this] { presets.next(); refresh(); };
         save.onClick = [this] { if (onSaveRequested) onSaveRequested(); };
+        browse.setTooltip ("Preset browser: search, categories and favourites");
+        browse.onClick = [this] { if (onBrowseRequested) onBrowseRequested(); };
 
         box.setTextWhenNothingSelected ("Init");
         box.onChange = [this]
@@ -24,7 +26,7 @@ public:
             if (const int id = box.getSelectedId(); id > 0)
                 presets.loadPreset (id - 1);
         };
-        for (auto* c : std::initializer_list<juce::Component*> { &prev, &next, &save, &box })
+        for (auto* c : std::initializer_list<juce::Component*> { &prev, &next, &save, &browse, &box })
             addAndMakeVisible (c);
         refresh();
         startTimerHz (4);
@@ -53,6 +55,8 @@ public:
         auto r = getLocalBounds();
         save.setBounds (r.removeFromRight (r.getHeight()));
         r.removeFromRight (6);
+        browse.setBounds (r.removeFromRight (r.getHeight()));
+        r.removeFromRight (6);
         next.setBounds (r.removeFromRight (r.getHeight()));
         r.removeFromRight (4);
         prev.setBounds (r.removeFromLeft (r.getHeight()));
@@ -67,7 +71,8 @@ private:
     }
 
     PresetManager& presets;
-    IconButton prev { "prev", Icons::chevronLeft() }, next { "next", Icons::chevronRight() }, save { "save", Icons::save() };
+    IconButton prev { "prev", Icons::chevronLeft() }, next { "next", Icons::chevronRight() }, save { "save", Icons::save() },
+               browse { "browse", Icons::browse() };
     juce::ComboBox box;
     juce::String lastName;
 };

@@ -124,6 +124,21 @@ namespace Icons
         for (float y : { 0.25f, 0.5f, 0.75f }) { p.startNewSubPath (0.18f, y); p.lineTo (0.82f, y); }
         return p;
     }
+    /** Preset browser: a 2x2 grid of tiles. */
+    inline juce::Path browse()
+    {
+        juce::Path p;
+        for (float x : { 0.18f, 0.56f })
+            for (float y : { 0.18f, 0.56f })
+                p.addRoundedRectangle (x, y, 0.26f, 0.26f, 0.05f);
+        return p;
+    }
+    inline juce::Path star()
+    {
+        juce::Path p;
+        p.addStar ({ 0.5f, 0.52f }, 5, 0.18f, 0.42f, -juce::MathConstants<float>::pi * 0.5f + juce::MathConstants<float>::pi * 0.5f);
+        return p;
+    }
     inline juce::Path close()
     {
         juce::Path p;

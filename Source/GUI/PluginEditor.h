@@ -7,6 +7,7 @@
 #include "CompressorView.h"
 #include "Eq2View.h"
 #include "DrawEnvelopeEditor.h"
+#include "PresetBrowser.h"
 #include "Tuner.h"
 #include "PresetBar.h"
 #include "DistortionView.h"
@@ -29,6 +30,7 @@ public:
 
     void showTab (int tab);   // 0 = KICK, 1 = DISTORTION, 2 = SATURATION, 3 = COMPRESSOR, 4 = EQ 2, 5 = SPACE, 6 = SCOPE
     void openAbout() { aboutOverlay.open(); }
+    void openBrowser() { browserOverlay.open(); }
     void openSaveDialog() { presetBar.onSaveRequested(); }
     std::function<void (float)> onScaleRequested;
 
@@ -104,6 +106,7 @@ private:
 
     // Overlays
     SavePresetOverlay saveOverlay;
+    PresetBrowserOverlay browserOverlay;
     AboutOverlay aboutOverlay;
 };
 

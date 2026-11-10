@@ -81,6 +81,7 @@ static void snapshot (CodexProcessor& proc, const juce::AudioBuffer<float>& audi
         hk->showTab (tab);
         if (overlay == 1) hk->getView().openAbout();
         if (overlay == 2) hk->getView().openSaveDialog();
+        if (overlay == 3) hk->getView().openBrowser();
     }
     // feed analyzer + tuner with the tail of a kick
     for (int i = 0; i < 6; ++i)
@@ -953,6 +954,7 @@ int main (int argc, char** argv)
     setParam (proc, ID::spc ("On"), 0.0f);
     snapshot (proc, render (proc, 1), outDir.getChildFile ("ui_about.png"), 0, 1);
     snapshot (proc, render (proc, 1), outDir.getChildFile ("ui_save.png"), 0, 2);
+    snapshot (proc, render (proc, 1), outDir.getChildFile ("ui_browser.png"), 0, 3);
     {
         // Resized window (75 %)
         std::unique_ptr<juce::AudioProcessorEditor> editor (proc.createEditor());
