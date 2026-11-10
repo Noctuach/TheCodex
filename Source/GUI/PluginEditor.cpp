@@ -223,14 +223,14 @@ void MainView::showMainMenu()
 
     const auto presetName = proc.presets.getCurrentName();
     menu.addSectionHeader ("Presets");
-    menu.addItem (9, "Browse presets...");
-    menu.addItem (1, "Save preset...");
+    { PopupMenu::Item it ("Browse presets..."); it.itemID = 9; it.isEnabled = true; it.shortcutKeyDescription = KeyPress ('b', ModifierKeys::commandModifier, 0).getTextDescriptionWithIcons(); menu.addItem (it); }
+    { PopupMenu::Item it ("Save preset..."); it.itemID = 1; it.isEnabled = true; it.shortcutKeyDescription = KeyPress ('s', ModifierKeys::commandModifier, 0).getTextDescriptionWithIcons(); menu.addItem (it); }
     menu.addItem (2, "Delete \"" + presetName + "\"", proc.presets.isCurrentUserPreset());
     menu.addItem (3, "Open preset folder");
     menu.addItem (4, "Rescan preset folder");
     menu.addSectionHeader ("Edit");
-    menu.addItem (5, "Undo", proc.undoManager.canUndo());
-    menu.addItem (6, "Redo", proc.undoManager.canRedo());
+    { PopupMenu::Item it ("Undo"); it.itemID = 5; it.isEnabled = proc.undoManager.canUndo(); it.shortcutKeyDescription = KeyPress ('z', ModifierKeys::commandModifier, 0).getTextDescriptionWithIcons(); menu.addItem (it); }
+    { PopupMenu::Item it ("Redo"); it.itemID = 6; it.isEnabled = proc.undoManager.canRedo(); it.shortcutKeyDescription = KeyPress ('z', ModifierKeys::commandModifier | ModifierKeys::shiftModifier, 0).getTextDescriptionWithIcons(); menu.addItem (it); }
     menu.addSectionHeader ("View");
     menu.addSubMenu ("Interface size", sizes);
     menu.addItem (7, "Show tooltips", true, tooltipWindow != nullptr);
@@ -259,6 +259,25 @@ void MainView::showMainMenu()
                     break;
             }
         });
+}
+
+bool MainView::keyPressed (const KeyPress& k)
+{
+    // Shortcuts (when the plugin window has keyboard focus; text fields keep their own keys)
+    const auto mods = k.getModifiers();
+    if (! mods.isCommandDown()) return false;
+    const int code = k.getKeyCode();
+    if (code == 'Z' || code == 'z')
+    {
+        if (mods.isShiftDown()) proc.undoManager.redo(); else proc.undoManager.undo();
+        return true;
+    }
+    if (code == 'Y' || code == 'y') { proc.undoManager.redo(); return true; }
+    if (code == 'B' || code == 'b') { browserOverlay.open(); return true; }
+    if (code == 'S' || code == 's') { presetBar.onSaveRequested(); return true; }
+    if (code == KeyPress::rightKey || code == KeyPress::downKey) { proc.presets.next(); presetBar.refresh(); return true; }
+    if (code == KeyPress::leftKey || code == KeyPress::upKey) { proc.presets.previous(); presetBar.refresh(); return true; }
+    return false;
 }
 
 void MainView::switchAB (int slot)

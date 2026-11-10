@@ -28,6 +28,7 @@ public:
 
     void paint (juce::Graphics&) override;
     void resized() override;
+    bool keyPressed (const juce::KeyPress&) override;
 
     void showTab (int tab);   // 0 = KICK, 1 = DISTORTION, 2 = SATURATION, 3 = COMPRESSOR, 4 = EQ 2, 5 = SPACE, 6 = SCOPE
     void openAbout() { aboutOverlay.open(); }
