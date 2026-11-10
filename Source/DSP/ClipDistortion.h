@@ -471,7 +471,7 @@ private:
                     }
                     w = holdValue[(size_t) ch];
                 }
-                if (mode == Downsample)
+                if (mode == Downsample || mode == Bitcrush)   // deliberately stepped: no anti-aliasing (and ADAA is ill-conditioned on steps)
                     w = transfer (mode, w, chDrive, chOffset, chr, &curve);
                 else
                 {

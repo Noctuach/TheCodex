@@ -372,7 +372,7 @@ int main (int argc, char** argv)
                       << juce::String (s50, 1).paddedLeft (' ', 16) << " / " << juce::String (m50, 1) << " dB" << juce::String (lat).paddedLeft (' ', 14) << " samples\n";
             if (std::abs (g200 - 6.0f) > 0.3f || s50 > -30.0f || std::abs (m50 - 0.4f) > 0.3f) ++bad;   // 0.4 dB = skirt of the bell at 50 Hz
             if (mode == 0 && lat != 0) ++bad;
-            if (mode == 2 && lat != eq::firLength (1, sr) / 2) ++bad;
+            if (mode == 2 && lat != eq::firLength (1, sr) / 2 + PartitionedConvolver::B) ++bad;
         }
         // linear phase: impulse response symmetric around the latency (no phase shift)
         {
@@ -389,6 +389,36 @@ int main (int argc, char** argv)
             std::cout << "  Linear phase impulse: peak at the latency " << (peakAtLatency ? "yes" : "NO") << ", max asymmetry " << asym << "\n";
             if (! peakAtLatency || asym > 1.0e-3f) ++bad;
         }
+        // Linear phase: editing a band while audio plays swaps the filter without dropping or clicking
+        {
+            eq::EqEngine e; e.prepare (sr, 256);
+            eq::BandSettings bell; bell.on = true; bell.type = eq::BandType::Bell; bell.freq = 2000.0f; bell.gainDb = 0.5f; bell.q = 1.0f;
+            e.setBand (0, bell); e.setMode (2, 1); settle (e);
+            const int n = (int) (sr * 2.0);
+            juce::AudioBuffer<float> b (2, n);
+            for (int i = 0; i < n; ++i) { const float v = 0.3f * (float) std::sin (juce::MathConstants<double>::twoPi * 100.0 * i / sr); b.setSample (0, i, v); b.setSample (1, i, v); }
+            for (int pos = 0; pos < n; pos += 256)
+            {
+                if (pos > 0 && pos % (int) (0.1 * sr) < 256)   // a new band setting every 100 ms
+                {
+                    bell.gainDb = bell.gainDb > 0.0f ? -0.5f : 0.5f;
+                    e.setBand (0, bell); e.setMode (2, 1);
+                    juce::Thread::sleep (30);   // give the worker time so swaps really happen mid-stream
+                }
+                e.process (b.getWritePointer (0, pos), b.getWritePointer (1, pos), std::min (256, n - pos));
+            }
+            // after the latency, the 100 Hz sine must be continuous: no block quieter than -1 dB of the steady level,
+            // and no sample-to-sample jump larger than the sine's own slope allows
+            const int lat = e.getLatencyInSamples();
+            float minRms = 10.0f, maxJump = 0.0f;
+            for (int pos = lat + 2048; pos + 256 < n; pos += 256)
+                minRms = std::min (minRms, b.getRMSLevel (0, pos, 256));
+            for (int i = lat + 2049; i < n; ++i) maxJump = std::max (maxJump, std::abs (b.getSample (0, i) - b.getSample (0, i - 1)));
+            const float slope = 0.3f * juce::MathConstants<float>::twoPi * 100.0f / (float) sr;
+            std::cout << "  Linear phase live edits: lowest block " << juce::String (juce::Decibels::gainToDecibels (minRms / (0.3f * 0.7071f)), 2)
+                      << " dB, largest step " << juce::String (maxJump / slope, 2) << "x the sine's slope\n";
+            if (minRms < 0.3f * 0.7071f * 0.89f || maxJump > slope * 1.5f) ++bad;
+        }
         // EQ 2 in the plugin: a band changes the output; latency is reported for linear phase
         {
             proc.presets.loadPreset (8);
@@ -400,7 +430,7 @@ int main (int argc, char** argv)
             render (proc, 1);
             const int lat = proc.getLatencySamples();
             std::cout << "  EQ 2 low cut at 200 Hz changes the kick by " << juce::String (d, 2) << " dB; linear-phase EQ 2 latency " << lat << " samples\n";
-            if (std::abs (d) < 0.2f || lat < eq::firLength (1, sr) / 2) ++bad;
+            if (std::abs (d) < 0.2f || lat < eq::firLength (1, sr) / 2 + PartitionedConvolver::B) ++bad;
             proc.presets.loadPreset (8);
             if (EQDisplay::numPresent (proc.apvts, 1) != 0 || proc.apvts.getRawParameterValue (ID::eqMode (1))->load() != 0.0f) { ++bad; std::cout << "   preset did not reset EQ 2\n"; }
         }
@@ -583,6 +613,26 @@ int main (int argc, char** argv)
             std::cout << "  default drag file name: " << KickExporter::defaultFile (proc).getFileName() << "\n";
         }
         if (proc.apvts.copyState().toXmlString() != before) { ++bad; std::cout << "   export changed the live instance\n"; }
+        // with a linear-phase EQ (large latency, filters built on a worker thread) the attack must still be there
+        {
+            setParam (proc, ID::eqMode (0), 2.0f);
+            setParam (proc, ID::eqRes (0), 3.0f);   // Very High: ~340 ms of latency
+            const auto lpFile = KickExporter::render (proc, outDir.getChildFile ("export_linear.wav"), 0.4, sr);
+            std::unique_ptr<juce::AudioFormatReader> rd (fm.createReaderFor (lpFile));
+            if (rd == nullptr) ++bad;
+            else
+            {
+                juce::AudioBuffer<float> b (2, (int) rd->lengthInSamples);
+                rd->read (&b, 0, b.getNumSamples(), 0, true, true);
+                const float attack = b.getMagnitude (0, 0, (int) (0.02 * sr));
+                const float total = b.getMagnitude (0, 0, b.getNumSamples());
+                std::cout << "  linear-phase export: attack " << juce::String (juce::Decibels::gainToDecibels (attack), 1)
+                          << " dBFS in the first 20 ms (peak " << juce::String (juce::Decibels::gainToDecibels (total), 1) << "), "
+                          << juce::String ((float) b.getNumSamples() / (float) rd->sampleRate, 2) << " s\n";
+                if (attack < total * 0.25f) ++bad;
+            }
+            setParam (proc, ID::eqMode (0), 0.0f);
+        }
         std::cout << "Export checks: " << (bad == 0 ? "OK" : "FAILED") << "\n";
         failures += bad;
         setParam (proc, ID::key, 0.0f);

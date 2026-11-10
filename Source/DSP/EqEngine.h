@@ -1,6 +1,7 @@
 #pragma once
 #include <juce_dsp/juce_dsp.h>
 #include "ParametricEQ.h"
+#include "PartitionedConvolver.h"
 #include "../Parameters.h"
 
 /**
@@ -28,6 +29,11 @@ namespace eq
         return juce::jmin (n, 1 << 18);
     }
 
+    /**
+        Linear-phase FIR equaliser. A worker thread designs the four filters of the 2x2 stereo matrix (so Mid / Side /
+        Left / Right bands work) and hands them to a PartitionedConvolver, which swaps them in on the audio thread
+        without losing the input history. Latency = half the FIR length + one convolution partition.
+    */
     class LinearPhaseEq : private juce::Thread
     {
     public:
@@ -36,20 +42,21 @@ namespace eq
         LinearPhaseEq() : juce::Thread ("Codex linear-phase EQ") {}
         ~LinearPhaseEq() override { stopThread (4000); }
 
-        void prepare (double rate, int maxBlock)
+        void prepare (double rate, int)
         {
             stopThread (4000);
             sr = rate;
-            const juce::dsp::ProcessSpec spec { rate, (juce::uint32) maxBlock, 1 };
-            for (auto& c : conv) { c.prepare (spec); c.reset(); }
-            for (auto& b : scratch) b.assign ((size_t) maxBlock, 0.0f);
-            for (auto& b : ins) b.assign ((size_t) maxBlock, 0.0f);
-            dirty = true;
-            built.store (-1);
+            convolver.prepare (firLength (4, rate));
+            {
+                const juce::SpinLock::ScopedLockType l (pending);
+                dirty = true;
+            }
+            requested.store (true);
+            builtGeneration = -1;
             startThread (juce::Thread::Priority::low);
         }
 
-        /** Called from the audio thread with the current bands and resolution; rebuilds in the background when they change. */
+        /** Audio thread: current bands and resolution; a rebuild is requested when they change (never blocks). */
         void update (const Bands& bands, int resolution)
         {
             const juce::SpinLock::ScopedTryLockType lock (pending);
@@ -60,76 +67,69 @@ namespace eq
                 nextRes = resolution;
                 dirty = false;
                 generation++;
-                notify();
+                requested.store (true);   // polled by the worker: no event is signalled from the audio thread
             }
         }
 
-        int getLatency (int resolution) const { return firLength (resolution, sr) / 2; }
-
-        void process (float* l, float* r, int n) noexcept
+        /** Latency of the running filter (half its length) plus the convolver's partition. */
+        int getLatency() const
         {
-            std::copy (l, l + n, ins[0].begin());
-            std::copy (r, r + n, ins[1].begin());
-            auto run = [&] (juce::dsp::Convolution& c, int input, float* out)
-            {
-                float* inPtr = ins[(size_t) input].data();
-                juce::dsp::AudioBlock<float> inB (&inPtr, 1, (size_t) n), outB (&out, 1, (size_t) n);
-                c.process (juce::dsp::ProcessContextNonReplacing<float> (inB, outB));
-            };
-            run (conv[0], 0, l);
-            run (conv[3], 1, r);
-            if (cross.load (std::memory_order_relaxed))
-            {
-                float* s0 = scratch[0].data();
-                float* s1 = scratch[1].data();
-                run (conv[1], 1, s0);
-                run (conv[2], 0, s1);
-                for (int i = 0; i < n; ++i) { l[i] += s0[i]; r[i] += s1[i]; }
-            }
+            const int len = convolver.getInstalledLength();
+            return (len > 0 ? len / 2 : 0) + PartitionedConvolver::B;
         }
 
-        /** True once the filters for the current settings have been handed to the convolution engines. */
-        bool isUpToDate() const { return built.load() == generationSnapshot(); }
+        void process (float* l, float* r, int n) noexcept { convolver.process (l, r, n); }
+
+        /** True once the filters for the latest settings are running. */
+        bool isUpToDate() const
+        {
+            int gen;
+            { const juce::SpinLock::ScopedLockType l (pending); gen = generation; }
+            return convolver.getInstalledTag() == gen;
+        }
+
+        void resetHistory() noexcept { convolver.reset(); }
 
     private:
-        int generationSnapshot() const { const juce::SpinLock::ScopedLockType l (pending); return generation; }
-
         void run() override
         {
-            juce::HeapBlock<float> fftBuf;
             while (! threadShouldExit())
             {
-                Bands bands;
-                int res, gen;
+                convolver.collectGarbage();
+                if (requested.exchange (false))
                 {
-                    const juce::SpinLock::ScopedLockType l (pending);
-                    bands = next; res = nextRes; gen = generation;
+                    Bands bands;
+                    int res, gen;
+                    {
+                        const juce::SpinLock::ScopedLockType l (pending);
+                        bands = next; res = nextRes; gen = generation;
+                    }
+                    if (gen != builtGeneration)
+                    {
+                        build (bands, res, gen);
+                        builtGeneration = gen;
+                    }
                 }
-                if (gen != built.load())
-                {
-                    build (bands, res);
-                    built.store (gen);
-                }
-                wait (-1);
+                wait (10);
             }
         }
 
-        void build (const Bands& bands, int res)
+        void build (const Bands& bands, int res, int gen)
         {
             const int N = firLength (res, sr);
             const int order = juce::roundToInt (std::log2 ((double) N));
             juce::dsp::FFT fft (order);
 
-            // magnitudes of the four matrix elements on the FFT grid
             std::array<BandDesign, Params::numBands> designs;
             for (int b = 0; b < Params::numBands; ++b) designs[(size_t) b] = design (bands[(size_t) b], sr);
             std::array<std::vector<float>, 4> spec;
-            for (auto& s : spec) s.assign ((size_t) N / 2 + 1, 0.0f);
+            for (auto& sp : spec) sp.assign ((size_t) N / 2 + 1, 0.0f);
             bool hasCross = false;
             for (int k = 0; k <= N / 2; ++k)
             {
+                if (threadShouldExit()) return;
                 const double f = juce::jmax (1.0, (double) k * sr / (double) N);
-                double m = 1.0, s = 1.0, dl = 1.0, dr = 1.0;
+                double m = 1.0, sd = 1.0, dl = 1.0, dr = 1.0;
                 for (int b = 0; b < Params::numBands; ++b)
                 {
                     const auto& d = designs[(size_t) b];
@@ -137,25 +137,32 @@ namespace eq
                     const double g = magnitude (d, f, sr);
                     switch (bands[(size_t) b].placement)
                     {
-                        case Placement::Stereo: m *= g; s *= g; break;
+                        case Placement::Stereo: m *= g; sd *= g; break;
                         case Placement::Mid:    m *= g; break;
-                        case Placement::Side:   s *= g; break;
+                        case Placement::Side:   sd *= g; break;
                         case Placement::Left:   dl *= g; break;
                         case Placement::Right:  dr *= g; break;
                     }
                 }
-                spec[0][(size_t) k] = (float) (dl * 0.5 * (m + s));
-                spec[1][(size_t) k] = (float) (dl * 0.5 * (m - s));   // R -> L
-                spec[2][(size_t) k] = (float) (dr * 0.5 * (m - s));   // L -> R
-                spec[3][(size_t) k] = (float) (dr * 0.5 * (m + s));
-                hasCross = hasCross || std::abs (m - s) > 1.0e-6;
+                spec[0][(size_t) k] = (float) (dl * 0.5 * (m + sd));
+                spec[1][(size_t) k] = (float) (dl * 0.5 * (m - sd));   // R -> L
+                spec[2][(size_t) k] = (float) (dr * 0.5 * (m - sd));   // L -> R
+                spec[3][(size_t) k] = (float) (dr * 0.5 * (m + sd));
+                hasCross = hasCross || std::abs (m - sd) > 1.0e-6;
             }
 
+            // zero-phase spectrum -> impulse centred at N/2 -> Blackman window
             std::vector<float> work ((size_t) N * 2);
+            std::fill (work.begin(), work.end(), 0.0f);
+            work[0] = 1.0f;
+            fft.performRealOnlyForwardTransform (work.data(), true);
+            fft.performRealOnlyInverseTransform (work.data());
+            const float scale = std::abs (work[0]) > 1.0e-9f ? 1.0f / work[0] : 1.0f;
+
+            std::array<std::vector<float>, 4> irs;
             for (int e = 0; e < 4; ++e)
             {
                 if (threadShouldExit()) return;
-                // zero-phase real spectrum -> impulse centred at N/2 -> Blackman window
                 std::fill (work.begin(), work.end(), 0.0f);
                 for (int k = 0; k < N; ++k)
                 {
@@ -163,40 +170,30 @@ namespace eq
                     work[(size_t) (2 * k)] = spec[(size_t) e][(size_t) kk];
                 }
                 fft.performRealOnlyInverseTransform (work.data());
-                const float scale = inverseScale (fft, N);
-                juce::AudioBuffer<float> ir (1, N);
-                auto* h = ir.getWritePointer (0);
+                auto& h = irs[(size_t) e];
+                h.resize ((size_t) N);
                 for (int i = 0; i < N; ++i)
                 {
-                    const int src = (i + N / 2) % N;   // circular shift: the impulse peak lands on N/2
+                    const int src = (i + N / 2) % N;
                     const double w = 0.42 - 0.5 * std::cos (juce::MathConstants<double>::twoPi * i / (N - 1))
                                    + 0.08 * std::cos (2.0 * juce::MathConstants<double>::twoPi * i / (N - 1));
-                    h[i] = work[(size_t) src] * scale * (float) w;
+                    h[(size_t) i] = work[(size_t) src] * scale * (float) w;
                 }
-                conv[(size_t) e].loadImpulseResponse (std::move (ir), sr, juce::dsp::Convolution::Stereo::no,
-                                                      juce::dsp::Convolution::Trim::no, juce::dsp::Convolution::Normalise::no);
             }
-            cross.store (hasCross);
-        }
-
-        /** Normalisation of JUCE's inverse real FFT, measured once (a flat spectrum must give a unit impulse). */
-        static float inverseScale (juce::dsp::FFT& fft, int N)
-        {
-            std::vector<float> t ((size_t) N * 2, 0.0f);
-            for (int k = 0; k < N; ++k) t[(size_t) (2 * k)] = 1.0f;
-            fft.performRealOnlyInverseTransform (t.data());
-            return std::abs (t[0]) > 1.0e-9f ? 1.0f / t[0] : 1.0f;
+            auto set = PartitionedConvolver::FilterSet::create ({ irs[0].data(), hasCross ? irs[1].data() : nullptr,
+                                                                  hasCross ? irs[2].data() : nullptr, irs[3].data() }, N, hasCross);
+            set->tag = gen;
+            convolver.offer (std::move (set));
         }
 
         double sr = 48000.0;
-        std::array<juce::dsp::Convolution, 4> conv;   // LL, RL (R->L), LR (L->R), RR
-        std::array<std::vector<float>, 2> scratch, ins;
-        std::atomic<bool> cross { false };
-        juce::SpinLock pending;
+        PartitionedConvolver convolver;
+        mutable juce::SpinLock pending;
         Bands next {};
         int nextRes = 1, generation = 0;
         bool dirty = true;
-        std::atomic<int> built { -1 };
+        std::atomic<bool> requested { true };
+        int builtGeneration = -1;   // worker only
     };
 
     /** The equaliser as used by the plugin: band settings + processing mode. */
@@ -230,6 +227,7 @@ namespace eq
             {
                 zeroLatency.reset(); natural.reset();
                 if (os) os->reset();
+                if (mode == 2) linear.resetHistory();
                 lastMode = mode;
             }
         }
@@ -237,7 +235,7 @@ namespace eq
         int getLatencyInSamples() const
         {
             if (mode == 1 && os) return juce::roundToInt (os->getLatencyInSamples());
-            if (mode == 2) return linear.getLatency (res);
+            if (mode == 2) return linear.getLatency();
             return 0;
         }
 
@@ -252,7 +250,7 @@ namespace eq
             os->processSamplesDown (block);
         }
 
-        bool isLinearUpToDate() const { return linear.isUpToDate(); }
+        bool isLinearUpToDate() const { return mode != 2 || linear.isUpToDate(); }
         int getMode() const { return mode; }
 
     private:

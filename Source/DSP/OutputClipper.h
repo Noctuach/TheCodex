@@ -19,6 +19,7 @@ public:
 
     void setParameters (bool on, float ceilingDb, float softness)
     {
+        if (on && ! enabled && os != nullptr) os->reset();   // no stale filter state when switched back on
         enabled = on;
         ceilingGain.setTargetValue (juce::Decibels::decibelsToGain (ceilingDb));
         knee = juce::jlimit (0.0f, 1.0f, softness);

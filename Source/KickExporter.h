@@ -23,10 +23,7 @@ struct KickExporter
         offline.prepareToPlay (rate, block);
         offline.setNonRealtime (true);
 
-        // let the linear-phase EQ filters build before rendering
-        juce::AudioBuffer<float> warm (2, block);
-        juce::MidiBuffer none;
-        for (int i = 0; i < 20; ++i) { warm.clear(); offline.processBlock (warm, none); juce::Thread::sleep (2); }
+        settle (offline, rate, block);
 
         const int latency = offline.getLatencySamples();
         const int hold = (int) (holdSeconds * rate);
@@ -75,6 +72,25 @@ struct KickExporter
     }
 
     /**
+        Runs silent blocks until every filter is ready (linear-phase EQ filters designed on the worker thread and
+        installed), then a little more for the convolution engine's crossfade. Gives up after 5 s.
+    */
+    static void settle (CodexProcessor& p, double rate, int block)
+    {
+        juce::AudioBuffer<float> warm (2, block);
+        juce::MidiBuffer none;
+        const auto deadline = juce::Time::getMillisecondCounter() + 5000;
+        do
+        {
+            warm.clear();
+            p.processBlock (warm, none);
+            if (! p.isSettled()) juce::Thread::sleep (2);
+        }
+        while (! p.isSettled() && juce::Time::getMillisecondCounter() < deadline);
+        for (int i = 0; i < (int) (0.12 * rate) / block + 1; ++i) { warm.clear(); p.processBlock (warm, none); }
+    }
+
+    /**
         Finds the sub layer phase that gives the fullest low end: renders the kick offline at 24 phases
         (15 degree steps) and measures the energy below 100 Hz in the tail. Returns the best phase in degrees.
     */
@@ -98,21 +114,27 @@ struct KickExporter
         float bestPhase = 0.0f;
         double bestEnergy = -1.0;
         juce::AudioBuffer<float> buf (2, block);
+        offline.prepareToPlay (rate, block);
+        settle (offline, rate, block);
+        const int latency = offline.getLatencySamples();
         for (int step = 0; step < 24; ++step)
         {
             const float deg = (float) step * 15.0f;
             phaseParam->setValueNotifyingHost (phaseParam->convertTo0to1 (deg));
-            offline.prepareToPlay (rate, block);
             std::vector<eq::Biquad> filters ((size_t) design.numStages);
             for (int k = 0; k < design.numStages; ++k) filters[(size_t) k].c = design.stages[(size_t) k];
             double energy = 0.0;
-            const int total = (int) (0.4 * rate), from = (int) (0.08 * rate);
-            for (int pos = 0; pos < total; pos += block)
+            // measure the tail after the chain latency; then release the note and let everything ring out
+            const int from = latency + (int) (0.08 * rate), total = latency + (int) (0.4 * rate);
+            const int flush = total + (int) (0.4 * rate);
+            for (int pos = 0; pos < flush; pos += block)
             {
                 juce::MidiBuffer midi;
                 if (pos == 0) midi.addEvent (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 127), 0);
+                if (pos <= total && total < pos + block) midi.addEvent (juce::MidiMessage::noteOff (1, 60), total - pos);
                 buf.clear();
                 offline.processBlock (buf, midi);
+                if (pos >= total) continue;
                 for (int i = 0; i < block; ++i)
                 {
                     float v = 0.5f * (buf.getSample (0, i) + buf.getSample (1, i));

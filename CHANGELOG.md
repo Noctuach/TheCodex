@@ -55,6 +55,13 @@ All notable changes to Codex. Versions follow [Semantic Versioning](https://semv
 - The host's tail length follows the reverb decay.
 
 ### Fixed
+- Linear-phase EQ rebuilt on a custom partitioned convolver: filters are designed on a worker thread and swapped in
+  on the audio thread without losing the input history, so editing a band during playback is seamless and the
+  reported latency always matches the running filter (previously the filter swap could briefly drop audio).
+- Kick export and sub ALIGN wait for the linear-phase filters and measure after the chain latency.
+- Sub layer delay buffer sized for the worst-case chain latency; velocity applied sample-accurately at note-on.
+- Host latency changes are applied on the message thread; no allocation or blocking calls on the audio thread from
+  the ADAA tables or the EQ worker; Bitcrush excluded from ADAA; clipper oversampler reset when re-enabled.
 - Switching from *909 Clean* (both distortions bypassed on purpose) to another preset re-enables the distortion units
   (covered by an automated test).
 

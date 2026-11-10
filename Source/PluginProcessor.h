@@ -40,7 +40,7 @@ private:
     std::array<float, size> buffer {};
 };
 
-class CodexProcessor : public juce::AudioProcessor
+class CodexProcessor : public juce::AudioProcessor, private juce::Timer
 {
 public:
     CodexProcessor();
@@ -80,6 +80,8 @@ public:
     /** Share of the available processing time used by the audio callback (0..1, for the CPU readout). */
     double getCpuLoad() const { return loadMeasurer.getLoadAsProportion(); }
     OutputClipper& getClipper() { return clipper; }
+    /** True when every filter is ready (linear-phase EQ filters built and installed); used before offline renders. */
+    bool isSettled() const { return equalisers[0].isLinearUpToDate() && equalisers[1].isLinearUpToDate(); }
 
     /** Output peak since last read, per channel (0 = left, 1 = right). */
     float getAndResetPeak (int channel) { return peaks[(size_t) channel].exchange (0.0f); }
@@ -112,6 +114,8 @@ private:
     void startScope();
     void feedScope (float left, float right) noexcept;
     void updateLatency();
+    void timerCallback() override;
+    std::atomic<int> latencyTarget { 0 };
 
     static constexpr int chunkSize = 256;
 
@@ -129,7 +133,7 @@ private:
     std::vector<float> subDelay;
     int subDelayPos = 0;
     space::OnePole subLp1, subLp2;
-    juce::SmoothedValue<float> subGain, velGain;
+    juce::SmoothedValue<float> subGain;
     std::atomic<float> *subOnParam = nullptr, *subLevelParam = nullptr, *subLpParam = nullptr, *subFadeParam = nullptr,
                        *subPhaseParam = nullptr, *velocityParam = nullptr;
     int chainLatency() const;

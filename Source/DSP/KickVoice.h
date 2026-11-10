@@ -40,6 +40,8 @@ public:
 
     /** Optional second output: the clean sub layer (same length as `out`), or nullptr. */
     float* subOut = nullptr;
+    /** Level of the current note from its velocity (set before noteOn). */
+    float velocityGain = 1.0f;
 
     CurveEnvelope pitchEnv, ampEnv;
     DrawEnvelope pitchDraw, ampDraw;
@@ -105,6 +107,7 @@ public:
         currentNote = midiNote;
         baseFreq = 440.0 * std::pow (2.0, (pitchNote - 69.0) / 12.0);
         phase = settings.startPhaseDeg / 360.0;   // hard phase reset: identical punch on every hit
+        noteGain = velocityGain;
         pitchEnv.noteOn();
         ampEnv.noteOn();
         pitchDraw.noteOn();
@@ -186,7 +189,8 @@ private:
                 click = nextNoise() * clickEnv * noiseLevel;
                 clickEnv *= clickMul;
             }
-            out[i] = osc * aEnv + click;
+            out[i] = (osc * aEnv + click) * noteGain;
+            if (subOut != nullptr) subOut[i] *= noteGain;
         }
     }
 
@@ -230,7 +234,8 @@ private:
                 clickEnv *= clickMul;
             }
 
-            out[i] = (body + attack) * gate;
+            out[i] = (body + attack) * gate * noteGain;
+            if (subOut != nullptr) subOut[i] *= noteGain;
         }
     }
 
@@ -260,7 +265,7 @@ private:
             case Triangle: return triangle (p);
             case WarmSine:
             {
-                static const float norm = 1.0f / std::tanh (2.0f);
+                constexpr float norm = 1.0373147f;   // 1 / tanh (2)
                 return std::tanh (2.0f * std::sin (juce::MathConstants<float>::twoPi * p)) * norm;
             }
             default: return std::sin (juce::MathConstants<float>::twoPi * p);
@@ -272,7 +277,7 @@ private:
     Kick909Model model = kick909Models()[0];
     double baseFreq = 55.0, phase = 0.0;
     int currentNote = -1;
-    float subTime = 0.0f, msPerSample = 1000.0f / 44100.0f;
+    float subTime = 0.0f, msPerSample = 1000.0f / 44100.0f, noteGain = 1.0f;
 
     float clickEnv = 0.0f, clickMul = 0.99f, noiseLevel = 0.0f;
     float pulseEnv = 0.0f, pulseMul = 0.9f, pulseLevel = 0.0f;

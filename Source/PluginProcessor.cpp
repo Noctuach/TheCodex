@@ -5,6 +5,7 @@ CodexProcessor::CodexProcessor()
     : AudioProcessor (BusesProperties().withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
       apvts (*this, &undoManager, "CodexState", Params::createLayout())
 {
+    startTimerHz (20);   // applies latency changes to the host from the message thread
     engine = p (ID::engine); model909 = p (ID::model909); tune909 = p (ID::tune909);
     attack909 = p (ID::attack909); decay909 = p (ID::decay909);
     key = p (ID::key); octave = p (ID::octave); keyMode = p (ID::keyMode);
@@ -99,12 +100,11 @@ bool CodexProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
 void CodexProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     loadMeasurer.reset (sampleRate, juce::jmax (1, samplesPerBlock));
-    subDelay.assign ((size_t) (sampleRate * 0.25) + 1, 0.0f);   // up to 250 ms of chain latency
+    // worst-case chain latency: two Maximum-resolution linear-phase EQs (~0.7 s each) + oversampling + lookahead
+    subDelay.assign ((size_t) (sampleRate * 1.6) + 1, 0.0f);
     subDelayPos = 0;
     subLp1.reset(); subLp2.reset();
     subGain.reset (sampleRate, 0.02);
-    velGain.reset (sampleRate, 0.003);
-    velGain.setCurrentAndTargetValue (1.0f);
     for (auto* v : { &left, &right, &mid, &sub })
         v->assign ((size_t) chunkSize, 0.0f);
     scopePos = -1;
@@ -138,6 +138,16 @@ void CodexProcessor::updateLatency()
                                           + saturator.getLatencyInSamples() + compressor.getLatencyInSamples()
                                           + equalisers[0].getLatencyInSamples() + equalisers[1].getLatencyInSamples()
                                           + clipper.getLatencyInSamples());
+    // The host is told on the message thread (setLatencySamples notifies listeners and can lock);
+    // when this already runs on the message thread (offline renders, tests) it is applied at once.
+    latencyTarget.store (latency);
+    if (juce::MessageManager::existsAndIsCurrentThread() && latency != getLatencySamples())
+        setLatencySamples (latency);
+}
+
+void CodexProcessor::timerCallback()
+{
+    const int latency = latencyTarget.load();
     if (latency != getLatencySamples())
         setLatencySamples (latency);
 }
@@ -357,9 +367,10 @@ void CodexProcessor::handleMidi (const juce::MidiMessage& m, int positionInChunk
     {
         captureArmAt = positionInChunk;
         const bool followMidi = keyMode->load() > 0.5f;
-        voice.noteOn (m.getNoteNumber(), (float) (followMidi ? m.getNoteNumber() : getKeyNote()));
+        // velocity scales the voice from this exact sample (before the effects, like a harder or softer hit)
         const float amount = velocityParam->load();
-        velGain.setCurrentAndTargetValue (1.0f - amount * (1.0f - m.getFloatVelocity()));   // instant: the attack must be scaled too
+        voice.velocityGain = 1.0f - amount * (1.0f - m.getFloatVelocity());
+        voice.noteOn (m.getNoteNumber(), (float) (followMidi ? m.getNoteNumber() : getKeyNote()));
     }
     else if (m.isNoteOff())
         voice.noteOff (m.getNoteNumber());
@@ -437,7 +448,7 @@ void CodexProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiB
 
         for (int i = 0; i < n; ++i)
         {
-            const float g = outGain.getNextValue() * velGain.getNextValue();
+            const float g = outGain.getNextValue();
             l[i] *= g;
             r[i] *= g;
         }
