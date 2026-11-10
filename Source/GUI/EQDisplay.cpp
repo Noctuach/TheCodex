@@ -1,46 +1,94 @@
 #include "EQDisplay.h"
 #include "../PluginProcessor.h"
+#include "../DSP/PitchDetector.h"
 
 using namespace juce;
+
+namespace
+{
+    const float displayRanges[] = { 3.0f, 6.0f, 12.0f, 30.0f };
+
+    /** Colours of the per-channel result curves and node badges. */
+    Colour placementColour (eq::Placement p)
+    {
+        switch (p)
+        {
+            case eq::Placement::Left:  return Colour (0xffffb84d);
+            case eq::Placement::Right: return Colour (0xffff6b6b);
+            case eq::Placement::Mid:   return Colours_::good;
+            case eq::Placement::Side:  return Colours_::accent2;
+            default:                   return Colour (0xffd6f0ff);
+        }
+    }
+    const char* placementName (eq::Placement p)
+    {
+        const char* n[] = { "Stereo", "Left", "Right", "Mid", "Side" };
+        return n[(int) p];
+    }
+    const char* placementTag (eq::Placement p)
+    {
+        const char* n[] = { "", "L", "R", "M", "S" };
+        return n[(int) p];
+    }
+}
 
 //==============================================================================
 EQDisplay::EQDisplay (CodexProcessor& p) : proc (p), apvts (p.apvts)
 {
-    ring.assign ((size_t) fftSize, 0.0f);
     fftData.assign ((size_t) fftSize * 2, 0.0f);
-    spectrumDb.assign ((size_t) fftSize / 2, -120.0f);
     pullBuffer.assign (32768, 0.0f);
+    post.init (fftSize);
+    pre.init (fftSize);
+
+    for (int i = 0; i < 4; ++i)
+        rangeBox.addItem (String (CharPointer_UTF8 ("\xc2\xb1")) + String ((int) displayRanges[i]) + " dB", i + 1);
+    rangeBox.setSelectedId (3, dontSendNotification);
+    rangeBox.setTooltip ("Display range: zoom the gain scale (3, 6, 12 or 30 dB). It expands automatically when a band needs more room.");
+    rangeBox.onChange = [this] { repaint(); };
+    addAndMakeVisible (rangeBox);
+
+    for (auto* b : { &preButton, &postButton, &freezeButton })
+    {
+        b->setComponentID ("pill");
+        b->setClickingTogglesState (true);
+        addAndMakeVisible (b);
+    }
+    preButton.setTooltip ("Pre: spectrum going into the EQ (after Distortion 1)");
+    postButton.setTooltip ("Post: spectrum after the whole chain");
+    freezeButton.setTooltip ("Freeze: the spectrum stops falling and builds up a maximum over time");
+    postButton.setToggleState (true, dontSendNotification);
+    preButton.onClick = [this] { showPre = preButton.getToggleState(); };
+    postButton.onClick = [this] { showPost = postButton.getToggleState(); };
+    freezeButton.onClick = [this]
+    {
+        freeze = freezeButton.getToggleState();
+        if (! freeze) { std::fill (post.db.begin(), post.db.end(), -150.0f); std::fill (pre.db.begin(), pre.db.end(), -150.0f); }
+    };
+    analyzerMenuButton.setTooltip ("Analyzer settings: range, speed and tilt");
+    analyzerMenuButton.onClick = [this] { showAnalyzerMenu(); };
+    addAndMakeVisible (analyzerMenuButton);
+
     startTimerHz (30);
 }
 
 void EQDisplay::resized()
 {
     plot = getLocalBounds().toFloat().reduced (1.0f).withTrimmedBottom (16.0f).withTrimmedRight (30.0f);
+    rangeBox.setBounds (getWidth() - 96, 6, 88, 24);
+    auto row = Rectangle<int> (8, 6, 260, 22);
+    preButton.setBounds (row.removeFromLeft (52)); row.removeFromLeft (4);
+    postButton.setBounds (row.removeFromLeft (56)); row.removeFromLeft (4);
+    freezeButton.setBounds (row.removeFromLeft (70)); row.removeFromLeft (4);
+    analyzerMenuButton.setBounds (row.removeFromLeft (26));
 }
 
-float EQDisplay::freqToX (float f) const
-{
-    return plot.getX() + plot.getWidth() * std::log (f / minFreq) / std::log (maxFreq / minFreq);
-}
+float EQDisplay::freqToX (float f) const { return plot.getX() + plot.getWidth() * std::log (f / minFreq) / std::log (maxFreq / minFreq); }
+float EQDisplay::xToFreq (float x) const { return minFreq * std::pow (maxFreq / minFreq, (x - plot.getX()) / plot.getWidth()); }
+float EQDisplay::gainToY (float db) const { return jmap (db, -displayRange, displayRange, plot.getBottom(), plot.getY()); }
+float EQDisplay::yToGain (float y) const  { return jmap (y, plot.getBottom(), plot.getY(), -displayRange, displayRange); }
+float EQDisplay::analyzerDbToY (float db) const { return jmap (db, -analyzerRange, 6.0f, plot.getBottom(), plot.getY()); }
 
-float EQDisplay::xToFreq (float x) const
-{
-    return minFreq * std::pow (maxFreq / minFreq, (x - plot.getX()) / plot.getWidth());
-}
-
-float EQDisplay::gainToY (float db) const { return jmap (db, -rangeDb, rangeDb, plot.getBottom(), plot.getY()); }
-float EQDisplay::yToGain (float y) const  { return jmap (y, plot.getBottom(), plot.getY(), -rangeDb, rangeDb); }
-float EQDisplay::analyzerDbToY (float db) const { return jmap (db, -90.0f, 6.0f, plot.getBottom(), plot.getY()); }
-
-bool EQDisplay::typeUsesGain (eq::BandType t) const
-{
-    return t == eq::BandType::Bell || t == eq::BandType::LowShelf || t == eq::BandType::HighShelf;
-}
-
-RangedAudioParameter* EQDisplay::param (int b, const char* suffix) const
-{
-    return apvts.getParameter (ID::band (b, suffix));
-}
+RangedAudioParameter* EQDisplay::param (int b, const char* suffix) const { return apvts.getParameter (ID::band (b, suffix)); }
 
 void EQDisplay::setParam (int b, const char* suffix, float value)
 {
@@ -48,23 +96,36 @@ void EQDisplay::setParam (int b, const char* suffix, float value)
         prm->setValueNotifyingHost (prm->convertTo0to1 (value));
 }
 
-eq::BandSettings EQDisplay::readBand (int b) const
+void EQDisplay::setParamGesture (int b, const char* suffix, float value)
 {
+    if (auto* prm = param (b, suffix))
+    {
+        prm->beginChangeGesture();
+        prm->setValueNotifyingHost (prm->convertTo0to1 (value));
+        prm->endChangeGesture();
+    }
+}
+
+float EQDisplay::gainScale() const { return apvts.getRawParameterValue (ID::eqScale)->load(); }
+
+eq::BandSettings EQDisplay::readBand (int b, bool scaled) const
+{
+    auto v = [this, b] (const char* sfx) { return apvts.getRawParameterValue (ID::band (b, sfx))->load(); };
     eq::BandSettings s;
-    s.on     = apvts.getRawParameterValue (ID::band (b, "On"))->load() > 0.5f;
-    s.type   = (eq::BandType) (int) apvts.getRawParameterValue (ID::band (b, "Type"))->load();
-    s.freq   = apvts.getRawParameterValue (ID::band (b, "Freq"))->load();
-    s.gainDb = apvts.getRawParameterValue (ID::band (b, "Gain"))->load();
-    s.q      = apvts.getRawParameterValue (ID::band (b, "Q"))->load();
-    s.slope  = (int) apvts.getRawParameterValue (ID::band (b, "Slope"))->load();
-    s.placement = (eq::Placement) (int) apvts.getRawParameterValue (ID::band (b, "Place"))->load();
+    s.on        = v ("On") > 0.5f;
+    s.type      = (eq::BandType) (int) v ("Type");
+    s.freq      = v ("Freq");
+    s.gainDb    = v ("Gain") * (scaled ? gainScale() : 1.0f);
+    s.q         = v ("Q");
+    s.slope     = (int) v ("Slope");
+    s.placement = (eq::Placement) (int) v ("Place");
     return s;
 }
 
 Point<float> EQDisplay::nodePosition (int b) const
 {
     const auto s = readBand (b);
-    return { freqToX (s.freq), typeUsesGain (s.type) ? gainToY (s.gainDb) : gainToY (0.0f) };
+    return { freqToX (s.freq), eq::typeUsesGain (s.type) ? gainToY (s.gainDb) : gainToY (0.0f) };
 }
 
 int EQDisplay::hitTestNode (Point<float> pt) const
@@ -74,42 +135,83 @@ int EQDisplay::hitTestNode (Point<float> pt) const
     for (int b = 0; b < Params::numBands; ++b)
     {
         const float d = nodePosition (b).getDistanceFrom (pt);
-        // Prefer enabled bands when nodes overlap
-        const float bias = readBand (b).on ? 0.0f : 3.0f;
+        const float bias = readBand (b).on ? 0.0f : 3.0f;   // prefer enabled bands when nodes overlap
         if (d + bias < bestDist) { bestDist = d + bias; best = b; }
     }
     return best;
 }
 
 //==============================================================================
-void EQDisplay::timerCallback()
+void EQDisplay::updateSpectrum (bool preEq, Spectrum& sp)
 {
-    // Keep the most recent fftSize samples in the ring buffer
-    const int got = proc.analyzer.pull (pullBuffer.data(), (int) pullBuffer.size());
+    auto& fifo = preEq ? proc.analyzerPre : proc.analyzer;
+    const int got = fifo.pull (pullBuffer.data(), (int) pullBuffer.size());
     if (got >= fftSize)
-    {
-        std::copy (pullBuffer.begin() + (got - fftSize), pullBuffer.begin() + got, ring.begin());
-    }
+        std::copy (pullBuffer.begin() + (got - fftSize), pullBuffer.begin() + got, sp.ring.begin());
     else if (got > 0)
     {
-        std::move (ring.begin() + got, ring.end(), ring.begin());
-        std::copy (pullBuffer.begin(), pullBuffer.begin() + got, ring.end() - got);
+        std::move (sp.ring.begin() + got, sp.ring.end(), sp.ring.begin());
+        std::copy (pullBuffer.begin(), pullBuffer.begin() + got, sp.ring.end() - got);
     }
+    if (! (preEq ? showPre : showPost)) return;
 
     std::fill (fftData.begin(), fftData.end(), 0.0f);
-    std::copy (ring.begin(), ring.end(), fftData.begin());
+    std::copy (sp.ring.begin(), sp.ring.end(), fftData.begin());
     window.multiplyWithWindowingTable (fftData.data(), (size_t) fftSize);
     fft.performFrequencyOnlyForwardTransform (fftData.data());
 
-    const float norm = 4.0f / (float) fftSize; // Hann window coherent gain compensation
-    for (size_t i = 0; i < spectrumDb.size(); ++i)
+    const float norm = 4.0f / (float) fftSize;   // Hann window coherent gain compensation
+    for (size_t i = 0; i < sp.db.size(); ++i)
     {
-        const float db = Decibels::gainToDecibels (fftData[i] * norm, -120.0f);
-        // fast attack, slow release
-        spectrumDb[i] = db > spectrumDb[i] ? db : jmax (db, spectrumDb[i] - 2.0f);
+        const float db = Decibels::gainToDecibels (fftData[i] * norm, -150.0f);
+        auto& v = sp.db[i];
+        v = db > v ? db : (freeze ? v : jmax (db, v - analyzerDecay));
     }
+}
+
+void EQDisplay::timerCallback()
+{
+    updateSpectrum (false, post);
+    updateSpectrum (true, pre);
+
+    // Display range: the chosen range, expanded when a band needs more room (Pro-Q's auto-adjust)
+    float needed = 0.0f;
+    for (int b = 0; b < Params::numBands; ++b)
+    {
+        const auto s = readBand (b);
+        if (s.on && eq::typeUsesGain (s.type)) needed = jmax (needed, std::abs (s.gainDb));
+    }
+    float range = displayRanges[jlimit (0, 3, rangeBox.getSelectedId() - 1)];
+    for (float r : displayRanges)
+        if (range < needed && r > range) range = r;
+    displayRange = range;
 
     repaint();
+}
+
+void EQDisplay::showAnalyzerMenu()
+{
+    PopupMenu menu, range, speed, tilt;
+    for (float r : { 60.0f, 90.0f, 120.0f }) range.addItem (10 + (int) r, String ((int) r) + " dB", true, exactlyEqual (analyzerRange, r));
+    const char* speeds[] = { "Slow", "Medium", "Fast" };
+    const float decays[] = { 0.6f, 1.5f, 3.5f };
+    for (int i = 0; i < 3; ++i) speed.addItem (200 + i, speeds[i], true, exactlyEqual (analyzerDecay, decays[i]));
+    const float tilts[] = { 0.0f, 3.0f, 4.5f, 6.0f };
+    for (int i = 0; i < 4; ++i) tilt.addItem (300 + i, String (tilts[i], 1) + " dB/oct", true, exactlyEqual (analyzerTilt, tilts[i]));
+    menu.addSectionHeader ("Analyzer");
+    menu.addSubMenu ("Range", range);
+    menu.addSubMenu ("Speed", speed);
+    menu.addSubMenu ("Tilt", tilt);
+
+    SafePointer<EQDisplay> safe (this);
+    menu.showMenuAsync (PopupMenu::Options().withTargetComponent (&analyzerMenuButton), [safe, decays, tilts] (int r)
+    {
+        if (safe == nullptr || r == 0) return;
+        if (r >= 70 && r <= 130) safe->analyzerRange = (float) (r - 10);
+        else if (r >= 200 && r < 203) safe->analyzerDecay = decays[r - 200];
+        else if (r >= 300 && r < 304) safe->analyzerTilt = tilts[r - 300];
+        safe->repaint();
+    });
 }
 
 //==============================================================================
@@ -121,42 +223,40 @@ void EQDisplay::paint (Graphics& g)
     g.drawRoundedRectangle (getLocalBounds().toFloat().reduced (0.5f), 5.0f, 1.0f);
 
     drawGrid (g);
-    if (analyzerOn) drawAnalyzer (g);
+    drawAnalyzer (g);
     drawCurves (g);
     drawNodes (g);
+    drawHoverReadout (g);
 }
 
 void EQDisplay::drawGrid (Graphics& g)
 {
     g.setFont (Fonts::regular (11.0f));
-
     const float freqs[] = { 20, 30, 40, 50, 60, 80, 100, 200, 300, 400, 500, 800, 1000, 2000, 3000, 4000, 5000, 8000, 10000, 20000 };
     for (float f : freqs)
     {
         const float x = freqToX (f);
-        const bool major = f == 50 || f == 100 || f == 500 || f == 1000 || f == 5000 || f == 10000;
+        const bool major = exactlyEqual (f, 50.0f) || exactlyEqual (f, 100.0f) || exactlyEqual (f, 500.0f)
+                        || exactlyEqual (f, 1000.0f) || exactlyEqual (f, 5000.0f) || exactlyEqual (f, 10000.0f);
         g.setColour (major ? Colours_::grid.brighter (0.35f) : Colours_::grid);
         g.drawVerticalLine (roundToInt (x), plot.getY(), plot.getBottom());
-
-        if (major || f == 20 || f == 20000)
+        if (major || exactlyEqual (f, 20.0f) || exactlyEqual (f, 20000.0f))
         {
             const String label = f >= 1000 ? String ((int) (f / 1000)) + "k" : String ((int) f);
             g.setColour (Colours_::textDim);
             const float lx = jlimit (plot.getX(), plot.getRight() - 40.0f, x - 20.0f);
-            g.drawText (label, Rectangle<float> (lx, plot.getBottom() + 1, 40, 14),
-                        f <= 20 ? Justification::centredLeft : Justification::centred);
+            g.drawText (label, Rectangle<float> (lx, plot.getBottom() + 1, 40, 14), f <= 20 ? Justification::centredLeft : Justification::centred);
         }
     }
 
-    const float stepDb = rangeDb <= 12.0f ? 3.0f : 6.0f;
-    for (float db = -rangeDb + stepDb; db <= rangeDb - stepDb + 0.01f; db += stepDb)
+    const float step = displayRange <= 3.0f ? 1.0f : displayRange <= 6.0f ? 2.0f : displayRange <= 12.0f ? 3.0f : 6.0f;
+    for (float db = -displayRange + step; db <= displayRange - step + 0.01f; db += step)
     {
         const float y = gainToY (db);
-        g.setColour (juce::exactlyEqual (db, 0.0f) ? Colours_::grid.brighter (0.7f) : Colours_::grid);
+        g.setColour (std::abs (db) < 0.01f ? Colours_::grid.brighter (0.7f) : Colours_::grid);
         g.drawHorizontalLine (roundToInt (y), plot.getX(), plot.getRight());
         g.setColour (Colours_::textDim);
-        g.drawText ((db > 0 ? "+" : "") + String ((int) db), Rectangle<float> (plot.getRight() + 2, y - 7, 28, 14),
-                    Justification::centredLeft);
+        g.drawText ((db > 0 ? "+" : "") + String ((int) db), Rectangle<float> (plot.getRight() + 2, y - 7, 28, 14), Justification::centredLeft);
     }
 }
 
@@ -164,45 +264,56 @@ void EQDisplay::drawAnalyzer (Graphics& g)
 {
     const double sr = proc.getSampleRate() > 0 ? proc.getSampleRate() : 48000.0;
     const float binHz = (float) (sr / fftSize);
-    const int numBins = (int) spectrumDb.size();
 
-    Path path;
-    bool started = false;
-    const int x0 = (int) plot.getX(), x1 = (int) plot.getRight();
-
-    for (int x = x0; x <= x1; x += 2)
+    auto build = [&] (const std::vector<float>& spectrum)
     {
-        const float fLo = xToFreq ((float) x - 1.0f), fHi = xToFreq ((float) x + 1.0f);
-        const float binLo = fLo / binHz, binHi = fHi / binHz;
-        float db;
-
-        if (binHi - binLo < 1.0f)
+        const int numBins = (int) spectrum.size();
+        Path path;
+        const int x0 = (int) plot.getX(), x1 = (int) plot.getRight();
+        for (int x = x0; x <= x1; x += 2)
         {
-            // Sparse bins at low frequencies: interpolate
-            const float pos = jlimit (0.0f, (float) numBins - 2.0f, xToFreq ((float) x) / binHz);
-            const int i = (int) pos;
-            db = jmap (pos - (float) i, spectrumDb[(size_t) i], spectrumDb[(size_t) i + 1]);
+            const float f = xToFreq ((float) x);
+            const float fLo = xToFreq ((float) x - 1.0f), fHi = xToFreq ((float) x + 1.0f);
+            const float binLo = fLo / binHz, binHi = fHi / binHz;
+            float db;
+            if (binHi - binLo < 1.0f)
+            {
+                const float pos = jlimit (0.0f, (float) numBins - 2.0f, f / binHz);
+                const int i = (int) pos;
+                db = jmap (pos - (float) i, spectrum[(size_t) i], spectrum[(size_t) i + 1]);
+            }
+            else
+            {
+                db = -150.0f;
+                for (int i = jmax (0, (int) binLo); i <= jmin (numBins - 1, (int) binHi); ++i)
+                    db = jmax (db, spectrum[(size_t) i]);
+            }
+            db += analyzerTilt * std::log2 (f / 1000.0f);   // tilt around 1 kHz
+            const float y = jlimit (plot.getY(), plot.getBottom(), analyzerDbToY (db));
+            if (x == x0) { path.startNewSubPath ((float) x, plot.getBottom()); path.lineTo ((float) x, y); }
+            else path.lineTo ((float) x, y);
         }
-        else
-        {
-            db = -120.0f;
-            for (int i = jmax (0, (int) binLo); i <= jmin (numBins - 1, (int) binHi); ++i)
-                db = jmax (db, spectrumDb[(size_t) i]);
-        }
+        path.lineTo ((float) x1, plot.getBottom());
+        path.closeSubPath();
+        return path;
+    };
 
-        const float y = jlimit (plot.getY(), plot.getBottom(), analyzerDbToY (db));
-        if (! started) { path.startNewSubPath ((float) x, plot.getBottom()); path.lineTo ((float) x, y); started = true; }
-        else path.lineTo ((float) x, y);
+    if (showPre)
+    {
+        auto p = build (pre.db);
+        g.setColour (Colours_::textDim.withAlpha (0.12f));
+        g.fillPath (p);
+        g.setColour (Colours_::textDim.withAlpha (0.45f));
+        g.strokePath (p, PathStrokeType (1.0f));
     }
-
-    path.lineTo ((float) x1, plot.getBottom());
-    path.closeSubPath();
-
-    g.setGradientFill (ColourGradient (Colours_::accent.withAlpha (0.30f), 0, plot.getY(),
-                                       Colours_::accent2.withAlpha (0.04f), 0, plot.getBottom(), false));
-    g.fillPath (path);
-    g.setColour (Colours_::accent.withAlpha (0.45f));
-    g.strokePath (path, PathStrokeType (1.0f));
+    if (showPost)
+    {
+        auto p = build (post.db);
+        g.setGradientFill (ColourGradient (Colours_::accent.withAlpha (0.30f), 0, plot.getY(), Colours_::accent2.withAlpha (0.04f), 0, plot.getBottom(), false));
+        g.fillPath (p);
+        g.setColour ((freeze ? Colours_::accentHi : Colours_::accent).withAlpha (0.5f));
+        g.strokePath (p, PathStrokeType (1.0f));
+    }
 }
 
 void EQDisplay::drawCurves (Graphics& g)
@@ -211,43 +322,44 @@ void EQDisplay::drawCurves (Graphics& g)
 
     std::array<eq::BandDesign, Params::numBands> designs;
     std::array<eq::Placement, Params::numBands> places {};
-    bool msSplit = false;   // any band working on only Mid or only Side?
+    std::array<bool, 5> used {};   // which placements are in use
     for (int b = 0; b < Params::numBands; ++b)
     {
         const auto bs = readBand (b);
         designs[(size_t) b] = eq::design (bs, sr);
         places[(size_t) b] = bs.placement;
-        msSplit = msSplit || (bs.on && (bs.placement == eq::Placement::Mid || bs.placement == eq::Placement::Side));
+        if (bs.on) used[(size_t) bs.placement] = true;
     }
+    const bool anyGroup = used[1] || used[2] || used[3] || used[4];
 
     const int x0 = (int) plot.getX(), x1 = (int) plot.getRight();
-    Path total, side, sel;
+    std::array<Path, 5> curves;   // [0] = all channels (stereo bands), [1..4] = L, R, M, S results
+    Path sel;
     const bool selOn = readBand (selected).on;
 
     for (int x = x0; x <= x1; ++x)
     {
         const double f = xToFreq ((float) x);
-        double sumDb = 0.0, sideDb = 0.0;
+        std::array<double, 5> sum {};
         for (int b = 0; b < Params::numBands; ++b)
         {
             if (designs[(size_t) b].numStages == 0) continue;
             const double db = 20.0 * std::log10 (jmax (1.0e-6, eq::magnitude (designs[(size_t) b], f, sr)));
-            const auto pl = places[(size_t) b];
-            if (pl != eq::Placement::Side) sumDb += db;    // main curve: everything that reaches the mid / channels
-            if (pl != eq::Placement::Mid)  sideDb += db;   // side curve
+            const int p = (int) places[(size_t) b];
+            if (p == 0) for (auto& s : sum) s += db;   // stereo bands affect every result
+            else sum[(size_t) p] += db;
             if (b == selected)
             {
                 const float y = jlimit (plot.getY() - 2.0f, plot.getBottom() + 2.0f, gainToY ((float) db));
                 if (x == x0) sel.startNewSubPath ((float) x, y); else sel.lineTo ((float) x, y);
             }
         }
-        if (msSplit)
+        for (int p = 0; p < 5; ++p)
         {
-            const float ys = jlimit (plot.getY() - 2.0f, plot.getBottom() + 2.0f, gainToY ((float) sideDb));
-            if (x == x0) side.startNewSubPath ((float) x, ys); else side.lineTo ((float) x, ys);
+            if (p > 0 && ! used[(size_t) p]) continue;
+            const float y = jlimit (plot.getY() - 2.0f, plot.getBottom() + 2.0f, gainToY ((float) sum[(size_t) p]));
+            if (x == x0) curves[(size_t) p].startNewSubPath ((float) x, y); else curves[(size_t) p].lineTo ((float) x, y);
         }
-        const float y = jlimit (plot.getY() - 2.0f, plot.getBottom() + 2.0f, gainToY ((float) sumDb));
-        if (x == x0) total.startNewSubPath ((float) x, y); else total.lineTo ((float) x, y);
     }
 
     // Selected band's own curve, filled to the 0 dB line
@@ -263,33 +375,32 @@ void EQDisplay::drawCurves (Graphics& g)
         g.strokePath (sel, PathStrokeType (1.2f));
     }
 
-    if (msSplit)
-    {
-        Path dashed;
-        const float dashes[] = { 6.0f, 4.0f };
-        PathStrokeType (2.0f).createDashedStroke (dashed, side, dashes, 2);
-        g.setColour (Colours_::accent2.withAlpha (0.25f));
-        g.strokePath (side, PathStrokeType (5.0f));
-        g.setColour (Colours_::accent2);
-        g.fillPath (dashed);
+    for (int p = 1; p < 5; ++p)
+        if (used[(size_t) p])
+            Colours_::strokeGlow (g, curves[(size_t) p], placementColour ((eq::Placement) p), 1.6f);
+    Colours_::strokeGlow (g, curves[0], placementColour (eq::Placement::Stereo), anyGroup ? 1.6f : 2.0f);
 
-        // legend
-        auto legend = Rectangle<float> (plot.getX() + 10.0f, plot.getY() + 8.0f, 150.0f, 14.0f);
+    // Legend when channel-specific bands exist
+    if (anyGroup)
+    {
         g.setFont (Fonts::label (11.0f, 0.14f));
-        g.setColour (Colour (0xffd6f0ff));
-        g.fillRect (legend.getX(), legend.getCentreY() - 1.0f, 16.0f, 2.0f);
-        g.drawText ("MID", legend.withTrimmedLeft (22.0f), Justification::centredLeft);
-        g.setColour (Colours_::accent2);
-        g.fillRect (legend.getX() + 60.0f, legend.getCentreY() - 1.0f, 16.0f, 2.0f);
-        g.drawText ("SIDE", legend.withTrimmedLeft (82.0f), Justification::centredLeft);
+        float x = plot.getX() + 10.0f;
+        const float y = plot.getY() + 34.0f;
+        for (int p = 0; p < 5; ++p)
+        {
+            if (p > 0 && ! used[(size_t) p]) continue;
+            const auto c = placementColour ((eq::Placement) p);
+            g.setColour (c);
+            g.fillRect (x, y + 6.0f, 14.0f, 2.0f);
+            const String name = p == 0 ? "ALL" : String (placementName ((eq::Placement) p)).toUpperCase();
+            g.drawText (name, Rectangle<float> (x + 18.0f, y, 60.0f, 14.0f), Justification::centredLeft);
+            x += 30.0f + 9.0f * (float) name.length();
+        }
     }
-    Colours_::strokeGlow (g, total, Colour (0xffd6f0ff), 2.0f);
 }
 
 void EQDisplay::drawNodes (Graphics& g)
 {
-    g.setFont (Fonts::semibold (10.0f));
-
     for (int b = 0; b < Params::numBands; ++b)
     {
         const auto s = readBand (b);
@@ -305,6 +416,7 @@ void EQDisplay::drawNodes (Graphics& g)
             g.setColour (col);
             g.fillEllipse (circle);
             g.setColour (Colours::black);
+            g.setFont (Fonts::semibold (10.0f));
             g.drawText (String (b + 1), circle, Justification::centred);
         }
         else
@@ -321,33 +433,29 @@ void EQDisplay::drawNodes (Graphics& g)
 
         if (s.placement != eq::Placement::Stereo)
         {
-            const char* tag = s.placement == eq::Placement::Left ? "L" : s.placement == eq::Placement::Right ? "R"
-                            : s.placement == eq::Placement::Mid ? "M" : "S";
             auto badge = Rectangle<float> (13.0f, 13.0f).withCentre (pos.translated (10.0f, -10.0f));
-            g.setColour (s.placement == eq::Placement::Side ? Colours_::accent2 : Colours_::panelTop);
+            g.setColour (placementColour (s.placement));
             g.fillEllipse (badge);
-            g.setColour (col);
-            g.drawEllipse (badge, 1.0f);
-            g.setColour (Colours::white);
+            g.setColour (Colours::black);
             g.setFont (Fonts::label (10.0f, 0.0f));
-            g.drawText (tag, badge, Justification::centred);
-            g.setFont (Fonts::semibold (10.0f));
+            g.drawText (placementTag (s.placement), badge, Justification::centred);
         }
 
         if (b == hover || b == dragging)
         {
-            const String typeNames[] = { "Low Cut", "Low Shelf", "Bell", "Notch", "High Shelf", "High Cut" };
-            String text = typeNames[(int) s.type] + "  "
+            String text = String (eq::bandTypeNames()[(int) s.type]) + "  "
                         + (s.freq < 1000 ? String (s.freq, 1) + " Hz" : String (s.freq / 1000.0f, 2) + " kHz");
-            if (typeUsesGain (s.type)) text << "  " << (s.gainDb > 0 ? "+" : "") << String (s.gainDb, 1) << " dB";
-            text << "  Q " << String (s.q, 2);
-            const char* placeNames[] = { "", "  Left", "  Right", "  Mid", "  Side" };
-            text << placeNames[(int) s.placement];
+            if (eq::typeUsesGain (s.type)) text << "  " << (s.gainDb > 0 ? "+" : "") << String (s.gainDb, 1) << " dB";
+            if (eq::typeUsesSlope (s.type)) text << "  " << eq::slopeDb[s.slope] << " dB/oct";
+            else text << "  Q " << String (s.q, 2);
+            if (s.placement != eq::Placement::Stereo) text << "  " << placementName (s.placement);
             if (! s.on) text << "  (off)";
 
-            const float w = 262.0f;
-            auto box = Rectangle<float> (w, 18.0f).withCentre (pos.translated (0, -22.0f));
-            box = box.constrainedWithin (plot);
+            g.setFont (Fonts::medium (12.0f));
+            GlyphArrangement ga;
+            ga.addLineOfText (g.getCurrentFont(), text, 0, 0);
+            const float w = ga.getBoundingBox (0, -1, true).getWidth() + 20.0f;
+            auto box = Rectangle<float> (w, 20.0f).withCentre (pos.translated (0, -24.0f)).constrainedWithin (plot);
             g.setColour (Colours_::panelTop.withAlpha (0.95f));
             g.fillRoundedRectangle (box, 4.0f);
             g.setColour (col.withAlpha (0.5f));
@@ -358,20 +466,41 @@ void EQDisplay::drawNodes (Graphics& g)
     }
 }
 
+void EQDisplay::drawHoverReadout (Graphics& g)
+{
+    if (! mouseInside || dragging >= 0 || hover >= 0 || ! plot.contains (mousePos)) return;
+    const float f = xToFreq (mousePos.x);
+    const float note = frequencyToMidi (f);
+    const int n = roundToInt (note);
+    const int cents = roundToInt ((note - (float) n) * 100.0f);
+    const String text = (f < 1000 ? String (f, 1) + " Hz" : String (f / 1000.0f, 2) + " kHz") + "   "
+                      + noteNameFor (n) + String (octaveFor (n)) + (cents == 0 ? String() : String (cents > 0 ? " +" : " ") + String (cents) + "c");
+
+    g.setColour (Colours_::textDim.withAlpha (0.35f));
+    g.drawVerticalLine ((int) mousePos.x, plot.getY(), plot.getBottom());
+    g.setFont (Fonts::medium (12.0f));
+    auto box = Rectangle<float> (130.0f, 18.0f).withCentre ({ mousePos.x, plot.getBottom() - 14.0f }).constrainedWithin (plot);
+    g.setColour (Colours_::panelTop.withAlpha (0.92f));
+    g.fillRoundedRectangle (box, 4.0f);
+    g.setColour (Colours_::text);
+    g.drawText (text, box, Justification::centred);
+}
+
 //==============================================================================
 void EQDisplay::beginDrag (int b)
 {
     dragging = b;
-    for (auto* sfx : { "Freq", "Gain" })
+    for (auto* sfx : { "Freq", "Gain", "Q" })
         if (auto* prm = param (b, sfx)) prm->beginChangeGesture();
 }
 
 void EQDisplay::endDrag()
 {
     if (dragging >= 0)
-        for (auto* sfx : { "Freq", "Gain" })
+        for (auto* sfx : { "Freq", "Gain", "Q" })
             if (auto* prm = param (dragging, sfx)) prm->endChangeGesture();
     dragging = -1;
+    qDrag = false;
 }
 
 void EQDisplay::mouseDown (const MouseEvent& e)
@@ -383,19 +512,21 @@ void EQDisplay::mouseDown (const MouseEvent& e)
     selected = b;
     if (onBandSelected) onBandSelected (b);
 
-    if (e.mods.isPopupMenu())
+    if (e.mods.isPopupMenu()) { showBandMenu (b); return; }
+
+    // Alt-click: bypass / enable the band (Pro-Q behaviour)
+    if (e.mods.isAltDown())
     {
-        showBandMenu (b);
+        setParamGesture (b, "On", readBand (b).on ? 0.0f : 1.0f);
+        repaint();
         return;
     }
 
     if (! readBand (b).on)
-    {
-        // Grabbing a disabled node switches it on
-        if (auto* prm = param (b, "On")) { prm->beginChangeGesture(); prm->setValueNotifyingHost (1.0f); prm->endChangeGesture(); }
-    }
+        setParamGesture (b, "On", 1.0f);   // grabbing a disabled node switches it on
 
     beginDrag (b);
+    qDrag = e.mods.isCommandDown();
     lastDragPos = e.position;
     repaint();
 }
@@ -405,35 +536,47 @@ void EQDisplay::mouseDrag (const MouseEvent& e)
     if (dragging < 0)
         return;
 
-    const auto s = readBand (dragging);
-    Point<float> target = e.position;
+    const auto s = readBand (dragging, false);
+    const float speed = e.mods.isShiftDown() ? 0.1f : 1.0f;
 
-    if (e.mods.isShiftDown())
+    if (qDrag)   // Ctrl/Cmd + vertical drag: Q
     {
-        // Fine mode: move at 1/10 speed relative to the node's current position
-        const auto delta = (e.position - lastDragPos) * 0.1f;
-        target = nodePosition (dragging) + delta;
+        const float dy = (e.position.y - lastDragPos.y) * speed;
+        setParam (dragging, "Q", jlimit (0.1f, 18.0f, s.q * std::exp (-dy * 0.02f)));
+        lastDragPos = e.position;
+        return;
     }
+
+    Point<float> target = e.position;
+    if (e.mods.isShiftDown())
+        target = nodePosition (dragging) + (e.position - lastDragPos) * 0.1f;   // fine mode
     lastDragPos = e.position;
 
     target.x = jlimit (plot.getX(), plot.getRight(), target.x);
     target.y = jlimit (plot.getY(), plot.getBottom(), target.y);
 
     setParam (dragging, "Freq", jlimit (minFreq, maxFreq, xToFreq (target.x)));
-    if (typeUsesGain (s.type))
-        setParam (dragging, "Gain", jlimit (-maxDb, maxDb, yToGain (target.y)));
+    if (eq::typeUsesGain (s.type))
+    {
+        const float scale = gainScale();
+        const float shown = yToGain (target.y);
+        setParam (dragging, "Gain", jlimit (-maxDb, maxDb, scale > 0.05f ? shown / scale : shown));
+    }
 }
 
 void EQDisplay::mouseUp (const MouseEvent&) { endDrag(); }
 
 void EQDisplay::mouseMove (const MouseEvent& e)
 {
+    mouseInside = true;
+    mousePos = e.position;
     const int h = hitTestNode (e.position);
-    if (h != hover) { hover = h; repaint(); }
+    if (h != hover) hover = h;
     setMouseCursor (h >= 0 ? MouseCursor::DraggingHandCursor : MouseCursor::NormalCursor);
+    repaint();
 }
 
-void EQDisplay::mouseExit (const MouseEvent&) { hover = -1; repaint(); }
+void EQDisplay::mouseExit (const MouseEvent&) { hover = -1; mouseInside = false; repaint(); }
 
 void EQDisplay::mouseDoubleClick (const MouseEvent& e)
 {
@@ -442,34 +585,35 @@ void EQDisplay::mouseDoubleClick (const MouseEvent& e)
 
     if (b >= 0)
     {
-        if (auto* prm = param (b, "On"))
-        {
-            prm->beginChangeGesture();
-            prm->setValueNotifyingHost (readBand (b).on ? 0.0f : 1.0f);
-            prm->endChangeGesture();
-        }
+        setParamGesture (b, "On", readBand (b).on ? 0.0f : 1.0f);
         return;
     }
-
     if (! plot.contains (e.position))
         return;
 
-    // Activate the first free band as a bell at the clicked position
+    // New band in the first free slot; the shape depends on where you click
     for (int i = 0; i < Params::numBands; ++i)
     {
         if (readBand (i).on) continue;
 
-        for (auto* sfx : { "On", "Type", "Freq", "Gain", "Q" })
-            if (auto* prm = param (i, sfx)) prm->beginChangeGesture();
+        const float relX = (e.position.x - plot.getX()) / plot.getWidth();
+        const float relY = (e.position.y - plot.getY()) / plot.getHeight();
+        eq::BandType t = eq::BandType::Bell;
+        if (relX < 0.06f)      t = eq::BandType::LowCut;
+        else if (relX > 0.94f) t = eq::BandType::HighCut;
+        else if (relY > 0.88f) t = eq::BandType::Notch;
 
-        setParam (i, "Type", (float) eq::BandType::Bell);
-        setParam (i, "Freq", jlimit (minFreq, maxFreq, xToFreq (e.position.x)));
-        setParam (i, "Gain", jlimit (-maxDb, maxDb, yToGain (e.position.y)));
-        setParam (i, "Q", 1.0f);
-        setParam (i, "On", 1.0f);
-
-        for (auto* sfx : { "On", "Type", "Freq", "Gain", "Q" })
-            if (auto* prm = param (i, sfx)) prm->endChangeGesture();
+        if (auto* um = apvts.undoManager) um->beginNewTransaction ("Add EQ band");
+        resetBand (apvts, i);
+        setParamGesture (i, "Type", (float) t);
+        setParamGesture (i, "Freq", jlimit (minFreq, maxFreq, xToFreq (e.position.x)));
+        if (t == eq::BandType::Bell)
+        {
+            const float scale = gainScale();
+            setParamGesture (i, "Gain", jlimit (-maxDb, maxDb, yToGain (e.position.y) / jmax (0.05f, scale)));
+            setParamGesture (i, "Q", 1.0f);
+        }
+        setParamGesture (i, "On", 1.0f);
 
         selected = i;
         if (onBandSelected) onBandSelected (i);
@@ -480,62 +624,107 @@ void EQDisplay::mouseDoubleClick (const MouseEvent& e)
 void EQDisplay::mouseWheelMove (const MouseEvent& e, const MouseWheelDetails& w)
 {
     int b = hitTestNode (e.position);
-    if (b < 0) b = dragging >= 0 ? dragging : -1;
+    if (b < 0) b = dragging;
     if (b < 0) return;
 
-    if (auto* prm = param (b, "Q"))
+    const auto s = readBand (b, false);
+    const float fine = e.mods.isShiftDown() ? 0.2f : 1.0f;
+
+    if (e.mods.isCommandDown())   // Ctrl/Cmd + wheel: gain
     {
-        const float q = readBand (b).q;
-        const float newQ = jlimit (0.1f, 18.0f, q * std::exp (w.deltaY * 1.5f));
-        prm->beginChangeGesture();
-        prm->setValueNotifyingHost (prm->convertTo0to1 (newQ));
-        prm->endChangeGesture();
+        if (eq::typeUsesGain (s.type))
+            setParamGesture (b, "Gain", jlimit (-maxDb, maxDb, s.gainDb + w.deltaY * 6.0f * fine));
+        return;
     }
+    if (eq::typeUsesSlope (s.type))   // cut / band-pass filters: step the slope
+    {
+        const int step = w.deltaY > 0 ? 1 : (w.deltaY < 0 ? -1 : 0);
+        setParamGesture (b, "Slope", (float) jlimit (0, eq::numSlopes - 1, s.slope + step));
+        return;
+    }
+    setParamGesture (b, "Q", jlimit (0.1f, 18.0f, s.q * std::exp (w.deltaY * 1.5f * fine)));
+}
+
+//==============================================================================
+void EQDisplay::resetBand (AudioProcessorValueTreeState& s, int b)
+{
+    for (auto* sfx : { "On", "Type", "Freq", "Gain", "Q", "Slope", "Place" })
+        if (auto* p = s.getParameter (ID::band (b, sfx)))
+        {
+            p->beginChangeGesture();
+            p->setValueNotifyingHost (p->getDefaultValue());
+            p->endChangeGesture();
+        }
+}
+
+void EQDisplay::splitBand (AudioProcessorValueTreeState& s, int from, bool midSide)
+{
+    int target = -1;
+    for (int i = 0; i < Params::numBands; ++i)
+        if (i != from && s.getRawParameterValue (ID::band (i, "On"))->load() < 0.5f) { target = i; break; }
+    if (target < 0) return;
+
+    if (auto* um = s.undoManager) um->beginNewTransaction ("Split EQ band");
+    for (auto* sfx : { "Type", "Freq", "Gain", "Q", "Slope", "On" })
+        if (auto* p = s.getParameter (ID::band (target, sfx)))
+        {
+            p->beginChangeGesture();
+            p->setValueNotifyingHost (s.getParameter (ID::band (from, sfx))->getValue());
+            p->endChangeGesture();
+        }
+    auto place = [&s] (int b, eq::Placement pl)
+    {
+        if (auto* p = s.getParameter (ID::band (b, "Place")))
+        {
+            p->beginChangeGesture();
+            p->setValueNotifyingHost (p->convertTo0to1 ((float) pl));
+            p->endChangeGesture();
+        }
+    };
+    place (from, midSide ? eq::Placement::Mid : eq::Placement::Left);
+    place (target, midSide ? eq::Placement::Side : eq::Placement::Right);
 }
 
 void EQDisplay::showBandMenu (int b)
 {
-    const auto s = readBand (b);
-    PopupMenu menu, slopes;
-    const String typeNames[] = { "Low Cut", "Low Shelf", "Bell", "Notch", "High Shelf", "High Cut" };
-    for (int t = 0; t < 6; ++t)
-        menu.addItem (1 + t, typeNames[t], true, (int) s.type == t);
+    const auto s = readBand (b, false);
+    PopupMenu menu, shapes, slopes, placement;
+    for (int t = 0; t < eq::numBandTypes; ++t)
+        shapes.addItem (1 + t, eq::bandTypeNames()[t], true, (int) s.type == t);
+    for (int sl = 0; sl < eq::numSlopes; ++sl)
+        slopes.addItem (20 + sl, String (eq::slopeDb[sl]) + " dB/oct", true, s.slope == sl);
+    for (int p = 0; p < 5; ++p)
+        placement.addItem (40 + p, placementName ((eq::Placement) p), true, (int) s.placement == p);
 
-    const String slopeNames[] = { "12 dB/oct", "24 dB/oct", "48 dB/oct" };
-    for (int sl = 0; sl < 3; ++sl)
-        slopes.addItem (20 + sl, slopeNames[sl], true, s.slope == sl);
-    menu.addSubMenu ("Slope", slopes, s.type == eq::BandType::LowCut || s.type == eq::BandType::HighCut);
+    bool freeBand = false;
+    for (int i = 0; i < Params::numBands; ++i) freeBand = freeBand || (i != b && ! readBand (i).on);
 
-    PopupMenu placement;
-    const char* placeNames[] = { "Stereo", "Left", "Right", "Mid", "Side" };
-    for (int pIdx = 0; pIdx < 5; ++pIdx)
-        placement.addItem (40 + pIdx, placeNames[pIdx], true, (int) s.placement == pIdx);
+    menu.addSectionHeader ("Band " + String (b + 1));
+    menu.addSubMenu ("Shape", shapes);
+    menu.addSubMenu ("Slope", slopes, eq::typeUsesSlope (s.type));
     menu.addSubMenu ("Stereo placement", placement);
-
+    menu.addItem (50, "Split into Left + Right", freeBand);
+    menu.addItem (51, "Split into Mid + Side", freeBand);
+    menu.addItem (52, "Reset placement", s.placement != eq::Placement::Stereo);
     menu.addSeparator();
-    menu.addItem (30, s.on ? "Disable band" : "Enable band");
-    menu.addItem (31, "Reset gain");
+    menu.addItem (30, s.on ? "Bypass band" : "Enable band");
+    menu.addItem (31, "Reset gain", eq::typeUsesGain (s.type));
+    menu.addItem (32, "Reset band");
 
     SafePointer<EQDisplay> safe (this);
-    menu.showMenuAsync (PopupMenu::Options().withTargetComponent (this).withMousePosition(),
-        [safe, b] (int result)
-        {
-            if (safe == nullptr || result == 0) return;
-            auto set = [&] (const char* sfx, float v)
-            {
-                if (auto* prm = safe->param (b, sfx))
-                {
-                    prm->beginChangeGesture();
-                    prm->setValueNotifyingHost (prm->convertTo0to1 (v));
-                    prm->endChangeGesture();
-                }
-            };
-            if (result >= 1 && result <= 6) { set ("Type", (float) (result - 1)); set ("On", 1.0f); }
-            else if (result >= 20 && result <= 22) set ("Slope", (float) (result - 20));
-            else if (result == 30) set ("On", safe->readBand (b).on ? 0.0f : 1.0f);
-            else if (result == 31) set ("Gain", 0.0f);
-            else if (result >= 40 && result <= 44) set ("Place", (float) (result - 40));
-        });
+    menu.showMenuAsync (PopupMenu::Options().withTargetComponent (this).withMousePosition(), [safe, b] (int result)
+    {
+        if (safe == nullptr || result == 0) return;
+        auto& d = *safe;
+        if (result >= 1 && result <= eq::numBandTypes) { d.setParamGesture (b, "Type", (float) (result - 1)); d.setParamGesture (b, "On", 1.0f); }
+        else if (result >= 20 && result < 20 + eq::numSlopes) d.setParamGesture (b, "Slope", (float) (result - 20));
+        else if (result >= 40 && result <= 44) d.setParamGesture (b, "Place", (float) (result - 40));
+        else if (result == 50 || result == 51) splitBand (d.apvts, b, result == 51);
+        else if (result == 52) d.setParamGesture (b, "Place", 0.0f);
+        else if (result == 30) d.setParamGesture (b, "On", d.readBand (b).on ? 0.0f : 1.0f);
+        else if (result == 31) d.setParamGesture (b, "Gain", 0.0f);
+        else if (result == 32) resetBand (d.apvts, b);
+    });
 }
 
 //==============================================================================
@@ -546,53 +735,23 @@ BandControls::BandControls (AudioProcessorValueTreeState& s) : apvts (s)
         auto& btn = bandButtons[b];
         btn.setButtonText (String (b + 1));
         btn.setTooltip ("Select EQ band " + String (b + 1));
-        btn.setClickingTogglesState (false);
         btn.setColour (TextButton::buttonOnColourId, Colours_::band (b));
-        btn.onClick = [this, b]
-        {
-            setBand (b);
-            if (onBandSelected) onBandSelected (b);
-        };
+        btn.onClick = [this, b] { setBand (b); if (onBandSelected) onBandSelected (b); };
         addAndMakeVisible (btn);
     }
 
-    addAndMakeVisible (onButton);
     onButton.setTooltip (Help::forParameter ("b1On"));
-
-    // Display tools
-    range12.setComponentID ("seg"); range24.setComponentID ("seg");
-    range12.setConnectedEdges (Button::ConnectedOnRight);
-    range24.setConnectedEdges (Button::ConnectedOnLeft);
-    range12.setTooltip ("Display range: zoom the EQ display to +/-12 dB for fine moves");
-    range24.setTooltip ("Display range: show the full +/-24 dB");
-    range24.setToggleState (true, dontSendNotification);
-    range12.onClick = [this] { range12.setToggleState (true, dontSendNotification); range24.setToggleState (false, dontSendNotification); if (onRangeChanged) onRangeChanged (12.0f); };
-    range24.onClick = [this] { range24.setToggleState (true, dontSendNotification); range12.setToggleState (false, dontSendNotification); if (onRangeChanged) onRangeChanged (24.0f); };
-    analyzerButton.setComponentID ("pill");
-    analyzerButton.setClickingTogglesState (true);
-    analyzerButton.setToggleState (true, dontSendNotification);
-    analyzerButton.setTooltip ("Analyzer: show the live spectrum of the output behind the EQ curve");
-    analyzerButton.onClick = [this] { if (onAnalyzerToggled) onAnalyzerToggled (analyzerButton.getToggleState()); };
     resetButton.setComponentID ("pill");
-    resetButton.setTooltip ("Reset band: return the selected band to its default settings (off, flat)");
-    resetButton.onClick = [this]
-    {
-        for (auto* sfx : { "On", "Type", "Freq", "Gain", "Q", "Slope" })
-            if (auto* p = apvts.getParameter (ID::band (band, sfx)))
-            {
-                p->beginChangeGesture();
-                p->setValueNotifyingHost (p->getDefaultValue());
-                p->endChangeGesture();
-            }
-    };
-    for (Component* c : { (Component*) &range12, (Component*) &range24, (Component*) &analyzerButton, (Component*) &resetButton })
-        addAndMakeVisible (c);
+    resetButton.setTooltip ("Reset band: return the selected band to its default settings (off, flat, stereo)");
+    resetButton.onClick = [this] { EQDisplay::resetBand (apvts, band); };
+    gainScale.attach (apvts, ID::eqScale);
+    gainScale.slider.setTooltip ("Gain Scale: scales the gain of all Bell, Shelf and Tilt bands at once (100 % = as set, 0 % = flat, 200 % = double)");
 
-    addAndMakeVisible (placement);
-    for (Component* c : { (Component*) &type, (Component*) &slope, (Component*) &freq, (Component*) &gain, (Component*) &q })
+    for (Component* c : std::initializer_list<Component*> { &onButton, &resetButton, &type, &slope, &placement, &freq, &gain, &q, &gainScale })
         addAndMakeVisible (c);
 
     setBand (0);
+    startTimerHz (10);
 }
 
 void BandControls::setBand (int b)
@@ -615,7 +774,21 @@ void BandControls::setBand (int b)
     const auto col = Colours_::band (b);
     for (auto* k : { &freq, &gain, &q })
         k->label.setColour (Label::textColourId, col);
+    timerCallback();
     repaint();
+}
+
+void BandControls::timerCallback()
+{
+    // Grey out the controls that do not apply to the selected shape
+    const auto t = (eq::BandType) (int) apvts.getRawParameterValue (ID::band (band, "Type"))->load();
+    const int sl = (int) apvts.getRawParameterValue (ID::band (band, "Slope"))->load();
+    const bool usesSlope = eq::typeUsesSlope (t), usesGain = eq::typeUsesGain (t);
+    const bool usesQ = ! (usesSlope && sl == 0) && t != eq::BandType::FlatTilt;
+    auto enable = [] (Component& c, bool on) { if (c.isEnabled() != on) { c.setEnabled (on); c.setAlpha (on ? 1.0f : 0.35f); } };
+    enable (slope, usesSlope);
+    enable (gain, usesGain);
+    enable (q, usesQ);
 }
 
 void BandControls::paint (Graphics& g)
@@ -623,10 +796,8 @@ void BandControls::paint (Graphics& g)
     g.setColour (Colours_::textDim);
     g.setFont (Fonts::label (11.5f, 0.14f));
     g.drawText ("BAND", Rectangle<int> (1, 0, 200, 16), Justification::centredLeft);
-    g.drawText ("ACTIVE", onButton.getBounds().translated (30, 0).withWidth (80), Justification::centredLeft);
-    g.drawText ("DISPLAY", toolsArea.withHeight (16), Justification::centredLeft);
-
-    // separator between band editing and display tools
+    g.drawText ("ACTIVE", onButton.getBounds().translated (30, 0).withWidth (60), Justification::centredLeft);
+    g.drawText ("GLOBAL", toolsArea.withHeight (16), Justification::centredLeft);
     g.setColour (Colours_::outline);
     g.drawVerticalLine (toolsArea.getX() - 18, 6.0f, (float) getHeight() - 6.0f);
 }
@@ -640,32 +811,22 @@ void BandControls::resized()
     for (auto& btn : bandButtons)
         btn.setBounds (buttons.removeFromLeft (34).reduced (2, 0));
     left.removeFromTop (8);
-    onButton.setBounds (left.removeFromTop (26).removeFromLeft (26));
+    auto row = left.removeFromTop (26);
+    onButton.setBounds (row.removeFromLeft (26));
+    resetButton.setBounds (row.removeFromRight (78).reduced (0, 1));
 
-    // Display tools on the far right
-    toolsArea = r.removeFromRight (226);
-    {
-        auto t = toolsArea;
-        t.removeFromTop (18);
-        auto row1 = t.removeFromTop (28);
-        range12.setBounds (row1.removeFromLeft (76));
-        range24.setBounds (row1.removeFromLeft (76));
-        t.removeFromTop (8);
-        auto row2 = t.removeFromTop (26);
-        analyzerButton.setBounds (row2.removeFromLeft (104));
-        row2.removeFromLeft (8);
-        resetButton.setBounds (row2.removeFromLeft (112));
-    }
+    toolsArea = r.removeFromRight (170);
+    gainScale.setBounds (toolsArea.withTrimmedTop (22).withHeight (44));
     r.removeFromRight (30);
 
     r.removeFromLeft (10);
-    type.setBounds (r.removeFromLeft (128).withTrimmedTop (8).withHeight (48));
+    type.setBounds (r.removeFromLeft (130).withTrimmedTop (8).withHeight (48));
     r.removeFromLeft (10);
     slope.setBounds (r.removeFromLeft (116).withTrimmedTop (8).withHeight (48));
     r.removeFromLeft (10);
     placement.setBounds (r.removeFromLeft (108).withTrimmedTop (8).withHeight (48));
     r.removeFromLeft (10);
-    const int kw = juce::jmin (100, r.getWidth() / 3);
+    const int kw = jmin (100, r.getWidth() / 3);
     for (auto* k : { &freq, &gain, &q })
         k->setBounds (r.removeFromLeft (kw));
 }

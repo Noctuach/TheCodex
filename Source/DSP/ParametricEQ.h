@@ -6,7 +6,21 @@
 
 namespace eq
 {
-    enum class BandType { LowCut = 0, LowShelf, Bell, Notch, HighShelf, HighCut };
+    /** Filter shapes (the first six keep their original indices). */
+    enum class BandType { LowCut = 0, LowShelf, Bell, Notch, HighShelf, HighCut, BandPass, TiltShelf, FlatTilt, AllPass };
+
+    inline const char* const* bandTypeNames()
+    {
+        static const char* names[] = { "Low Cut", "Low Shelf", "Bell", "Notch", "High Shelf", "High Cut",
+                                       "Band Pass", "Tilt Shelf", "Flat Tilt", "All Pass" };
+        return names;
+    }
+    constexpr int numBandTypes = 10;
+
+    /** Slopes in dB/oct, selected by index. */
+    constexpr int slopeDb[] = { 6, 12, 18, 24, 36, 48, 72, 96 };
+    constexpr int numSlopes = 8;
+    constexpr int defaultSlope = 3; // 24 dB/oct
 
     struct Coeffs { double b0 = 1, b1 = 0, b2 = 0, a1 = 0, a2 = 0; };
 
@@ -19,7 +33,7 @@ namespace eq
         Placement placement = Placement::Stereo;
         BandType type = BandType::Bell;
         float freq = 1000.0f, gainDb = 0.0f, q = 0.707f;
-        int slope = 1; // 0 = 12, 1 = 24, 2 = 48 dB/oct
+        int slope = defaultSlope; // index into slopeDb
 
         bool operator== (const BandSettings& o) const
         {
@@ -28,7 +42,7 @@ namespace eq
         bool operator!= (const BandSettings& o) const { return ! (*this == o); }
     };
 
-    constexpr int maxStages = 4;
+    constexpr int maxStages = 8;
 
     struct BandDesign
     {
@@ -36,81 +50,151 @@ namespace eq
         int numStages = 0;
     };
 
-    inline int stagesForSlope (int slope) { return slope <= 0 ? 1 : (slope == 1 ? 2 : 4); }
+    inline bool typeUsesGain (BandType t)
+    {
+        return t == BandType::Bell || t == BandType::LowShelf || t == BandType::HighShelf
+            || t == BandType::TiltShelf || t == BandType::FlatTilt;
+    }
+    inline bool typeUsesSlope (BandType t) { return t == BandType::LowCut || t == BandType::HighCut || t == BandType::BandPass; }
 
-    /** RBJ-cookbook biquads; cut filters are Butterworth cascades. Shared by DSP and GUI. */
+    //==========================================================================
+    // Building blocks (also used by the saturation crossovers and the distortion filters)
+    constexpr double pi_ = 3.14159265358979323846;
+
+    inline Coeffs normalise (double b0, double b1, double b2, double a0, double a1, double a2)
+    {
+        return Coeffs { b0 / a0, b1 / a0, b2 / a0, a1 / a0, a2 / a0 };
+    }
+
+    inline double clampFreq (double f, double sr) { return std::clamp (f, 5.0, sr * 0.49); }
+
+    inline Coeffs firstOrder (bool highpass, double fc, double sr)
+    {
+        const double K = std::tan (pi_ * clampFreq (fc, sr) / sr);
+        const double a1 = (K - 1.0) / (K + 1.0);
+        if (! highpass) return { K / (1.0 + K), K / (1.0 + K), 0.0, a1, 0.0 };
+        return { 1.0 / (1.0 + K), -1.0 / (1.0 + K), 0.0, a1, 0.0 };
+    }
+
+    inline Coeffs secondOrder (bool highpass, double fc, double q, double sr)
+    {
+        const double w0 = 2.0 * pi_ * clampFreq (fc, sr) / sr, cw = std::cos (w0), alpha = std::sin (w0) / (2.0 * std::max (0.05, q));
+        if (highpass) return normalise ((1 + cw) / 2, -(1 + cw), (1 + cw) / 2, 1 + alpha, -2 * cw, 1 - alpha);
+        return normalise ((1 - cw) / 2, (1 - cw), (1 - cw) / 2, 1 + alpha, -2 * cw, 1 - alpha);
+    }
+
+    inline Coeffs shelf (bool high, double fc, double gainDb, double q, double sr)
+    {
+        const double A = std::pow (10.0, gainDb / 40.0);
+        const double w0 = 2.0 * pi_ * clampFreq (fc, sr) / sr, cw = std::cos (w0);
+        const double sq = 2.0 * std::sqrt (A) * std::sin (w0) / (2.0 * std::max (0.05, q));
+        if (! high)
+            return normalise (A * ((A + 1) - (A - 1) * cw + sq), 2 * A * ((A - 1) - (A + 1) * cw), A * ((A + 1) - (A - 1) * cw - sq),
+                              (A + 1) + (A - 1) * cw + sq, -2 * ((A - 1) + (A + 1) * cw), (A + 1) + (A - 1) * cw - sq);
+        return normalise (A * ((A + 1) + (A - 1) * cw + sq), -2 * A * ((A - 1) + (A + 1) * cw), A * ((A + 1) + (A - 1) * cw - sq),
+                          (A + 1) - (A - 1) * cw + sq, 2 * ((A - 1) - (A + 1) * cw), (A + 1) - (A - 1) * cw - sq);
+    }
+
+    /** Butterworth low/high-pass of any order (odd orders get a first-order section). order 2 uses userQ. */
+    inline void addButterworth (BandDesign& d, bool highpass, int order, double fc, double userQ, double sr)
+    {
+        auto add = [&d] (Coeffs c) { if (d.numStages < maxStages) d.stages[(size_t) d.numStages++] = c; };
+        if (order <= 1) { add (firstOrder (highpass, fc, sr)); return; }
+        if (order == 2) { add (secondOrder (highpass, fc, userQ, sr)); return; }
+        if (order % 2 == 1)
+        {
+            add (firstOrder (highpass, fc, sr));
+            for (int k = 1; k <= (order - 1) / 2; ++k)
+                add (secondOrder (highpass, fc, 1.0 / (2.0 * std::cos (k * pi_ / order)), sr));
+        }
+        else
+            for (int k = 0; k < order / 2; ++k)
+                add (secondOrder (highpass, fc, 1.0 / (2.0 * std::cos ((2 * k + 1) * pi_ / (2.0 * order))), sr));
+    }
+
+    /** All EQ shapes. Shared by the DSP and the GUI curve. */
     inline BandDesign design (const BandSettings& s, double sampleRate)
     {
         BandDesign d;
         if (! s.on)
             return d;
 
-        constexpr double pi = 3.14159265358979323846;
-        const double f    = std::clamp ((double) s.freq, 10.0, sampleRate * 0.49);
-        const double w0   = 2.0 * pi * f / sampleRate;
+        const double sr   = sampleRate;
+        const double f    = clampFreq ((double) s.freq, sr);
+        const double w0   = 2.0 * pi_ * f / sr;
         const double cosw = std::cos (w0), sinw = std::sin (w0);
         const double A    = std::pow (10.0, s.gainDb / 40.0);
         const double Q    = std::max (0.05, (double) s.q);
-
-        auto normalise = [] (double b0, double b1, double b2, double a0, double a1, double a2)
-        {
-            return Coeffs { b0 / a0, b1 / a0, b2 / a0, a1 / a0, a2 / a0 };
-        };
+        const int order   = slopeDb[std::clamp (s.slope, 0, numSlopes - 1)] / 6;
+        auto add = [&d] (Coeffs c) { if (d.numStages < maxStages) d.stages[(size_t) d.numStages++] = c; };
 
         switch (s.type)
         {
-            case BandType::LowCut:
-            case BandType::HighCut:
-            {
-                const int k = stagesForSlope (s.slope);
-                const bool hp = s.type == BandType::LowCut;
-                for (int i = 0; i < k; ++i)
-                {
-                    // First stage at 12 dB/oct follows the user Q (resonance); higher orders are Butterworth.
-                    const double q = k == 1 ? Q : 1.0 / (2.0 * std::cos (pi * (2.0 * i + 1.0) / (4.0 * k)));
-                    const double alpha = sinw / (2.0 * q);
-                    if (hp) d.stages[i] = normalise ((1 + cosw) / 2, -(1 + cosw), (1 + cosw) / 2, 1 + alpha, -2 * cosw, 1 - alpha);
-                    else    d.stages[i] = normalise ((1 - cosw) / 2,  (1 - cosw), (1 - cosw) / 2, 1 + alpha, -2 * cosw, 1 - alpha);
-                }
-                d.numStages = k;
-                break;
-            }
+            case BandType::LowCut:  addButterworth (d, true,  order, f, Q, sr); break;
+            case BandType::HighCut: addButterworth (d, false, order, f, Q, sr); break;
             case BandType::Bell:
             {
                 const double alpha = sinw / (2.0 * Q);
-                d.stages[0] = normalise (1 + alpha * A, -2 * cosw, 1 - alpha * A, 1 + alpha / A, -2 * cosw, 1 - alpha / A);
-                d.numStages = 1;
+                add (normalise (1 + alpha * A, -2 * cosw, 1 - alpha * A, 1 + alpha / A, -2 * cosw, 1 - alpha / A));
                 break;
             }
             case BandType::Notch:
             {
                 const double alpha = sinw / (2.0 * Q);
-                d.stages[0] = normalise (1, -2 * cosw, 1, 1 + alpha, -2 * cosw, 1 - alpha);
-                d.numStages = 1;
+                add (normalise (1, -2 * cosw, 1, 1 + alpha, -2 * cosw, 1 - alpha));
                 break;
             }
-            case BandType::LowShelf:
+            case BandType::LowShelf:  add (shelf (false, f, s.gainDb, Q, sr)); break;
+            case BandType::HighShelf: add (shelf (true,  f, s.gainDb, Q, sr)); break;
+            case BandType::BandPass:
             {
-                const double sq = 2.0 * std::sqrt (A) * sinw / (2.0 * Q);
-                d.stages[0] = normalise (A * ((A + 1) - (A - 1) * cosw + sq),
-                                         2 * A * ((A - 1) - (A + 1) * cosw),
-                                         A * ((A + 1) - (A - 1) * cosw - sq),
-                                         (A + 1) + (A - 1) * cosw + sq,
-                                         -2 * ((A - 1) + (A + 1) * cosw),
-                                         (A + 1) + (A - 1) * cosw - sq);
-                d.numStages = 1;
+                if (order <= 2)
+                {
+                    // constant 0 dB peak band-pass
+                    const double alpha = sinw / (2.0 * Q);
+                    add (normalise (alpha, 0.0, -alpha, 1 + alpha, -2 * cosw, 1 - alpha));
+                }
+                else
+                {
+                    // high-pass and low-pass around the centre; Q sets the width (Q 1 = one octave)
+                    const double bw = std::pow (2.0, 1.0 / (2.0 * Q));
+                    const int side = std::min (8, (order + 1) / 2);
+                    addButterworth (d, true,  side, f / bw, 0.70710678, sr);
+                    addButterworth (d, false, side, f * bw, 0.70710678, sr);
+
+                    // the two skirts overlap: normalise so the centre frequency passes at 0 dB
+                    const std::complex<double> z1 = std::polar (1.0, -w0), z2 = z1 * z1;
+                    double mag = 1.0;
+                    for (int i = 0; i < d.numStages; ++i)
+                    {
+                        const auto& c = d.stages[(size_t) i];
+                        mag *= std::abs ((c.b0 + c.b1 * z1 + c.b2 * z2) / (1.0 + c.a1 * z1 + c.a2 * z2));
+                    }
+                    if (mag > 1.0e-6)
+                    {
+                        auto& c0 = d.stages[0];
+                        c0.b0 /= mag; c0.b1 /= mag; c0.b2 /= mag;
+                    }
+                }
                 break;
             }
-            case BandType::HighShelf:
+            case BandType::TiltShelf:
+                // tilts around the frequency: lows down and highs up (or the other way round)
+                add (shelf (false, f, -0.5 * s.gainDb, Q * 0.7, sr));
+                add (shelf (true,  f,  0.5 * s.gainDb, Q * 0.7, sr));
+                break;
+            case BandType::FlatTilt:
+                // a straight tilt over the whole spectrum: three gentle tilt pairs spread over ~8 octaves
+                for (double m : { 1.0 / 16.0, 1.0, 16.0 })
+                {
+                    add (shelf (false, f * m, -s.gainDb / 6.0, 0.5, sr));
+                    add (shelf (true,  f * m,  s.gainDb / 6.0, 0.5, sr));
+                }
+                break;
+            case BandType::AllPass:
             {
-                const double sq = 2.0 * std::sqrt (A) * sinw / (2.0 * Q);
-                d.stages[0] = normalise (A * ((A + 1) + (A - 1) * cosw + sq),
-                                         -2 * A * ((A - 1) + (A + 1) * cosw),
-                                         A * ((A + 1) + (A - 1) * cosw - sq),
-                                         (A + 1) - (A - 1) * cosw + sq,
-                                         2 * ((A - 1) - (A + 1) * cosw),
-                                         (A + 1) - (A - 1) * cosw - sq);
-                d.numStages = 1;
+                const double alpha = sinw / (2.0 * Q);
+                add (normalise (1 - alpha, -2 * cosw, 1 + alpha, 1 + alpha, -2 * cosw, 1 - alpha));
                 break;
             }
         }
@@ -120,8 +204,7 @@ namespace eq
     /** Magnitude (linear) of a band design at a given frequency. */
     inline double magnitude (const BandDesign& d, double freq, double sampleRate)
     {
-        constexpr double pi = 3.14159265358979323846;
-        const std::complex<double> z1 = std::polar (1.0, -2.0 * pi * freq / sampleRate);
+        const std::complex<double> z1 = std::polar (1.0, -2.0 * pi_ * freq / sampleRate);
         const std::complex<double> z2 = z1 * z1;
         double mag = 1.0;
         for (int i = 0; i < d.numStages; ++i)

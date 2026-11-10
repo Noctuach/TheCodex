@@ -1,6 +1,7 @@
 #include "PresetManager.h"
 #include "Parameters.h"
 #include "DSP/ClipDistortion.h"
+#include "DSP/ParametricEQ.h"
 
 using namespace juce;
 
@@ -11,6 +12,13 @@ namespace
     using Values = std::vector<std::pair<String, float>>;
     using CD = ClipDistortion;
     enum Band { LowCut = 0, LowShelf, Bell, Notch, HighShelf, HighCut };
+
+    int slopeIndex (int dbPerOct)
+    {
+        for (int i = 0; i < eq::numSlopes; ++i)
+            if (eq::slopeDb[i] == dbPerOct) return i;
+        return eq::defaultSlope;
+    }
 
     struct Builder
     {
@@ -51,11 +59,12 @@ namespace
                   .set (ID::clip (stage, "ShelfF"), shelfHz).set (ID::clip (stage, "ShelfG"), shelfDb);
         }
         Builder& clipOff (int stage) { return set (ID::clip (stage, "On"), 0); }
-        Builder& band (int n, int type, float freq, float gain = 0.0f, float q = 0.707f, int slope = 1)
+        /** slopeDb: 6, 12, 18, 24, 36, 48, 72 or 96 dB/oct */
+        Builder& band (int n, int type, float freq, float gain = 0.0f, float q = 0.707f, int slopeDbPerOct = 24)
         {
             const int b = n - 1;
             return set (ID::band (b, "On"), 1).set (ID::band (b, "Type"), (float) type).set (ID::band (b, "Freq"), freq)
-                  .set (ID::band (b, "Gain"), gain).set (ID::band (b, "Q"), q).set (ID::band (b, "Slope"), (float) slope);
+                  .set (ID::band (b, "Gain"), gain).set (ID::band (b, "Q"), q).set (ID::band (b, "Slope"), (float) slopeIndex (slopeDbPerOct));
         }
         Builder& out (float db) { return set (ID::outGain, db); }
     };
@@ -117,13 +126,13 @@ PresetManager::PresetManager (AudioProcessorValueTreeState& s) : apvts (s)
          .clip (1, CD::HardClip, 18.0f, -7.0f).band (4, Bell, 3000.0f, 5.0f, 1.2f).clip (2, CD::SoftClip, 4.0f, -3.0f));
 
     add ("909 Boom Tail", Builder().kick909 (7, 0.5f, 0.4f, 0.7f).set (ID::aRelease, 500.0f)
-         .clip (1, CD::Tube, 16.0f, -6.0f).band (1, LowCut, 25.0f, 0.0f, 0.707f, 2).clip (2, CD::Tanh, 8.0f, -4.0f));
+         .clip (1, CD::Tube, 16.0f, -6.0f).band (1, LowCut, 25.0f, 0.0f, 0.707f, 48).clip (2, CD::Tanh, 8.0f, -4.0f));
 
     add ("909 Fuzz Box", Builder().kick909 (8).set (ID::aRelease, 150.0f)
          .clip (1, CD::Fuzz, 22.0f, -10.0f).band (3, Bell, 250.0f, 5.0f, 1.0f).clip (2, CD::AsymClip, 10.0f, -6.0f));
 
     add ("909 Bitcrushed", Builder().kick909 (0, 0.6f).set (ID::aRelease, 150.0f)
-         .clip (1, CD::Bitcrush, 12.0f, -6.0f, 0.0f, 0.6f).band (5, HighCut, 9000.0f, 0.0f, 0.707f, 1)
+         .clip (1, CD::Bitcrush, 12.0f, -6.0f, 0.0f, 0.6f).band (5, HighCut, 9000.0f, 0.0f, 0.707f, 24)
          .clip (2, CD::Tanh, 10.0f, -5.0f));
 
     add ("909 Hard Attack Raw", Builder().kick909 (4, 0.5f, 0.9f, 0.45f).set (ID::aRelease, 90.0f)
@@ -134,7 +143,7 @@ PresetManager::PresetManager (AudioProcessorValueTreeState& s) : apvts (s)
     // Spatial distortion for width, with a Side low cut so everything below 150 Hz stays mono
     add ("909 Wide Rawstyle", Builder().kick909 (2, 0.55f, 0.7f, 0.55f).set (ID::aRelease, 100.0f)
          .clip (1, CD::HardClip, 26.0f, -10.0f).set (ID::clip (1, "Spatial"), 0.5f)
-         .band (1, LowCut, 150.0f, 0.0f, 0.707f, 2).set (ID::band (0, "Place"), 4.0f)   // band 1: Side low cut
+         .band (1, LowCut, 150.0f, 0.0f, 0.707f, 48).set (ID::band (0, "Place"), 4.0f)   // band 1: Side low cut
          .band (3, Bell, 383.0f, 6.0f, 1.0f).band (4, Bell, 1800.0f, -5.0f, 2.0f)
          .clip (2, CD::Diode, 12.0f, -6.0f).set (ID::clip (2, "Spatial"), 0.3f));
 

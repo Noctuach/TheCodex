@@ -63,21 +63,8 @@ namespace sat
         void reset() { for (auto& b : s) b.reset(); }
     };
 
-    inline eq::Coeffs firstOrder (bool lowpass, double fc, double rate)
-    {
-        const double K = std::tan (juce::MathConstants<double>::pi * std::min (fc, rate * 0.49) / rate);
-        const double a1 = (K - 1.0) / (K + 1.0);
-        if (lowpass) return { K / (1.0 + K), K / (1.0 + K), 0.0, a1, 0.0 };
-        return { 1.0 / (1.0 + K), -1.0 / (1.0 + K), 0.0, a1, 0.0 };
-    }
-
-    inline eq::Coeffs secondOrder (bool lowpass, double fc, double q, double rate)
-    {
-        eq::BandSettings b;
-        b.on = true; b.type = lowpass ? eq::BandType::HighCut : eq::BandType::LowCut;
-        b.freq = (float) fc; b.q = (float) q; b.slope = 0;
-        return eq::design (b, rate).stages[0];
-    }
+    inline eq::Coeffs firstOrder (bool lowpass, double fc, double rate) { return eq::firstOrder (! lowpass, fc, rate); }
+    inline eq::Coeffs secondOrder (bool lowpass, double fc, double q, double rate) { return eq::secondOrder (! lowpass, fc, q, rate); }
 
     /** Designs the low-pass and high-pass halves of one crossover. */
     inline void designCrossover (int slope, double fc, double rate, Cascade& lp, Cascade& hp)

@@ -1,5 +1,6 @@
 #include "Parameters.h"
 #include "DSP/ClipDistortion.h"
+#include "DSP/ParametricEQ.h"
 #include "DSP/Kick909.h"
 #include "DSP/MultibandSaturator.h"
 
@@ -116,8 +117,9 @@ AudioProcessorValueTreeState::ParameterLayout Params::createLayout()
     }
 
     // ---------------- EQ ----------------
-    const StringArray bandTypes { "Low Cut", "Low Shelf", "Bell", "Notch", "High Shelf", "High Cut" };
-    const StringArray slopes { "12 dB/oct", "24 dB/oct", "48 dB/oct" };
+    StringArray bandTypes, slopes;
+    for (int t = 0; t < eq::numBandTypes; ++t) bandTypes.add (eq::bandTypeNames()[t]);
+    for (int i = 0; i < eq::numSlopes; ++i) slopes.add (String (eq::slopeDb[i]) + " dB/oct");
     const int   defTypes[Params::numBands] = { 0, 1, 2, 2, 2, 5 };
     const float defFreqs[Params::numBands] = { 30.0f, 60.0f, 200.0f, 1000.0f, 4000.0f, 16000.0f };
 
@@ -127,11 +129,13 @@ AudioProcessorValueTreeState::ParameterLayout Params::createLayout()
         addBool (l, ID::band (b, "On"), n + "On", false);
         addChoice (l, ID::band (b, "Type"), n + "Type", bandTypes, defTypes[b]);
         addFloat (l, ID::band (b, "Freq"), n + "Freq", skewed (20.0f, 20000.0f, 640.0f), defFreqs[b], hzText);
-        addFloat (l, ID::band (b, "Gain"), n + "Gain", { -24.0f, 24.0f, 0.01f }, 0.0f, dbText);
+        addFloat (l, ID::band (b, "Gain"), n + "Gain", { -30.0f, 30.0f, 0.01f }, 0.0f, dbText);
         addFloat (l, ID::band (b, "Q"), n + "Q", skewed (0.1f, 18.0f, 1.0f), 0.707f, [] (float v) { return String (v, 2); });
-        addChoice (l, ID::band (b, "Slope"), n + "Slope", slopes, 1);
+        addChoice (l, ID::band (b, "Slope"), n + "Slope", slopes, eq::defaultSlope);
         addChoice (l, ID::band (b, "Place"), n + "Stereo Placement", { "Stereo", "Left", "Right", "Mid", "Side" }, 0);
     }
+
+    addFloat (l, ID::eqScale, "EQ Gain Scale", { 0.0f, 2.0f }, 1.0f, pctText);
 
     // ---------------- Saturation (multiband) ----------------
     addBool (l, ID::sat ("On"), "Saturation On", false);

@@ -40,6 +40,8 @@ namespace ID
 
     // Output
     inline const juce::String outGain { "outGain" };
+    // EQ: scales the gain of all bands (Bell, shelves, tilts)
+    inline const juce::String eqScale { "eqScale" };
 
     // Clip stages: prefix "d1" / "d2" + suffix
     inline juce::String clip (int stage, const char* suffix) { return "d" + juce::String (stage) + suffix; }

@@ -19,6 +19,7 @@ CodexProcessor::CodexProcessor()
     aRelease = p (ID::aRelease); aCurve = p (ID::aCurve);
 
     outGainParam = p (ID::outGain);
+    eqScaleParam = p (ID::eqScale);
 
     for (int s = 0; s < 2; ++s)
     {
@@ -141,6 +142,8 @@ void CodexProcessor::updateParameters()
         bs.q      = bp.q->load();
         bs.slope  = (int) bp.slope->load();
         bs.placement = (eq::Placement) (int) bp.place->load();
+        if (eq::typeUsesGain (bs.type))
+            bs.gainDb *= eqScaleParam->load();   // Gain Scale
         equaliser.setBand (b, bs);
     }
 
@@ -269,6 +272,8 @@ void CodexProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiB
 
         // Old-school chain: distort -> EQ -> distort again -> multiband saturation (stereo from here on)
         clip1.process (l, r, n);
+        for (int i = 0; i < n; ++i) m[i] = 0.5f * (l[i] + r[i]);
+        analyzerPre.push (m, n);           // spectrum before the EQ (for the EQ display)
         equaliser.process (l, r, n);
         clip2.process (l, r, n);
         saturator.process (l, r, n);

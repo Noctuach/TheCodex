@@ -224,6 +224,59 @@ int main (int argc, char** argv)
         if (! supported) ++failures;
     }
 
+    // ---- EQ shapes and slopes (frequency responses) ----
+    {
+        auto magDb = [] (const eq::BandSettings& b, double f) { return 20.0 * std::log10 (eq::magnitude (eq::design (b, sr), f, sr)); };
+        eq::BandSettings b; b.on = true; b.freq = 1000.0f;
+
+        std::cout << "\nEQ low cut, attenuation 4 octaves below the cutoff (expected ~4 x slope):";
+        b.type = eq::BandType::LowCut;
+        for (int sl = 0; sl < eq::numSlopes; ++sl)
+        {
+            b.slope = sl;
+            const double a = -magDb (b, 1000.0 / 16.0), expected = 4.0 * eq::slopeDb[sl];
+            std::cout << " " << eq::slopeDb[sl] << ":" << juce::roundToInt (a);
+            if (std::abs (a - expected) > 4.0 || std::abs (magDb (b, 1000.0)) > 3.5 || std::abs (magDb (b, 16000.0)) > 0.2) { ++failures; std::cout << "(!)"; }
+        }
+        b.type = eq::BandType::AllPass; b.slope = 3;
+        double apMax = 0.0;
+        for (double f = 20.0; f < 20000.0; f *= 1.2) apMax = std::max (apMax, std::abs (magDb (b, f)));
+        b.type = eq::BandType::TiltShelf; b.gainDb = 12.0f;
+        const double tiltLo = magDb (b, 25.0), tiltHi = magDb (b, 18000.0);
+        b.type = eq::BandType::FlatTilt;
+        bool monotonic = true; double prev = -1e9;
+        for (double f = 20.0; f < 20000.0; f *= 1.1) { const double v = magDb (b, f); monotonic &= v >= prev - 0.01; prev = v; }
+        const double flatLo = magDb (b, 20.0), flatHi = magDb (b, 20000.0);
+        b.type = eq::BandType::BandPass; b.q = 1.0f;
+        const double bpPeak = magDb (b, 1000.0), bpFar = magDb (b, 100.0);
+        std::cout << "\nAll pass max deviation " << juce::String (apMax, 3) << " dB; tilt shelf " << juce::String (tiltLo, 1) << " / +" << juce::String (tiltHi, 1)
+                  << " dB; flat tilt " << juce::String (flatLo, 1) << " -> +" << juce::String (flatHi, 1) << " dB (monotonic " << (monotonic ? "yes" : "NO")
+                  << "); band pass peak " << juce::String (bpPeak, 1) << " dB, 1 decade away " << juce::String (bpFar, 1) << " dB\n";
+        if (apMax > 0.01 || tiltLo > -5.0 || tiltHi < 5.0 || ! monotonic || flatHi < 4.0 || std::abs (bpPeak) > 1.5 || bpFar > -12.0) ++failures;
+
+        // Stability: every shape, slope and placement on stereo noise
+        eq::ParametricEQ<Params::numBands> e;
+        e.prepare (sr);
+        juce::Random rng (3);
+        bool finite = true;
+        for (int t = 0; t < eq::numBandTypes; ++t)
+            for (int pl = 0; pl < 5; ++pl)
+            {
+                eq::BandSettings bs; bs.on = true; bs.type = (eq::BandType) t; bs.freq = 40.0f; bs.gainDb = 30.0f; bs.q = 18.0f;
+                bs.slope = eq::numSlopes - 1; bs.placement = (eq::Placement) pl;
+                e.setBand (0, bs);
+                float l[256], r[256];
+                for (int blk = 0; blk < 40; ++blk)
+                {
+                    for (int i = 0; i < 256; ++i) { l[i] = rng.nextFloat() - 0.5f; r[i] = rng.nextFloat() - 0.5f; }
+                    e.process (l, r, 256);
+                    for (int i = 0; i < 256; ++i) finite &= std::isfinite (l[i]) && std::isfinite (r[i]) && std::abs (l[i]) < 1000.0f;
+                }
+            }
+        std::cout << "EQ stability, all shapes x placements at extreme settings: " << (finite ? "OK" : "FAILED") << "\n";
+        if (! finite) ++failures;
+    }
+
     // ---- Stereo: spatial, M/S EQ ----
     {
         auto sideDb = [] (const juce::AudioBuffer<float>& b, double from, double to)
@@ -245,7 +298,7 @@ int main (int argc, char** argv)
         setParam (proc, ID::clip (2, "On"), 0.0f);
         const double uncutSide = sideDb (render (proc, 1), 0.0, 0.3);
         setParam (proc, ID::band (5, "On"), 1.0f); setParam (proc, ID::band (5, "Type"), 0.0f);
-        setParam (proc, ID::band (5, "Freq"), 20000.0f); setParam (proc, ID::band (5, "Slope"), 2.0f);
+        setParam (proc, ID::band (5, "Freq"), 20000.0f); setParam (proc, ID::band (5, "Slope"), 5.0f);   // 48 dB/oct
         setParam (proc, ID::band (5, "Place"), 4.0f);
         const double cutSide = sideDb (render (proc, 1), 0.0, 0.3);
         std::cout << "\nSide vs Mid energy: spatial off " << juce::String (monoSide, 1) << " dB, spatial on " << juce::String (wideSide, 1)

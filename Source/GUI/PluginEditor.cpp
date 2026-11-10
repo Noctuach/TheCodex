@@ -93,8 +93,6 @@ MainView::MainView (CodexProcessor& p, PropertiesFile* settingsFile)
     // ---- EQ ----
     eqDisplay.onBandSelected = [this] (int b) { bandControls.setBand (b); };
     bandControls.onBandSelected = [this] (int b) { eqDisplay.setSelectedBand (b); };
-    bandControls.onRangeChanged = [this] (float db) { eqDisplay.setDisplayRange (db); };
-    bandControls.onAnalyzerToggled = [this] (bool on) { eqDisplay.setAnalyzerEnabled (on); };
 
     for (Component* c : std::initializer_list<Component*> {
              &undoButton, &redoButton, &menuButton, &presetBar, &keyBox, &octaveBox, &keyModeBox,

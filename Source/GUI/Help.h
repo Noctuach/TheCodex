@@ -69,11 +69,11 @@ namespace Help
             const auto sfx = id.substring (2);
             static const std::map<juce::String, juce::String> band {
                 { "On",    "Band On/Off: Enable this EQ band. Tip: double-click on the EQ display to add a band." },
-                { "Type",  "Band Type: Low Cut, Low Shelf, Bell, Notch, High Shelf or High Cut." },
+                { "Type",  "Shape: Bell, Low/High Shelf, Low/High Cut, Notch, Band Pass (isolate a range), Tilt Shelf (tilt around the frequency), Flat Tilt (tilt the whole spectrum) or All Pass (phase only, no level change)." },
                 { "Freq",  "Frequency: Centre / corner frequency of the band. Drag the node on the display horizontally." },
-                { "Gain",  "Gain: Boost or cut. Drag the node on the display vertically." },
-                { "Q",     "Q: Width of the band (higher = narrower). Use the mouse wheel over a node." },
-                { "Slope", "Slope: Steepness of Low Cut / High Cut filters." },
+                { "Gain",  "Gain: boost or cut (+/-30 dB). Drag the node vertically, or Ctrl/Cmd + mouse wheel." },
+                { "Q",     "Q: width of the band (higher = narrower). Mouse wheel over a node, or Ctrl/Cmd + drag vertically." },
+                { "Slope", "Slope: steepness of Low Cut, High Cut and Band Pass filters, 6 to 96 dB/oct. Tip: mouse wheel over a cut filter's node steps the slope." },
                 { "Place", "Stereo Placement: which part of the stereo signal this band affects: Stereo (both channels), Left, Right, Mid (L+R, the centre) or Side (L-R, the width). Tip: a Side low cut keeps the low end mono." },
             };
             if (auto it = band.find (sfx); it != band.end())

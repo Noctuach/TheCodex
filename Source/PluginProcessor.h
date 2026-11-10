@@ -90,7 +90,7 @@ public:
     std::atomic<float> scopeCapturedSeconds { 0.5f }; // window of the current capture
 
     /** Mid signal for the EQ analyzer and the tuner; left/right for the scope page. */
-    AnalyzerFifo analyzer, tunerFeed, scopeFeedL, scopeFeedR;
+    AnalyzerFifo analyzer, analyzerPre, tunerFeed, scopeFeedL, scopeFeedR;   // analyzerPre: EQ input (mid)
 
     /** MIDI note of the selected key (F1..E2, shifted by the octave setting). */
     int getKeyNote() const;
@@ -128,7 +128,7 @@ private:
     std::atomic<float> *wave, *tune, *phase, *clickLevel, *clickDecay, *clickTone;
     std::atomic<float> *pAmount, *pAttack, *pDecay, *pSustain, *pRelease, *pCurve;
     std::atomic<float> *aAttack, *aDecay, *aSustain, *aRelease, *aCurve;
-    std::atomic<float> *outGainParam;
+    std::atomic<float> *outGainParam, *eqScaleParam;
     ClipParams clipParams[2];
     BandParams bandParams[Params::numBands];
     std::atomic<float> *satOn, *satBands, *satSlope, *satOs, *satMix, *satOut;

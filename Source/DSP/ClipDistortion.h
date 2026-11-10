@@ -208,8 +208,8 @@ private:
         // Wet filters (redesigned only when something changed)
         if (rate != lastFilterRate || s.loFilterHz != lastLo || s.hiFilterHz != lastHi || s.shelfHz != lastShelfHz || s.shelfDb != lastShelfDb)
         {
-            eq::BandSettings lp; lp.on = true; lp.type = eq::BandType::HighCut; lp.freq = s.loFilterHz; lp.slope = 0;
-            eq::BandSettings hp; hp.on = true; hp.type = eq::BandType::LowCut;  hp.freq = s.hiFilterHz; hp.slope = 0;
+            eq::BandSettings lp; lp.on = true; lp.type = eq::BandType::HighCut; lp.freq = s.loFilterHz; lp.slope = 1;
+            eq::BandSettings hp; hp.on = true; hp.type = eq::BandType::LowCut;  hp.freq = s.hiFilterHz; hp.slope = 1;
             eq::BandSettings sh; sh.on = true; sh.type = eq::BandType::HighShelf; sh.freq = s.shelfHz; sh.gainDb = s.shelfDb;
             for (int ch = 0; ch < 2; ++ch)
             {
