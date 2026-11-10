@@ -7,6 +7,8 @@
 int main (int argc, char** argv)
 {
     if (argc < 2) { std::cerr << "usage: CodexHostTest <Codex.vst3>\n"; return 1; }
+    std::cout << std::unitbuf;   // flush every line (useful when a step hangs)
+    std::cout << "Loading " << argv[1] << "\n";
     juce::ScopedJuceInitialiser_GUI init;
     int failures = 0;
     auto check = [&failures] (bool ok, const juce::String& what) { std::cout << (ok ? "  OK    " : "  FAIL  ") << what << "\n"; if (! ok) ++failures; };
@@ -66,13 +68,30 @@ int main (int argc, char** argv)
     plugin->setStateInformation (state.getData(), (int) state.getSize());
     check (std::abs (p0->getValue() - before) < 1.0e-4f, "state save / restore (" + juce::String ((int) state.getSize()) + " bytes)");
 
-    // Editor
-    std::unique_ptr<juce::AudioProcessorEditor> editor (plugin->createEditorIfNeeded());
-    check (editor != nullptr && editor->getWidth() > 100, "editor opens (" + (editor ? juce::String (editor->getWidth()) + " x " + juce::String (editor->getHeight()) : juce::String ("none")) + ")");
-    editor.reset();
+    // Editor: shown in a real window while the message loop runs (like a DAW), then closed
+    {
+        std::unique_ptr<juce::AudioProcessorEditor> editor (plugin->createEditorIfNeeded());
+        check (editor != nullptr && editor->getWidth() > 100, "editor opens (" + (editor ? juce::String (editor->getWidth()) + " x " + juce::String (editor->getHeight()) : juce::String ("none")) + ")");
+        if (editor != nullptr)
+        {
+            juce::DocumentWindow window ("Codex host test", juce::Colours::black, juce::DocumentWindow::closeButton, true);
+            window.setUsingNativeTitleBar (true);
+            window.setContentNonOwned (editor.get(), true);
+            window.setVisible (true);
+            juce::MessageManager::getInstance()->runDispatchLoopUntil (1500);   // let it draw for a while
+            check (window.isShowing(), "editor shown in a window and drawn for 1.5 s");
+            window.clearContentComponent();
+            window.setVisible (false);
+            editor.reset();
+            juce::MessageManager::getInstance()->runDispatchLoopUntil (300);
+        }
+        std::cout << "        editor closed\n";
+    }
 
     plugin->releaseResources();
+    std::cout << "        resources released\n";
     plugin.reset();
+    std::cout << "        plug-in deleted\n";
     std::cout << (failures == 0 ? "HOST TEST PASSED" : juce::String (failures) + " HOST CHECK(S) FAILED") << "\n";
     return failures == 0 ? 0 : 4;
 }

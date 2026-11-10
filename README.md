@@ -113,6 +113,14 @@ cmake --build build --config Release
 Plugins are written to `build/Codex_artefacts/Release/`. On Linux, install the JUCE dependencies first:
 `libasound2-dev libfreetype-dev libx11-dev libxext-dev libxinerama-dev libxrandr-dev libxcursor-dev libfontconfig1-dev libgl1-mesa-dev`.
 
+**Windows test builds from Linux** (cross-compiled with clang + MinGW-w64; official releases use Visual Studio):
+```bash
+cmake/mingw-compat/fetch-headers.sh build-win/mingw-overlay
+cmake -S . -B build-win -G Ninja -DCMAKE_TOOLCHAIN_FILE=cmake/clang-mingw.cmake -DMINGW_OVERLAY_INCLUDE=$PWD/build-win/mingw-overlay -DCMAKE_BUILD_TYPE=Release
+cmake --build build-win --target Codex_VST3
+```
+Copy `Contents/Resources/moduleinfo.json` from a native build into the Windows bundle (it cannot be generated when cross-compiling).
+
 **Continuous integration:** `.github/workflows/build.yml` builds Windows, macOS (universal) and Linux, runs the offline
 tests, validates the VST3 with [pluginval](https://github.com/Tracktion/pluginval) and uploads ready-to-use zips.
 
