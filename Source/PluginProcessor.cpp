@@ -19,6 +19,7 @@ CodexProcessor::CodexProcessor()
     aRelease = p (ID::aRelease); aCurve = p (ID::aCurve);
 
     outGainParam = p (ID::outGain);
+    clipOnParam = p (ID::clipOn); clipCeilParam = p (ID::clipCeiling); clipSoftParam = p (ID::clipSoft);
     eqScaleParam = p (ID::eqScale);
 
     for (int s = 0; s < 2; ++s)
@@ -110,6 +111,7 @@ void CodexProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     compressor.prepare (sampleRate);
     updateParameters();
 
+    clipper.prepare (sampleRate, chunkSize);
     outGain.reset (sampleRate, 0.02);
     outGain.setCurrentAndTargetValue (juce::Decibels::decibelsToGain (outGainParam->load()));
 
@@ -120,7 +122,8 @@ void CodexProcessor::updateLatency()
 {
     const int latency = juce::roundToInt (clip1.getLatencyInSamples() + clip2.getLatencyInSamples()
                                           + saturator.getLatencyInSamples() + compressor.getLatencyInSamples()
-                                          + equalisers[0].getLatencyInSamples() + equalisers[1].getLatencyInSamples());
+                                          + equalisers[0].getLatencyInSamples() + equalisers[1].getLatencyInSamples()
+                                          + clipper.getLatencyInSamples());
     if (latency != getLatencySamples())
         setLatencySamples (latency);
 }
@@ -283,6 +286,7 @@ void CodexProcessor::updateParameters()
     }
 
     outGain.setTargetValue (juce::Decibels::decibelsToGain (outGainParam->load()));
+    clipper.setParameters (clipOnParam->load() > 0.5f, clipCeilParam->load(), clipSoftParam->load());
 
     // Oversampling and the saturation stage change the latency: report it to the host
     updateLatency();
@@ -397,6 +401,11 @@ void CodexProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiB
             const float g = outGain.getNextValue();
             l[i] *= g;
             r[i] *= g;
+        }
+        clipper.process (l, r, n);         // optional output clipper (off by default)
+
+        for (int i = 0; i < n; ++i)
+        {
             m[i] = 0.5f * (l[i] + r[i]);
             blockPeak[0] = std::max (blockPeak[0], std::abs (l[i]));
             blockPeak[1] = std::max (blockPeak[1], std::abs (r[i]));

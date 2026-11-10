@@ -8,6 +8,7 @@
 #include "DSP/SpaceReverb.h"
 #include "DSP/Compressor.h"
 #include "DSP/EqEngine.h"
+#include "DSP/OutputClipper.h"
 #include "PresetManager.h"
 
 /** Lock-free single-producer/single-consumer sample FIFO feeding the spectrum analyzer. */
@@ -78,6 +79,7 @@ public:
     comp::MultibandCompressor& getCompressor() { return compressor; }
     /** Share of the available processing time used by the audio callback (0..1, for the CPU readout). */
     double getCpuLoad() const { return loadMeasurer.getLoadAsProportion(); }
+    OutputClipper& getClipper() { return clipper; }
 
     /** Output peak since last read, per channel (0 = left, 1 = right). */
     float getAndResetPeak (int channel) { return peaks[(size_t) channel].exchange (0.0f); }
@@ -120,6 +122,8 @@ private:
     space::SpaceReverb reverb;
     comp::MultibandCompressor compressor;
     juce::AudioProcessLoadMeasurer loadMeasurer;
+    OutputClipper clipper;
+    std::atomic<float> *clipOnParam = nullptr, *clipCeilParam = nullptr, *clipSoftParam = nullptr;
     std::vector<float> left, right, mid;
     juce::SmoothedValue<float> outGain;
 

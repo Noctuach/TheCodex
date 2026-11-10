@@ -528,6 +528,35 @@ int main (int argc, char** argv)
         proc.presets.loadPreset (0);
     }
 
+    // ---- Output clipper: the ceiling holds (also between samples), off = untouched ----
+    {
+        int bad = 0;
+        proc.presets.loadPreset (10);
+        setParam (proc, ID::outGain, 12.0f);
+        const auto hot = render (proc, 1);
+        setParam (proc, ID::clipOn, 1.0f);
+        setParam (proc, ID::clipCeiling, -1.0f);
+        const auto clipped = render (proc, 1);
+        const float hotPk = juce::Decibels::gainToDecibels (hot.getMagnitude (0, hot.getNumSamples()));
+        const float clipPk = juce::Decibels::gainToDecibels (clipped.getMagnitude (0, clipped.getNumSamples()));
+        // inter-sample peak estimate: 8x upsampled
+        juce::dsp::Oversampling<float> up (2, 3, juce::dsp::Oversampling<float>::filterHalfBandFIREquiripple, true, false);
+        up.initProcessing ((size_t) clipped.getNumSamples());
+        juce::AudioBuffer<float> copy (clipped);
+        juce::dsp::AudioBlock<float> blk (copy);
+        auto u = up.processSamplesUp (blk);
+        float isp = 0.0f;
+        for (size_t i = 0; i < u.getNumSamples(); ++i) isp = std::max (isp, std::abs (u.getSample (0, (int) i)));
+        std::cout << "\nOutput clipper: +12 dB hot peak " << juce::String (hotPk, 1) << " dBFS -> " << juce::String (clipPk, 2)
+                  << " dBFS (ceiling -1.0), inter-sample peak " << juce::String (juce::Decibels::gainToDecibels (isp), 2) << " dBFS, latency "
+                  << proc.getLatencySamples() << " samples\n";
+        if (clipPk > -0.99f || hotPk < 3.0f || juce::Decibels::gainToDecibels (isp) > 0.0f) ++bad;
+        std::cout << "Output clipper checks: " << (bad == 0 ? "OK" : "FAILED") << "\n";
+        failures += bad;
+        proc.presets.loadPreset (10);
+        if (proc.apvts.getRawParameterValue (ID::clipOn)->load() > 0.5f) { ++failures; std::cout << "   preset did not reset the clipper\n"; }
+    }
+
     // ---- Every key, both engines ----
     std::cout << "\nKey   target Hz   synth Hz   909 Hz\n";
     for (int k = 0; k < 12; ++k)

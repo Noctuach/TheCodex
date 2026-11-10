@@ -48,6 +48,7 @@ namespace ID
 
     // Output
     inline const juce::String outGain { "outGain" };
+    inline const juce::String clipOn { "outClipOn" }, clipCeiling { "outClipCeil" }, clipSoft { "outClipSoft" };
     // EQ: scales the gain of all bands (Bell, shelves, tilts)
     inline const juce::String eqScale { "eqScale" };
 

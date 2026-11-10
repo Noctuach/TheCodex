@@ -39,6 +39,9 @@ namespace Help
             { "macro2", "Dirt macro: adds or removes up to 12 dB of drive on both distortion units at once. Centre = as the preset is set." },
             { "macro3", "Tail macro: shortens or lengthens the kick's body and tail (amp decay / release, 909 decay, drawn amp envelope). Centre = as the preset is set." },
             { "macro4", "Width macro: right adds stereo distortion (Spatial) and widens the reverb; left narrows towards mono. Centre = as the preset is set." },
+            { ID::clipOn,      "Output Clipper: a clean, oversampled clipper after the output level. The kick can be pushed into it for loudness; nothing passes above the ceiling. The red bar under CLIP shows how hard it is working." },
+            { ID::clipCeiling, "Clipper Ceiling: the maximum output level. -0.3 dB leaves a little headroom for conversion." },
+            { ID::clipSoft,    "Clipper Knee: 0 % = hard clip (brightest, loudest), higher = a rounder knee that starts below the ceiling (warmer)." },
             { ID::outGain,    "Output: Final output level. Watch the meter: the peak marker turns red above 0 dB." },
         };
         if (auto it = tips.find (id); it != tips.end())

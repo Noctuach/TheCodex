@@ -76,6 +76,10 @@ private:
     // Footer: macros, A/B compare, CPU
     std::array<HeaderKnob, ID::numMacros> macroKnobs { HeaderKnob ("Punch"), HeaderKnob ("Dirt"), HeaderKnob ("Tail"), HeaderKnob ("Width") };
     juce::TextButton abA { "A" }, abB { "B" }, abCopy { "COPY" };
+    juce::TextButton clipButton { "CLIP" };
+    HeaderKnob clipCeiling { "Ceiling" }, clipSoftness { "Knee" };
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> clipAttachment;
+    float clipShown = 0.0f;
     std::array<juce::ValueTree, 2> abSlots;
     int abCurrent = 0;
     void switchAB (int slot);

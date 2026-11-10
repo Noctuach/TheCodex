@@ -103,6 +103,15 @@ MainView::MainView (CodexProcessor& p, PropertiesFile* settingsFile)
     abA.setToggleState (true, dontSendNotification);
     abA.onClick = [this] { switchAB (0); };
     abB.onClick = [this] { switchAB (1); };
+    clipButton.setComponentID ("pill");
+    clipButton.setClickingTogglesState (true);
+    clipButton.setTooltip (Help::forParameter (ID::clipOn));
+    clipAttachment = std::make_unique<AudioProcessorValueTreeState::ButtonAttachment> (s, ID::clipOn, clipButton);
+    clipCeiling.attach (s, ID::clipCeiling);
+    clipSoftness.attach (s, ID::clipSoft);
+    clipCeiling.slider.setTooltip (Help::forParameter (ID::clipCeiling));
+    clipSoftness.slider.setTooltip (Help::forParameter (ID::clipSoft));
+    for (Component* c : std::initializer_list<Component*> { &clipButton, &clipCeiling, &clipSoftness }) addAndMakeVisible (c);
     abCopy.setComponentID ("pill");
     abCopy.setTooltip ("Copy the current slot to the other one");
     abCopy.onClick = [this] { abSlots[(size_t) (1 - abCurrent)] = proc.apvts.copyState(); };
@@ -169,7 +178,12 @@ void MainView::timerCallback()
     redoButton.setEnabled (proc.undoManager.canRedo());
     const float cpu = (float) proc.getCpuLoad();
     cpuShown += 0.1f * (cpu - cpuShown);
-    if (++footerTick % 15 == 0) repaint (footer);
+    const float clipDb = Decibels::gainToDecibels (1.0f + proc.getClipper().getAndResetClip() * 4.0f);
+    clipShown = jmax (clipDb, clipShown - 0.25f);
+    const bool clipOn = proc.apvts.getRawParameterValue (ID::clipOn)->load() > 0.5f;
+    clipCeiling.setAlpha (clipOn ? 1.0f : 0.4f);
+    clipSoftness.setAlpha (clipOn ? 1.0f : 0.4f);
+    if (++footerTick % 4 == 0) repaint (footer);
 }
 
 void MainView::showMainMenu()
@@ -354,6 +368,15 @@ void MainView::paint (Graphics& g)
         g.setFont (Fonts::label (11.5f, 0.1f));
         g.drawText ("MACROS", footer.withTrimmedTop (4).withWidth (72), Justification::centredLeft);
         auto cpuArea = footer.withTrimmedTop (4).removeFromRight (90);
+        // clip activity: a small bar under the CLIP button
+        if (clipShown > 0.05f && proc.apvts.getRawParameterValue (ID::clipOn)->load() > 0.5f)
+        {
+            auto bar = clipButton.getBounds().toFloat().withY ((float) clipButton.getBottom() + 3.0f).withHeight (3.0f);
+            g.setColour (Colours_::warn);
+            g.fillRoundedRectangle (bar.withWidth (bar.getWidth() * jlimit (0.05f, 1.0f, clipShown / 6.0f)), 1.5f);
+        }
+        g.setColour (Colours_::textDim);
+        g.setFont (Fonts::label (11.5f, 0.1f));
         g.drawText ("A / B", abA.getBounds().translated (-48, 0).withWidth (44), Justification::centredRight);
         g.setFont (Fonts::medium (12.0f));
         g.setColour (cpuShown > 0.7f ? Colours_::warn : Colours_::textDim);
@@ -457,10 +480,15 @@ void MainView::resized()
         f.removeFromLeft (78);   // "MACROS" caption
         for (auto& k : macroKnobs)
         {
-            k.setBounds (f.removeFromLeft (124).withHeight (36));
-            f.removeFromLeft (6);
+            k.setBounds (f.removeFromLeft (116).withHeight (36));
+            f.removeFromLeft (4);
         }
-        auto right = f.removeFromRight (360);
+        f.removeFromLeft (14);
+        clipButton.setBounds (f.removeFromLeft (52).withSizeKeepingCentre (52, 24));
+        f.removeFromLeft (8);
+        clipCeiling.setBounds (f.removeFromLeft (108).withHeight (36));
+        clipSoftness.setBounds (f.removeFromLeft (96).withHeight (36));
+        auto right = f.removeFromRight (290);
         right.removeFromRight (96);   // CPU readout
         abCopy.setBounds (right.removeFromRight (64).withSizeKeepingCentre (64, 24));
         right.removeFromRight (8);

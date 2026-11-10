@@ -306,6 +306,9 @@ AudioProcessorValueTreeState::ParameterLayout Params::createLayout()
 
     // ---------------- Output ----------------
     addFloat (l, ID::outGain, "Output", { -24.0f, 12.0f, 0.01f }, -3.0f, dbText);
+    addBool (l, ID::clipOn, "Output Clipper On", false);
+    addFloat (l, ID::clipCeiling, "Output Clipper Ceiling", { -12.0f, 0.0f, 0.01f }, -0.3f, dbText);
+    addFloat (l, ID::clipSoft, "Output Clipper Softness", { 0.0f, 1.0f }, 0.3f, pctText);
 
     return l;
 }

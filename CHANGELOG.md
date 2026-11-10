@@ -4,6 +4,8 @@ All notable changes to Codex. Versions follow [Semantic Versioning](https://semv
 
 ## [Unreleased]
 ### Added
+- **Output clipper** (footer): 4x oversampled, adjustable knee, hard ceiling (a +12 dB hot kick comes out at exactly
+  the ceiling; inter-sample peaks stay within 0.5 dB of it). Off by default.
 - **Preset browser**: search, style categories (Hardstyle, Rawstyle, Euphoric, Early Hardstyle, Hardcore, Tok, FX),
   favourites (stored in your settings), click to audition, double-click / Enter to load. Opens from the grid button
   next to the preset name or the menu.
