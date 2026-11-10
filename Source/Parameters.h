@@ -48,6 +48,9 @@ namespace ID
 
     // Output
     inline const juce::String outGain { "outGain" };
+    // Clean sub layer and velocity
+    inline const juce::String subOn { "subOn" }, subLevel { "subLevel" }, subLowPass { "subLP" }, subFade { "subFade" }, subPhase { "subPhase" };
+    inline const juce::String velocity { "velAmount" };
     inline const juce::String clipOn { "outClipOn" }, clipCeiling { "outClipCeil" }, clipSoft { "outClipSoft" };
     // EQ: scales the gain of all bands (Bell, shelves, tilts)
     inline const juce::String eqScale { "eqScale" };

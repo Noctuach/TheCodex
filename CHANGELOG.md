@@ -4,6 +4,10 @@ All notable changes to Codex. Versions follow [Semantic Versioning](https://semv
 
 ## [Unreleased]
 ### Added
+- **Sub layer** (kick page): a clean sine on the oscillator's own phase (follows the sweep), faded in after the punch,
+  low-passed and added after all effects, delayed by the chain latency so it stays aligned. **ALIGN** finds the best
+  phase automatically (on 909 Rawstyle: +9.8 dB of clean fundamental).
+- **Velocity** sensitivity.
 - **Drag kick to DAW** (footer): drag the button onto a track to drop the current kick as a 24-bit WAV in the selected
   key (named e.g. "Codex - Screech Rawstyle - G#1.wav"), or click it to save the file. Rendered offline with a copy of
   the plugin; the tail is trimmed automatically.

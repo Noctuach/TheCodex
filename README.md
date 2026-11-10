@@ -87,6 +87,11 @@ click to audition, double-click or Enter to load.
 (no phase shift, the waveform keeps its shape; latency depends on the *Resolution*: Low, Medium, High, Very High, Maximum).
 The latency is reported to the host.
 
+**Sub layer** (right of the EQ): a clean sine under the kick that follows the oscillator's phase and sweep, fades in
+after the punch (*Fade-In*), is low-passed (*Low-Pass*) and is added after every effect, so the low end stays clean
+however hard the kick is distorted. Distortion and filters shift the fundamental's phase, so press **ALIGN**: Codex
+renders the kick at 24 phases and picks the fullest one. *Velocity* sets how much MIDI velocity changes the level.
+
 **EQ mouse controls:** drag a node for frequency/gain (Shift: fine, Ctrl/Cmd + vertical drag: Q) · mouse wheel: Q, or slope on
 cut filters (Ctrl/Cmd + wheel: gain) · Alt-click or double-click a node: on/off · double-click empty space: new band (far left = low
 cut, far right = high cut, bottom = notch, elsewhere = bell) · right-click a node: shape, slope, stereo placement, split, reset, delete · Delete / Backspace: delete the selected band ·

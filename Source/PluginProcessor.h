@@ -124,7 +124,15 @@ private:
     juce::AudioProcessLoadMeasurer loadMeasurer;
     OutputClipper clipper;
     std::atomic<float> *clipOnParam = nullptr, *clipCeilParam = nullptr, *clipSoftParam = nullptr;
-    std::vector<float> left, right, mid;
+    std::vector<float> left, right, mid, sub;
+    // Clean sub layer: delayed by the effect chain's latency so it stays phase-aligned with the kick
+    std::vector<float> subDelay;
+    int subDelayPos = 0;
+    space::OnePole subLp1, subLp2;
+    juce::SmoothedValue<float> subGain, velGain;
+    std::atomic<float> *subOnParam = nullptr, *subLevelParam = nullptr, *subLpParam = nullptr, *subFadeParam = nullptr,
+                       *subPhaseParam = nullptr, *velocityParam = nullptr;
+    int chainLatency() const;
     juce::SmoothedValue<float> outGain;
 
     std::atomic<bool> previewOn { false }, previewOff { false };

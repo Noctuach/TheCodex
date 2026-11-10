@@ -74,6 +74,58 @@ struct KickExporter
         return file;
     }
 
+    /**
+        Finds the sub layer phase that gives the fullest low end: renders the kick offline at 24 phases
+        (15 degree steps) and measures the energy below 100 Hz in the tail. Returns the best phase in degrees.
+    */
+    static float findBestSubPhase (CodexProcessor& source)
+    {
+        juce::MemoryBlock state;
+        source.getStateInformation (state);
+        const double rate = 48000.0;
+        constexpr int block = 512;
+        CodexProcessor offline;
+        offline.setStateInformation (state.getData(), (int) state.getSize());
+        offline.setPlayConfigDetails (0, 2, rate, block);
+        offline.setNonRealtime (true);
+        auto* phaseParam = offline.apvts.getParameter (ID::subPhase);
+        if (auto* on = offline.apvts.getParameter (ID::subOn)) on->setValueNotifyingHost (1.0f);
+
+        // 4th-order low-pass at 100 Hz for the measurement
+        eq::BandSettings lp; lp.on = true; lp.type = eq::BandType::HighCut; lp.freq = 100.0f; lp.slope = 3;
+        const auto design = eq::design (lp, rate);
+
+        float bestPhase = 0.0f;
+        double bestEnergy = -1.0;
+        juce::AudioBuffer<float> buf (2, block);
+        for (int step = 0; step < 24; ++step)
+        {
+            const float deg = (float) step * 15.0f;
+            phaseParam->setValueNotifyingHost (phaseParam->convertTo0to1 (deg));
+            offline.prepareToPlay (rate, block);
+            std::vector<eq::Biquad> filters ((size_t) design.numStages);
+            for (int k = 0; k < design.numStages; ++k) filters[(size_t) k].c = design.stages[(size_t) k];
+            double energy = 0.0;
+            const int total = (int) (0.4 * rate), from = (int) (0.08 * rate);
+            for (int pos = 0; pos < total; pos += block)
+            {
+                juce::MidiBuffer midi;
+                if (pos == 0) midi.addEvent (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 127), 0);
+                buf.clear();
+                offline.processBlock (buf, midi);
+                for (int i = 0; i < block; ++i)
+                {
+                    float v = 0.5f * (buf.getSample (0, i) + buf.getSample (1, i));
+                    for (auto& f : filters) v = f.process (v);
+                    if (pos + i >= from) energy += (double) v * v;
+                }
+            }
+            if (energy > bestEnergy) { bestEnergy = energy; bestPhase = deg; }
+        }
+        offline.releaseResources();
+        return bestPhase;
+    }
+
     /** "Codex - <preset> - <key>.wav" in a temp folder, for dragging into a DAW. */
     static juce::File defaultFile (CodexProcessor& p)
     {

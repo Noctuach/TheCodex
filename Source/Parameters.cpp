@@ -306,6 +306,12 @@ AudioProcessorValueTreeState::ParameterLayout Params::createLayout()
 
     // ---------------- Output ----------------
     addFloat (l, ID::outGain, "Output", { -24.0f, 12.0f, 0.01f }, -3.0f, dbText);
+    addBool (l, ID::subOn, "Sub Layer On", false);
+    addFloat (l, ID::subLevel, "Sub Layer Level", { -36.0f, 6.0f, 0.01f }, -6.0f, dbText);
+    addFloat (l, ID::subLowPass, "Sub Layer Low-Pass", skewed (30.0f, 300.0f, 100.0f), 110.0f, hzText);
+    addFloat (l, ID::subFade, "Sub Layer Fade-In", skewed (0.0f, 400.0f, 60.0f), 60.0f, msText);
+    addFloat (l, ID::subPhase, "Sub Layer Phase", { 0.0f, 360.0f, 1.0f }, 0.0f, [] (float v) { return String (roundToInt (v)) + String (CharPointer_UTF8 ("\xc2\xb0")); });
+    addFloat (l, ID::velocity, "Velocity Sensitivity", { 0.0f, 1.0f }, 0.0f, pctText);
     addBool (l, ID::clipOn, "Output Clipper On", false);
     addFloat (l, ID::clipCeiling, "Output Clipper Ceiling", { -12.0f, 0.0f, 0.01f }, -0.3f, dbText);
     addFloat (l, ID::clipSoft, "Output Clipper Softness", { 0.0f, 1.0f }, 0.3f, pctText);

@@ -19,6 +19,8 @@ CodexProcessor::CodexProcessor()
     aRelease = p (ID::aRelease); aCurve = p (ID::aCurve);
 
     outGainParam = p (ID::outGain);
+    subOnParam = p (ID::subOn); subLevelParam = p (ID::subLevel); subLpParam = p (ID::subLowPass);
+    subFadeParam = p (ID::subFade); subPhaseParam = p (ID::subPhase); velocityParam = p (ID::velocity);
     clipOnParam = p (ID::clipOn); clipCeilParam = p (ID::clipCeiling); clipSoftParam = p (ID::clipSoft);
     eqScaleParam = p (ID::eqScale);
 
@@ -97,7 +99,13 @@ bool CodexProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
 void CodexProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     loadMeasurer.reset (sampleRate, juce::jmax (1, samplesPerBlock));
-    for (auto* v : { &left, &right, &mid })
+    subDelay.assign ((size_t) (sampleRate * 0.25) + 1, 0.0f);   // up to 250 ms of chain latency
+    subDelayPos = 0;
+    subLp1.reset(); subLp2.reset();
+    subGain.reset (sampleRate, 0.02);
+    velGain.reset (sampleRate, 0.003);
+    velGain.setCurrentAndTargetValue (1.0f);
+    for (auto* v : { &left, &right, &mid, &sub })
         v->assign ((size_t) chunkSize, 0.0f);
     scopePos = -1;
 
@@ -116,6 +124,12 @@ void CodexProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     outGain.setCurrentAndTargetValue (juce::Decibels::decibelsToGain (outGainParam->load()));
 
     updateLatency();
+}
+
+int CodexProcessor::chainLatency() const
+{
+    return juce::roundToInt (clip1.getLatencyInSamples() + clip2.getLatencyInSamples() + saturator.getLatencyInSamples()
+                             + compressor.getLatencyInSamples() + equalisers[0].getLatencyInSamples() + equalisers[1].getLatencyInSamples());
 }
 
 void CodexProcessor::updateLatency()
@@ -155,6 +169,8 @@ void CodexProcessor::updateParameters()
     s.clickLevel       = juce::jlimit (0.0f, 1.0f, clickLevel->load() * (1.0f + mPunch * 2.0f));
     s.clickDecayMs     = clickDecay->load();
     s.clickToneHz      = clickTone->load();
+    s.subFadeMs        = subFadeParam->load();
+    s.subPhaseDeg      = subPhaseParam->load();
     voice.setSettings (s);
 
     voice.pitchEnv.setParameters (pAttack->load(), pDecay->load() * punchSpeed, pSustain->load(), pRelease->load(), pCurve->load());
@@ -287,6 +303,12 @@ void CodexProcessor::updateParameters()
 
     outGain.setTargetValue (juce::Decibels::decibelsToGain (outGainParam->load()));
     clipper.setParameters (clipOnParam->load() > 0.5f, clipCeilParam->load(), clipSoftParam->load());
+    subGain.setTargetValue (subOnParam->load() > 0.5f ? juce::Decibels::decibelsToGain (subLevelParam->load()) : 0.0f);
+    {
+        const double sr = getSampleRate() > 0 ? getSampleRate() : 44100.0;
+        subLp1.set (sr, subLpParam->load());
+        subLp2.set (sr, subLpParam->load());
+    }
 
     // Oversampling and the saturation stage change the latency: report it to the host
     updateLatency();
@@ -336,6 +358,8 @@ void CodexProcessor::handleMidi (const juce::MidiMessage& m, int positionInChunk
         captureArmAt = positionInChunk;
         const bool followMidi = keyMode->load() > 0.5f;
         voice.noteOn (m.getNoteNumber(), (float) (followMidi ? m.getNoteNumber() : getKeyNote()));
+        const float amount = velocityParam->load();
+        velGain.setCurrentAndTargetValue (1.0f - amount * (1.0f - m.getFloatVelocity()));   // instant: the attack must be scaled too
     }
     else if (m.isNoteOff())
         voice.noteOff (m.getNoteNumber());
@@ -378,6 +402,7 @@ void CodexProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiB
                 if (t <= pos) { handleMidi (meta.getMessage(), pos); ++midiIt; }
                 else          { next = std::min (t, n); break; }
             }
+            voice.subOut = sub.data() + pos;
             voice.render (l + pos, next - pos);
             pos = next;
         }
@@ -396,9 +421,23 @@ void CodexProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiB
         equalisers[1].process (l, r, n);   // EQ 2 (post), empty by default
         reverb.process (l, r, n);          // Space: stereo room reverb (off by default)
 
+        // Clean sub layer, low-passed and delayed by the chain latency, added in mono
+        {
+            const int delay = juce::jlimit (0, (int) subDelay.size() - 1, chainLatency());
+            const int len = (int) subDelay.size();
+            for (int i = 0; i < n; ++i)
+            {
+                subDelay[(size_t) subDelayPos] = subLp2.lp (subLp1.lp (sub[(size_t) i]));
+                const float s = subDelay[(size_t) ((subDelayPos - delay + len) % len)] * subGain.getNextValue();
+                subDelayPos = (subDelayPos + 1) % len;
+                l[i] += s;
+                r[i] += s;
+            }
+        }
+
         for (int i = 0; i < n; ++i)
         {
-            const float g = outGain.getNextValue();
+            const float g = outGain.getNextValue() * velGain.getNextValue();
             l[i] *= g;
             r[i] *= g;
         }

@@ -589,6 +589,72 @@ int main (int argc, char** argv)
         proc.prepareToPlay (sr, block);
     }
 
+    // ---- Sub layer (aligned with the chain latency) and velocity ----
+    {
+        int bad = 0;
+        auto lowBandDb = [] (const juce::AudioBuffer<float>& b, double t0, double t1)
+        {
+            // 2nd-order low-pass at 80 Hz, then RMS
+            eq::BandSettings lp; lp.on = true; lp.type = eq::BandType::HighCut; lp.freq = 80.0f; lp.slope = 3;
+            auto d = eq::design (lp, sr);
+            std::vector<eq::Biquad> st ((size_t) d.numStages);
+            for (int k = 0; k < d.numStages; ++k) st[(size_t) k].c = d.stages[(size_t) k];
+            double acc = 0; int cnt = 0;
+            for (int i = 0; i < (int) (t1 * sr); ++i)
+            {
+                double v = b.getSample (0, i);
+                for (auto& s2 : st) v = s2.process ((float) v);
+                if (i >= (int) (t0 * sr)) { acc += v * v; ++cnt; }
+            }
+            return juce::Decibels::gainToDecibels ((float) std::sqrt (acc / juce::jmax (1, cnt)), -120.0f);
+        };
+        proc.presets.loadPreset (10);   // 909 Rawstyle: hard clipping thins the fundamental
+        setParam (proc, ID::clip (1, "OS"), 3.0f);   // 8x: lots of latency to align against
+        const auto off = render (proc, 1);
+        setParam (proc, ID::subOn, 1.0f);
+        setParam (proc, ID::subLevel, -6.0f);
+        const auto on = render (proc, 1);
+        setParam (proc, ID::subPhase, 180.0f);
+        const auto inverted = render (proc, 1);
+        const float lOff = lowBandDb (off, 0.15, 0.33), lOn = lowBandDb (on, 0.15, 0.33), lInv = lowBandDb (inverted, 0.15, 0.33);
+        const float best = KickExporter::findBestSubPhase (proc);
+        setParam (proc, ID::subPhase, best);
+        const auto aligned = render (proc, 1);
+        const float lAligned = lowBandDb (aligned, 0.15, 0.33);
+        std::cout << "\nSub layer: ALIGN picked " << best << " degrees -> fundamental " << juce::String (lAligned, 1) << " dB";
+        if (lAligned < std::max (lOn, lInv) - 0.5f || lAligned < lOff + 3.0f) ++bad;
+        std::cout << "\nSub layer: fundamental (< 80 Hz) " << juce::String (lOff, 1) << " dB off, " << juce::String (lOn, 1)
+                  << " dB on, " << juce::String (lInv, 1) << " dB with 180 degrees (latency " << proc.getLatencySamples() << " samples)\n";
+        if (std::abs (lOn - lInv) < 3.0f) ++bad;   // the phase control must matter
+
+        proc.presets.loadPreset (7);
+        setParam (proc, ID::velocity, 1.0f);
+        const auto loud = render (proc, 1, 60);
+        juce::AudioBuffer<float> soft;
+        {
+            // half velocity
+            proc.prepareToPlay (sr, block);
+            juce::AudioBuffer<float> buf (2, block);
+            soft.setSize (2, (int) (0.5 * sr));
+            soft.clear();
+            for (int pos = 0; pos + block <= soft.getNumSamples(); pos += block)
+            {
+                juce::MidiBuffer midi;
+                if (pos == 0) midi.addEvent (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 64), 0);
+                buf.clear();
+                proc.processBlock (buf, midi);
+                for (int ch = 0; ch < 2; ++ch) soft.copyFrom (ch, pos, buf, ch, 0, block);
+            }
+        }
+        const float dLoud = juce::Decibels::gainToDecibels (loud.getMagnitude (0, 0, (int) (0.4 * sr)));
+        const float dSoft = juce::Decibels::gainToDecibels (soft.getMagnitude (0, 0, (int) (0.4 * sr)));
+        std::cout << "Velocity 100 %: velocity 127 peak " << juce::String (dLoud, 1) << " dBFS, velocity 64 peak " << juce::String (dSoft, 1) << " dBFS\n";
+        if (std::abs ((dLoud - dSoft) - 6.0f) > 1.0f) ++bad;
+        std::cout << "Sub / velocity checks: " << (bad == 0 ? "OK" : "FAILED") << "\n";
+        failures += bad;
+        proc.presets.loadPreset (7);
+    }
+
     // ---- Every key, both engines ----
     std::cout << "\nKey   target Hz   synth Hz   909 Hz\n";
     for (int k = 0; k < 12; ++k)

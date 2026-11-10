@@ -42,6 +42,12 @@ namespace Help
             { ID::clipOn,      "Output Clipper: a clean, oversampled clipper after the output level. The kick can be pushed into it for loudness; nothing passes above the ceiling. The red bar under CLIP shows how hard it is working." },
             { ID::clipCeiling, "Clipper Ceiling: the maximum output level. -0.3 dB leaves a little headroom for conversion." },
             { ID::clipSoft,    "Clipper Knee: 0 % = hard clip (brightest, loudest), higher = a rounder knee that starts below the ceiling (warmer)." },
+            { ID::subOn,      "Sub Layer: adds a clean sine under the kick, on the oscillator's own phase (it follows the pitch sweep) and mixed in after all effects, so the low end stays clean however hard the kick is distorted." },
+            { ID::subLevel,   "Sub Level: level of the clean sub layer." },
+            { ID::subLowPass, "Sub Low-Pass: removes the top of the sub layer so only the fundamental is added (12 dB/oct)." },
+            { ID::subFade,    "Sub Fade-In: the sub layer fades in after the punch (time from the start of the hit), so the attack stays distorted and the tail gets a clean fundamental." },
+            { ID::subPhase,   "Sub Phase: shifts the sub layer's phase. If the low end gets thinner when the sub is on, try 180 degrees or adjust until the tail is fullest." },
+            { ID::velocity,   "Velocity: how much the MIDI velocity changes the level (0 % = every hit at full level)." },
             { ID::outGain,    "Output: Final output level. Watch the meter: the peak marker turns red above 0 dB." },
         };
         if (auto it = tips.find (id); it != tips.end())

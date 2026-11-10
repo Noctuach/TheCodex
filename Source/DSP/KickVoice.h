@@ -32,7 +32,14 @@ public:
 
         int   model909 = 0;
         float tune909 = 0.5f, attack909 = 0.5f, decay909 = 0.5f;
+
+        // Clean sub layer: a sine on the oscillator's own phase (so it follows the sweep and stays aligned),
+        // faded in after the punch. Mixed in after the effects chain by the processor.
+        float subFadeMs = 60.0f, subPhaseDeg = 0.0f;
     };
+
+    /** Optional second output: the clean sub layer (same length as `out`), or nullptr. */
+    float* subOut = nullptr;
 
     CurveEnvelope pitchEnv, ampEnv;
     DrawEnvelope pitchDraw, ampDraw;
@@ -41,6 +48,7 @@ public:
     void prepare (double sr)
     {
         sampleRate = sr;
+        msPerSample = (float) (1000.0 / sr);
         pitchEnv.setSampleRate (sr);
         ampEnv.setSampleRate (sr);
         pitchDraw.setSampleRate (sr);
@@ -104,6 +112,7 @@ public:
         clickEnv = 1.0f;
         pulseEnv = 1.0f;
         env909 = fast909 = slow909 = 1.0f;
+        subTime = 0.0f;
     }
 
     void noteOff (int midiNote)
@@ -162,12 +171,13 @@ private:
     {
         for (int i = 0; i < numSamples; ++i)
         {
-            if (! isActive()) { out[i] = 0.0f; continue; }
+            if (! isActive()) { out[i] = 0.0f; if (subOut != nullptr) subOut[i] = 0.0f; continue; }
 
             // Draw mode: breakpoints shape the hit; the ADSR still provides the release (as a gate) on note-off
             const float pEnv = pitchDrawMode ? pitchDraw.next() : pitchEnv.next();
             const float aEnv = ampDrawMode ? ampDraw.next() * ampEnv.next() : ampEnv.next();
             const float osc = oscillator (phase);
+            if (subOut != nullptr) subOut[i] = subSample (aEnv);
             advancePhase (settings.tuneSemis + pEnv * settings.pitchAmountSemis);
 
             float click = 0.0f;
@@ -186,9 +196,11 @@ private:
 
         for (int i = 0; i < numSamples; ++i)
         {
-            if (! isActive()) { out[i] = 0.0f; continue; }
+            if (! isActive()) { out[i] = 0.0f; if (subOut != nullptr) subOut[i] = 0.0f; continue; }
 
             const float gate = ampEnv.next();
+            // the distorted 909 tail is sustained by clipping long after env909 has decayed: the sub follows the note gate
+            if (subOut != nullptr) subOut[i] = subSample (gate);
 
             // Shaped triangle: shape = 1 gives an exact sine, lower values keep the triangle's edge
             const float tri = triangle ((float) phase);
@@ -222,6 +234,17 @@ private:
         }
     }
 
+    /** Clean sine on the oscillator's phase, faded in (raised cosine) over subFadeMs. */
+    float subSample (float level) noexcept
+    {
+        const float fadeMs = std::max (0.1f, settings.subFadeMs);
+        const float u = std::min (1.0f, subTime / fadeMs);
+        subTime += msPerSample;
+        const float fade = 0.5f - 0.5f * std::cos (juce::MathConstants<float>::pi * u);
+        return std::sin (juce::MathConstants<float>::twoPi * (float) phase + settings.subPhaseDeg * (juce::MathConstants<float>::pi / 180.0f))
+               * level * fade;
+    }
+
     static float triangle (float p) noexcept
     {
         if (p < 0.25f) return 4.0f * p;
@@ -249,6 +272,7 @@ private:
     Kick909Model model = kick909Models()[0];
     double baseFreq = 55.0, phase = 0.0;
     int currentNote = -1;
+    float subTime = 0.0f, msPerSample = 1000.0f / 44100.0f;
 
     float clickEnv = 0.0f, clickMul = 0.99f, noiseLevel = 0.0f;
     float pulseEnv = 0.0f, pulseMul = 0.9f, pulseLevel = 0.0f;

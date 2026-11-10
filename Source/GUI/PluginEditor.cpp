@@ -117,6 +117,33 @@ MainView::MainView (CodexProcessor& p, PropertiesFile* settingsFile)
     abCopy.onClick = [this] { abSlots[(size_t) (1 - abCurrent)] = proc.apvts.copyState(); };
     addAndMakeVisible (abCopy);
 
+    subPowerAttachment = std::make_unique<AudioProcessorValueTreeState::ButtonAttachment> (s, ID::subOn, subPower);
+    subPower.setTooltip (Help::forParameter (ID::subOn));
+    subPower.onStateChange = [this] { repaint (subArea); };
+    subAlign.setComponentID ("pill");
+    subAlign.setTooltip ("Align: finds the sub phase that gives the fullest low end for the current sound (renders the kick offline at 24 phases).");
+    subAlign.onClick = [this]
+    {
+        subAlign.setButtonText ("...");
+        const float best = KickExporter::findBestSubPhase (proc);
+        if (auto* prm = proc.apvts.getParameter (ID::subPhase))
+        {
+            prm->beginChangeGesture();
+            prm->setValueNotifyingHost (prm->convertTo0to1 (best));
+            prm->endChangeGesture();
+        }
+        if (auto* on = proc.apvts.getParameter (ID::subOn)) { on->beginChangeGesture(); on->setValueNotifyingHost (1.0f); on->endChangeGesture(); }
+        subAlign.setButtonText ("ALIGN");
+    };
+    addAndMakeVisible (subAlign);
+    subLevel.attach (s, ID::subLevel);
+    subLowPass.attach (s, ID::subLowPass);
+    subFade.attach (s, ID::subFade);
+    subPhase.attach (s, ID::subPhase);
+    velocity.attach (s, ID::velocity);
+    for (Component* c : std::initializer_list<Component*> { &subPower, &subLevel, &subLowPass, &subFade, &subPhase, &velocity })
+        addAndMakeVisible (c);
+
     pitchModeSwitch.onChange = [this] (int) { updateEngineView(); };
     ampModeSwitch.onChange = [this] (int) { updateEngineView(); };
     pitchDrawEditor.levelToText = [this] (float level) { return level * proc.apvts.getRawParameterValue (ID::pAmount)->load(); };
@@ -308,6 +335,7 @@ std::vector<Component*> MainView::kickTabComponents()
              &pitchEnvDisplay, &pAmount, &pAttack, &pDecay, &pSustain, &pRelease, &pCurve,
              &ampEnvDisplay, &aAttack, &aDecay, &aSustain, &aRelease, &aCurve,
              &pitchModeSwitch, &ampModeSwitch,
+             &subPower, &subLevel, &subLowPass, &subFade, &subPhase, &subAlign, &velocity,
              &eqDisplay, &bandControls };
 }
 
@@ -367,7 +395,7 @@ void MainView::paint (Graphics& g)
         g.setColour (Colours_::textDim);
         g.setFont (Fonts::label (11.5f, 0.1f));
         g.drawText ("MACROS", footer.withTrimmedTop (4).withWidth (72), Justification::centredLeft);
-        auto cpuArea = footer.withTrimmedTop (4).removeFromRight (90);
+        auto cpuArea = footer.withTrimmedTop (4).removeFromRight (76);
         // clip activity: a small bar under the CLIP button
         if (clipShown > 0.05f && proc.apvts.getRawParameterValue (ID::clipOn)->load() > 0.5f)
         {
@@ -417,6 +445,9 @@ void MainView::paint (Graphics& g)
         drawSectionPanel (g, pitchArea, "PITCH ENVELOPE", Colours_::accent2);
         drawSectionPanel (g, ampArea, engineSwitch.getIndex() == 1 ? "AMP GATE" : "AMP ENVELOPE", Colours_::accent);
         drawSectionPanel (g, eqArea, "EQUALIZER", Colours_::accent);
+        const bool subOn = proc.apvts.getRawParameterValue (ID::subOn)->load() > 0.5f;
+        drawSectionPanel (g, subArea, "SUB LAYER", subOn ? Colours_::good : Colours_::textFaint);
+        drawGroupCaption (g, velocityCaption, "DYNAMICS");
     }
 }
 
@@ -477,22 +508,21 @@ void MainView::resized()
     r.removeFromBottom (10);
     {
         auto f = footer.withTrimmedTop (4);
-        f.removeFromLeft (78);   // "MACROS" caption
+        f.removeFromLeft (70);   // "MACROS" caption
         for (auto& k : macroKnobs)
         {
-            k.setBounds (f.removeFromLeft (116).withHeight (36));
-            f.removeFromLeft (4);
+            k.setBounds (f.removeFromLeft (104).withHeight (36));
+            f.removeFromLeft (2);
         }
-        f.removeFromLeft (14);
-        clipButton.setBounds (f.removeFromLeft (52).withSizeKeepingCentre (52, 24));
-        f.removeFromLeft (8);
-        clipCeiling.setBounds (f.removeFromLeft (108).withHeight (36));
-        clipSoftness.setBounds (f.removeFromLeft (96).withHeight (36));
-        auto right = f.removeFromRight (290);
-        f.removeFromRight (10);
-        exportButton.setBounds (f.removeFromRight (118).withSizeKeepingCentre (118, 26));
-        right.removeFromRight (96);   // CPU readout
-        abCopy.setBounds (right.removeFromRight (64).withSizeKeepingCentre (64, 24));
+        f.removeFromLeft (10);
+        clipButton.setBounds (f.removeFromLeft (48).withSizeKeepingCentre (48, 24));
+        f.removeFromLeft (6);
+        clipCeiling.setBounds (f.removeFromLeft (102).withHeight (36));
+        clipSoftness.setBounds (f.removeFromLeft (86).withHeight (36));
+        auto right = f.removeFromRight (264);
+        exportButton.setBounds (f.withSizeKeepingCentre (jmin (f.getWidth() - 8, 116), 26));
+        right.removeFromRight (78);   // CPU readout
+        abCopy.setBounds (right.removeFromRight (58).withSizeKeepingCentre (58, 24));
         right.removeFromRight (8);
         abB.setBounds (right.removeFromRight (36).withSizeKeepingCentre (36, 24));
         abA.setBounds (right.removeFromRight (36).withSizeKeepingCentre (36, 24));
@@ -538,7 +568,21 @@ void MainView::resized()
     rowA.removeFromLeft (12);
     ampArea = rowA;
     r.removeFromTop (12);
+    subArea = r.removeFromRight (206);
+    r.removeFromRight (12);
     eqArea = r;
+    {
+        subPower.setBounds (subArea.withHeight (28).removeFromRight (32).reduced (4));
+        auto c = subArea.reduced (10).withTrimmedTop (30);
+        auto velRow = c.removeFromBottom (100);
+        velocityCaption = c.removeFromBottom (18);
+        velocity.setBounds (velRow.withSizeKeepingCentre (96, velRow.getHeight()));
+        const int rowH = jmin (110, c.getHeight() / 2);
+        auto row1 = c.removeFromTop (rowH), row2 = c.removeFromTop (rowH);
+        subLevel.setBounds (row1.removeFromLeft (row1.getWidth() / 2)); subLowPass.setBounds (row1);
+        subFade.setBounds (row2.removeFromLeft (row2.getWidth() / 2)); subPhase.setBounds (row2);
+        subAlign.setBounds (subPhase.getBounds().withY (subPhase.getBottom() + 2).withHeight (22).withSizeKeepingCentre (64, 22));
+    }
 
     engineSwitch.setBounds (sourceArea.withHeight (28).removeFromRight (116).reduced (5, 4));
     {

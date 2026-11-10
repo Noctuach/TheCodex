@@ -91,6 +91,13 @@ private:
     Knob pAmount { "Amount" }, pAttack { "Attack" }, pDecay { "Decay" }, pSustain { "Sustain" }, pRelease { "Release" }, pCurve { "Curve" };
     Knob aAttack { "Attack" }, aDecay { "Decay" }, aSustain { "Sustain" }, aRelease { "Release" }, aCurve { "Curve" };
 
+    // Sub layer + velocity
+    PowerButton subPower;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> subPowerAttachment;
+    Knob subLevel { "Level" }, subLowPass { "Low-Pass" }, subFade { "Fade-In" }, subPhase { "Phase" }, velocity { "Velocity" };
+    juce::Rectangle<int> subArea, velocityCaption;
+    juce::TextButton subAlign { "ALIGN" };
+
     // EQ
     EQDisplay eqDisplay;
     BandControls bandControls;
