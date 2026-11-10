@@ -38,6 +38,37 @@ namespace Help
         if (auto it = tips.find (id); it != tips.end())
             return it->second;
 
+        // Compressor: cmpOn ... and per band c1Thr ...
+        if (id.startsWith ("cmp") || (id.length() > 2 && id[0] == 'c' && juce::CharacterFunctions::isDigit (id[1])))
+        {
+            static const std::map<juce::String, juce::String> cmp {
+                { "On",     "Compressor On/Off: multiband downward / upward compression after the Saturation stage." },
+                { "Bands",  "Bands: compress the full signal (1) or split it into 2-4 bands, each with its own settings. Drag the dividers in the band strip to move the crossovers." },
+                { "Style",  "Style: detection and timing character. Clean = transparent, Punch = analog-like, lets the transient through, Smooth / Bus = glue, Mastering = transparent with fast catch, Classic / Vari-Mu = vintage feedback designs, Opto = slow and soft, T4 Opto = LA-3A-style program-dependent release, Pumping = deep audible swell, TTM = upward + downward at once (threshold becomes a target level)." },
+                { "Look",   "Lookahead: delays the audio slightly so the compressor can react before the peak. Adds latency (reported to the host)." },
+                { "Hold",   "Hold: keeps the gain change for this long before releasing. Longer hold = pumping." },
+                { "ScHp",   "Side-Chain High-Pass: stops the lowest band from reacting to the sub. Off = full-range detection." },
+                { "Mix",    "Mix: parallel compression. Blend the uncompressed signal back in." },
+                { "Out",    "Output: level after the compressor." },
+                { "Auto",   "Auto Gain: automatic make-up gain estimated from threshold, ratio and knee, so the level stays similar while you adjust." },
+                { "Limit",  "T4 Opto Mode: Compress (about 3:1, very soft knee) or Limit (about 12:1), like the switch on an LA-3A. Only used by the T4 Opto style." },
+                { "Dir",    "Direction: Downward turns loud parts down (classic compression). Upward brings quiet parts up (the tail of the kick, room, texture). Both does both: the threshold becomes a target level." },
+                { "Thr",    "Threshold: level where compression starts. Drag the dashed line in the display." },
+                { "Ratio",  "Ratio: amount of compression. 4:1 = 4 dB in gives 1 dB out above the threshold. Infinity = limiting. Drag up/down in the knee display above the threshold." },
+                { "Knee",   "Knee: softness of the transition around the threshold (0 = hard, up to 48 dB = very soft)." },
+                { "Range",  "Range: maximum gain change in dB, in either direction. Limits how far upward compression can push quiet parts up." },
+                { "Att",    "Attack: how fast the compressor reacts. Slower attack lets more of the kick's transient through (more punch)." },
+                { "Rel",    "Release: how fast the gain recovers. Program dependent in the Clean, Smooth, Bus and Opto styles." },
+                { "Gain",   "Gain: make-up gain for this band (added to Auto Gain)." },
+                { "Mute",   "Mute: silence this band." },
+                { "Solo",   "Solo: hear only the soloed bands." },
+                { "Bypass", "Bypass: pass this band through without compression." },
+            };
+            const auto sfx = id.startsWith ("cmp") ? id.substring (3) : id.substring (2);
+            if (auto it = cmp.find (sfx); it != cmp.end())
+                return it->second;
+        }
+
         // Space (reverb): spcOn, spcDecay, ...
         if (id.startsWith ("spc"))
         {

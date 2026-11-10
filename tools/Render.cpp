@@ -263,6 +263,73 @@ int main (int argc, char** argv)
         failures += bad;
     }
 
+    // ---- Compressor: static curves (down / up / both), multiband flatness, styles, lookahead ----
+    {
+        int bad = 0;
+        auto sine = [] (float dbfs, double seconds)
+        {
+            juce::AudioBuffer<float> b (2, (int) (seconds * sr));
+            const float a = juce::Decibels::decibelsToGain (dbfs);
+            for (int i = 0; i < b.getNumSamples(); ++i)
+            { const float v = a * std::sin (juce::MathConstants<float>::twoPi * 1000.0f * (float) i / (float) sr); b.setSample (0, i, v); b.setSample (1, i, v); }
+            return b;
+        };
+        auto run = [] (comp::MultibandCompressor& c, juce::AudioBuffer<float> b)
+        {
+            for (int pos = 0; pos < b.getNumSamples(); pos += 256)
+                c.process (b.getWritePointer (0, pos), b.getWritePointer (1, pos), std::min (256, b.getNumSamples() - pos));
+            return b;
+        };
+        auto peakDb = [] (const juce::AudioBuffer<float>& b) { return juce::Decibels::gainToDecibels (b.getMagnitude (0, b.getNumSamples() - (int) (0.1 * sr), (int) (0.1 * sr))); };
+        auto make = [] (int dir, float thr, float ratio, int style = comp::Clean)
+        {
+            comp::Settings s; s.enabled = true; s.style = style; s.autoGain = false;
+            auto& b = s.bands[0]; b.direction = dir; b.thresholdDb = thr; b.ratio = ratio; b.kneeDb = 0.0f; b.rangeDb = 40.0f; b.attackMs = 1.0f; b.releaseMs = 50.0f;
+            for (auto& o : s.bands) o = b;
+            return s;
+        };
+        struct Case { const char* name; int dir; float in, thr, ratio, expect; };
+        const Case cases[] = { { "Downward 4:1, -6 dB in, -18 thr", 0, -6.0f, -18.0f, 4.0f, -15.0f },
+                               { "Upward 2:1, -40 dB in, -18 thr  ", 1, -40.0f, -18.0f, 2.0f, -29.0f },
+                               { "Both 4:1, -40 dB in, -18 thr    ", 2, -40.0f, -18.0f, 4.0f, -23.5f },
+                               { "Both 4:1, -6 dB in, -18 thr     ", 2, -6.0f, -18.0f, 4.0f, -15.0f } };
+        std::cout << "\nCompressor static curve                 expected   measured (peak dBFS)\n";
+        for (auto& c : cases)
+        {
+            comp::MultibandCompressor cp; cp.prepare (sr); cp.setSettings (make (c.dir, c.thr, c.ratio));
+            const float got = peakDb (run (cp, sine (c.in, 1.5)));
+            std::cout << "  " << c.name << "   " << juce::String (c.expect, 1).paddedLeft (' ', 7) << "   " << juce::String (got, 1).paddedLeft (' ', 7) << "\n";
+            if (std::abs (got - c.expect) > 1.0f) ++bad;
+        }
+        // 4 bands at 1:1 sum flat (crossovers + all-pass compensation)
+        {
+            comp::Settings s = make (0, -18.0f, 1.0f); s.numBands = 4;
+            float worst = 0.0f;
+            for (float f : { 60.0f, 400.0f, 2500.0f, 9000.0f })
+            {
+                comp::MultibandCompressor cp; cp.prepare (sr); cp.setSettings (s);
+                juce::AudioBuffer<float> b (2, (int) sr);
+                for (int i = 0; i < b.getNumSamples(); ++i) { const float v = 0.5f * std::sin (juce::MathConstants<float>::twoPi * f * (float) i / (float) sr); b.setSample (0, i, v); b.setSample (1, i, v); }
+                worst = std::max (worst, std::abs (peakDb (run (cp, b)) - juce::Decibels::gainToDecibels (0.5f)));
+            }
+            std::cout << "  4-band split at 1:1, max deviation " << juce::String (worst, 2) << " dB\n";
+            if (worst > 0.5f) ++bad;
+        }
+        // every style on a kick: finite, and actually reduces the peak (downward)
+        for (int st = 0; st < comp::numStyles; ++st)
+        {
+            comp::MultibandCompressor cp; cp.prepare (sr);
+            auto s = make (0, -24.0f, 6.0f, st); s.numBands = 3; s.lookahead = 2;
+            cp.setSettings (s);
+            auto b = run (cp, sine (-3.0f, 1.0));
+            const float pk = b.getMagnitude (0, b.getNumSamples());
+            if (! std::isfinite (pk) || pk > 2.0f || peakDb (b) > -6.0f) { ++bad; std::cout << "   style " << comp::styleNames()[st] << " peak " << peakDb (b) << "\n"; }
+            if (cp.getLatencyInSamples() != (int) std::round (0.002 * sr)) ++bad;
+        }
+        std::cout << "Compressor checks: " << (bad == 0 ? "OK" : "FAILED") << "\n";
+        failures += bad;
+    }
+
     // ---- Every key, both engines ----
     std::cout << "\nKey   target Hz   synth Hz   909 Hz\n";
     for (int k = 0; k < 12; ++k)
@@ -582,13 +649,16 @@ int main (int argc, char** argv)
         auto stereoAudio = render (proc, 1);
         snapshot (proc, stereoAudio, outDir.getChildFile ("ui_stereo_eq.png"), 0);
         snapshot (proc, stereoAudio, outDir.getChildFile ("ui_saturation.png"), 2);
-        snapshot (proc, stereoAudio, outDir.getChildFile ("ui_scope.png"), 4);
+        snapshot (proc, stereoAudio, outDir.getChildFile ("ui_scope.png"), 5);
         writeWav (stereoAudio, outDir.getChildFile ("stereo_demo.wav"));
         proc.presets.loadPreset (10);
     }
     proc.presets.loadPreset (8);
+    setParam (proc, ID::cmp ("On"), 1.0f); setParam (proc, ID::cmp ("Bands"), 3.0f);
+    snapshot (proc, render (proc, 3), outDir.getChildFile ("ui_compressor.png"), 3);
+    proc.presets.loadPreset (8);
     setParam (proc, ID::spc ("On"), 1.0f);
-    snapshot (proc, render (proc, 1), outDir.getChildFile ("ui_space.png"), 3);
+    snapshot (proc, render (proc, 1), outDir.getChildFile ("ui_space.png"), 4);
     setParam (proc, ID::spc ("On"), 0.0f);
     snapshot (proc, render (proc, 1), outDir.getChildFile ("ui_about.png"), 0, 1);
     snapshot (proc, render (proc, 1), outDir.getChildFile ("ui_save.png"), 0, 2);

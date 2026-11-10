@@ -4,6 +4,7 @@
 #include "DSP/Kick909.h"
 #include "DSP/MultibandSaturator.h"
 #include "DSP/SpaceReverb.h"
+#include "DSP/Compressor.h"
 
 using namespace juce;
 
@@ -178,6 +179,41 @@ AudioProcessorValueTreeState::ParameterLayout Params::createLayout()
         addBool (l, ID::satBand (b, "Mute"), n + "Mute", false);
         addBool (l, ID::satBand (b, "Solo"), n + "Solo", false);
         addBool (l, ID::satBand (b, "Bypass"), n + "Bypass", false);
+    }
+
+    // ---------------- Compressor (Pro-C 3 / LA-3A inspired, multiband, up/down) ----------------
+    {
+        addBool (l, ID::cmp ("On"), "Compressor On", false);
+        l.add (std::make_unique<AudioParameterInt> (ParameterID { ID::cmp ("Bands"), 1 }, "Compressor Bands", 1, comp::maxBands, 1));
+        addChoice (l, ID::cmp ("Style"), "Compressor Style", comp::styleNames(), comp::Punch);
+        addChoice (l, ID::cmp ("Look"), "Compressor Lookahead", comp::lookaheadNames(), 0);
+        addFloat (l, ID::cmp ("Hold"), "Compressor Hold", skewed (0.0f, 500.0f, 50.0f), 0.0f, msText);
+        addFloat (l, ID::cmp ("ScHp"), "Compressor Side Chain High-Pass", skewed (20.0f, 500.0f, 100.0f), 20.0f,
+                  [] (float v) { return v <= 20.5f ? String ("Off") : String (v, 0) + " Hz"; });
+        addFloat (l, ID::cmp ("Mix"), "Compressor Mix", { 0.0f, 1.0f }, 1.0f, pctText);
+        addFloat (l, ID::cmp ("Out"), "Compressor Output", { -24.0f, 24.0f, 0.01f }, 0.0f, dbText);
+        addBool (l, ID::cmp ("Auto"), "Compressor Auto Gain", true);
+        addChoice (l, ID::cmp ("Limit"), "Compressor T4 Mode", { "Compress", "Limit" }, 0);
+        const float defX[] = { 120.0f, 1000.0f, 6000.0f };
+        for (int j = 0; j < comp::maxBands - 1; ++j)
+            addFloat (l, ID::cmp (("X" + String (j + 1)).toRawUTF8()), "Compressor Crossover " + String (j + 1),
+                      skewed (20.0f, 20000.0f, 640.0f), defX[j], hzText);
+        auto ratioText = [] (float v) { return v >= 99.5f ? String (CharPointer_UTF8 ("\xe2\x88\x9e : 1")) : String (v, v < 10.0f ? 1 : 0) + " : 1"; };
+        for (int b = 0; b < comp::maxBands; ++b)
+        {
+            const String n = "Compressor Band " + String (b + 1) + " ";
+            addChoice (l, ID::cmpBand (b, "Dir"), n + "Direction", comp::directionNames(), 0);
+            addFloat (l, ID::cmpBand (b, "Thr"), n + "Threshold", { -60.0f, 0.0f, 0.01f }, -18.0f, dbText);
+            addFloat (l, ID::cmpBand (b, "Ratio"), n + "Ratio", skewed (1.0f, 100.0f, 4.0f), 4.0f, ratioText);
+            addFloat (l, ID::cmpBand (b, "Knee"), n + "Knee", { 0.0f, 48.0f, 0.01f }, 6.0f, dbText);
+            addFloat (l, ID::cmpBand (b, "Range"), n + "Range", { 0.0f, 60.0f, 0.01f }, 30.0f, dbText);
+            addFloat (l, ID::cmpBand (b, "Att"), n + "Attack", skewed (0.01f, 250.0f, 10.0f), 5.0f, msText);
+            addFloat (l, ID::cmpBand (b, "Rel"), n + "Release", skewed (5.0f, 2500.0f, 150.0f), 120.0f, msText);
+            addFloat (l, ID::cmpBand (b, "Gain"), n + "Gain", { -24.0f, 24.0f, 0.01f }, 0.0f, dbText);
+            addBool (l, ID::cmpBand (b, "Mute"), n + "Mute", false);
+            addBool (l, ID::cmpBand (b, "Solo"), n + "Solo", false);
+            addBool (l, ID::cmpBand (b, "Bypass"), n + "Bypass", false);
+        }
     }
 
     // ---------------- Space (reverb, ValhallaRoom-style controls) ----------------

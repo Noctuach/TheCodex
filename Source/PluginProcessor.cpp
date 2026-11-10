@@ -38,6 +38,13 @@ CodexProcessor::CodexProcessor()
                               "LSize", "LCross", "LDiff", "LModRate", "LModDepth", "BassMult", "BassX", "HighMult", "HighX" };
         for (int i = 0; i < 25; ++i) spcParams[i] = p (ID::spc (spc[i]));
     }
+    {
+        const char* g[] = { "On", "Bands", "Style", "Look", "Hold", "ScHp", "Mix", "Out", "Auto", "Limit", "X1", "X2", "X3" };
+        for (int i = 0; i < 13; ++i) cmpGlobal[i] = p (ID::cmp (g[i]));
+        const char* bp[] = { "Dir", "Thr", "Ratio", "Knee", "Range", "Att", "Rel", "Gain", "Mute", "Solo", "Bypass" };
+        for (int b = 0; b < comp::maxBands; ++b)
+            for (int i = 0; i < 11; ++i) cmpBandParams[b][i] = p (ID::cmpBand (b, bp[i]));
+    }
     satOn = p (ID::sat ("On")); satBands = p (ID::sat ("Bands")); satSlope = p (ID::sat ("Slope"));
     satOs = p (ID::sat ("OS")); satMix = p (ID::sat ("Mix")); satOut = p (ID::sat ("Out"));
     satIn = p (ID::sat ("In")); satMode = p (ID::sat ("Mode"));
@@ -73,6 +80,7 @@ void CodexProcessor::prepareToPlay (double sampleRate, int)
     equaliser.prepare (sampleRate);
     saturator.prepare (sampleRate, chunkSize);
     reverb.prepare (sampleRate);
+    compressor.prepare (sampleRate);
     updateParameters();
 
     outGain.reset (sampleRate, 0.02);
@@ -84,7 +92,7 @@ void CodexProcessor::prepareToPlay (double sampleRate, int)
 void CodexProcessor::updateLatency()
 {
     const int latency = juce::roundToInt (clip1.getLatencyInSamples() + clip2.getLatencyInSamples()
-                                          + saturator.getLatencyInSamples());
+                                          + saturator.getLatencyInSamples() + compressor.getLatencyInSamples());
     if (latency != getLatencySamples())
         setLatencySamples (latency);
 }
@@ -200,6 +208,21 @@ void CodexProcessor::updateParameters()
         rs.bassMult = v (21); rs.bassXover = v (22); rs.highMult = v (23); rs.highXover = v (24);
         reverb.setSettings (rs);
     }
+    {
+        auto g = [this] (int i) { return cmpGlobal[i]->load(); };
+        comp::Settings cs;
+        cs.enabled = g (0) > 0.5f; cs.numBands = (int) g (1); cs.style = (int) g (2); cs.lookahead = (int) g (3);
+        cs.holdMs = g (4); cs.scHighPass = g (5); cs.mix = g (6); cs.outDb = g (7); cs.autoGain = g (8) > 0.5f; cs.limit = g (9) > 0.5f;
+        for (int j = 0; j < comp::maxBands - 1; ++j) cs.crossovers[(size_t) j] = g (10 + j);
+        for (int b = 0; b < comp::maxBands; ++b)
+        {
+            auto v = [this, b] (int i) { return cmpBandParams[b][i]->load(); };
+            auto& bs = cs.bands[(size_t) b];
+            bs.direction = (int) v (0); bs.thresholdDb = v (1); bs.ratio = v (2); bs.kneeDb = v (3); bs.rangeDb = v (4);
+            bs.attackMs = v (5); bs.releaseMs = v (6); bs.gainDb = v (7); bs.mute = v (8) > 0.5f; bs.solo = v (9) > 0.5f; bs.bypass = v (10) > 0.5f;
+        }
+        compressor.setSettings (cs);
+    }
 
     outGain.setTargetValue (juce::Decibels::decibelsToGain (outGainParam->load()));
 
@@ -297,13 +320,14 @@ void CodexProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiB
         }
         std::copy (l, l + n, r);
 
-        // Old-school chain: distort -> EQ -> distort again -> multiband saturation -> space (stereo from here on)
+        // Old-school chain: distort -> EQ -> distort again -> multiband saturation -> compressor -> space (stereo from here on)
         clip1.process (l, r, n);
         for (int i = 0; i < n; ++i) m[i] = 0.5f * (l[i] + r[i]);
         analyzerPre.push (m, n);           // spectrum before the EQ (for the EQ display)
         equaliser.process (l, r, n);
         clip2.process (l, r, n);
         saturator.process (l, r, n);
+        compressor.process (l, r, n);      // multiband up / down compression (off by default)
         reverb.process (l, r, n);          // Space: stereo room reverb (off by default)
 
         for (int i = 0; i < n; ++i)

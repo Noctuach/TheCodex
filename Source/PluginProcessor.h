@@ -6,6 +6,7 @@
 #include "DSP/ParametricEQ.h"
 #include "DSP/MultibandSaturator.h"
 #include "DSP/SpaceReverb.h"
+#include "DSP/Compressor.h"
 #include "PresetManager.h"
 
 /** Lock-free single-producer/single-consumer sample FIFO feeding the spectrum analyzer. */
@@ -73,6 +74,7 @@ public:
     ClipDistortion& getClip (int stage) { return stage == 1 ? clip1 : clip2; }
     sat::MultibandSaturator& getSaturator() { return saturator; }
     space::SpaceReverb& getReverb() { return reverb; }
+    comp::MultibandCompressor& getCompressor() { return compressor; }
 
     /** Output peak since last read, per channel (0 = left, 1 = right). */
     float getAndResetPeak (int channel) { return peaks[(size_t) channel].exchange (0.0f); }
@@ -113,6 +115,7 @@ private:
     eq::ParametricEQ<Params::numBands> equaliser;
     sat::MultibandSaturator saturator;
     space::SpaceReverb reverb;
+    comp::MultibandCompressor compressor;
     std::vector<float> left, right, mid;
     juce::SmoothedValue<float> outGain;
 
@@ -135,6 +138,8 @@ private:
     ClipParams clipParams[2];
     BandParams bandParams[Params::numBands];
     std::atomic<float>* spcParams[25] {};
+    std::atomic<float>* cmpGlobal[13] {};
+    std::atomic<float>* cmpBandParams[comp::maxBands][11] {};
     std::atomic<float> *satOn, *satBands, *satSlope, *satOs, *satMix, *satOut, *satIn, *satMode;
     std::array<std::atomic<float>*, sat::maxBands - 1> satX {};
     SatBandParams satBandParams[sat::maxBands];
