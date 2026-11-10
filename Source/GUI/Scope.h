@@ -1,3 +1,4 @@
+// DEPRECATED: replaced by ScopeView.h and no longer part of the build. Kept because this repository does not delete files.
 #pragma once
 #include "Widgets.h"
 #include "../PluginProcessor.h"
