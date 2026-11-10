@@ -4,9 +4,10 @@
 #include "Widgets.h"
 #include "EQDisplay.h"
 #include "Tuner.h"
-#include "Scope.h"
 #include "PresetBar.h"
 #include "DistortionView.h"
+#include "ScopeView.h"
+#include "SaturationView.h"
 #include "Overlays.h"
 
 class CodexProcessor;
@@ -22,7 +23,7 @@ public:
     void paint (juce::Graphics&) override;
     void resized() override;
 
-    void showTab (int tab);   // 0 = KICK, 1 = DISTORTION
+    void showTab (int tab);   // 0 = KICK, 1 = DISTORTION, 2 = SATURATION, 3 = SCOPE
     void openAbout() { aboutOverlay.open(); }
     void openSaveDialog() { presetBar.onSaveRequested(); }
     std::function<void (float)> onScaleRequested;
@@ -34,30 +35,25 @@ private:
     void setTooltipsEnabled (bool);
     std::vector<juce::Component*> kickTabComponents();
 
-    struct QuickDistortion
-    {
-        PowerButton on;
-        juce::TextButton edit { "EDIT" };
-        ChoiceBox mode { "Type" };
-        Knob drive { "Drive" }, character { "Character" }, mix { "Mix" };
-        std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> onAttachment;
-    };
-
     CodexProcessor& proc;
     juce::PropertiesFile* settings;
     std::unique_ptr<juce::TooltipWindow> tooltipWindow;
 
     int currentTab = 0;
-    juce::Rectangle<int> header, logoArea, presetArea, tabBar, sourceArea, pitchArea, ampArea, eqArea,
-                         quickAreas[2], outArea;
+    juce::Rectangle<int> header, logoArea, presetArea, tabBar, breadcrumbArea, sourceArea, pitchArea, ampArea, eqArea;
     std::array<juce::Rectangle<int>, 6> sourceCells;
 
     // Header
     IconButton undoButton { "undo", Icons::undo() }, redoButton { "redo", Icons::redo() }, menuButton { "menu", Icons::menu() };
     PresetBar presetBar;
     ChoiceBox keyBox { "Key" }, octaveBox { "Oct" }, keyModeBox { "Key Mode" };
-    TriggerButton kickButton { "KICK" };
-    juce::TextButton kickTabButton { "KICK" }, distTabButton { "DISTORTION" };
+    PressButton previewButton { "preview", Icons::play() };
+    HeaderKnob outGain { "Output" };
+    LevelMeter meterL, meterR;
+    std::array<juce::TextButton, 4> tabButtons { juce::TextButton ("KICK"), juce::TextButton ("DISTORTION"),
+                                                 juce::TextButton ("SATURATION"), juce::TextButton ("SCOPE") };
+    TunerAnalyser tunerAnalyser;
+    TunerChip tunerChip;
 
     // Source
     SegmentedChoice engineSwitch;
@@ -74,15 +70,10 @@ private:
     EQDisplay eqDisplay;
     BandControls bandControls;
 
-    // Distortion
-    QuickDistortion quick[2];
+    // Distortion, saturation, scope
     DistortionUnit unit1, unit2;
-
-    // Output
-    KickScope scope;
-    TunerDisplay tuner;
-    Knob outGain { "Output" };
-    LevelMeter meter;
+    ScopePage scopePage;
+    SaturationPage saturationPage;
 
     /** Shown over the pitch-envelope panel while the 909 engine is active. */
     struct EngineNotice : public juce::Component

@@ -57,6 +57,7 @@ namespace Help
                 { "Out",    "Output: Level after this distortion stage. Use it to control how hard the next stage is driven." },
                 { "DC",     "DC Filter: Removes DC offset caused by asymmetric curves and Offset." },
                 { "OS",     "Oversampling: Reduces aliasing (harsh, non-musical overtones) at the cost of CPU. 4x is a good default." },
+                { "Spatial", "Spatial: Distorts the left and right channels slightly differently (drive and operating point), creating stereo width from the mono kick. Use the EQ's Side placement to shape it." },
             };
             if (auto it = dist.find (sfx); it != dist.end())
                 return it->second;
@@ -73,8 +74,40 @@ namespace Help
                 { "Gain",  "Gain: Boost or cut. Drag the node on the display vertically." },
                 { "Q",     "Q: Width of the band (higher = narrower). Use the mouse wheel over a node." },
                 { "Slope", "Slope: Steepness of Low Cut / High Cut filters." },
+                { "Place", "Stereo Placement: which part of the stereo signal this band affects: Stereo (both channels), Left, Right, Mid (L+R, the centre) or Side (L-R, the width). Tip: a Side low cut keeps the low end mono." },
             };
             if (auto it = band.find (sfx); it != band.end())
+                return it->second;
+        }
+        // Saturation: global "satOn" ... and per band "s1Drive" ...
+        static const std::map<juce::String, juce::String> satTips {
+            { "satOn",    "Saturation On/Off: multiband saturation after Distortion 2." },
+            { "satBands", "Bands: number of frequency bands, each with its own saturation." },
+            { "satSlope", "Crossover Slope: how steeply the bands are separated. Steeper = more independent bands; 6 dB/oct blends most smoothly." },
+            { "satOS",    "Oversampling: reduces aliasing from the saturation at the cost of CPU." },
+            { "satMix",   "Mix: blend between the signal before and after the saturation stage." },
+            { "satOut",   "Output: level after the saturation stage." },
+        };
+        if (auto it = satTips.find (id); it != satTips.end())
+            return it->second;
+        if (id.startsWith ("satX"))
+            return "Crossover: split frequency between two bands. Drag the line on the display.";
+        if (id.length() > 2 && id[0] == 's' && juce::CharacterFunctions::isDigit (id[1]))
+        {
+            static const std::map<juce::String, juce::String> satBand {
+                { "Style",  "Style: saturation character of this band: tube, tape, transformer, amp, clipping or effects." },
+                { "Drive",  "Drive: how hard this band is pushed into the saturation." },
+                { "Mix",    "Mix: blend between the clean and the saturated band." },
+                { "Fb",     "Feedback: feeds the saturated output back into the input around the Feedback Freq, adding resonance and grit." },
+                { "FbFreq", "Feedback Freq: centre frequency of the feedback path." },
+                { "Dyn",    "Dynamics: positive values saturate loud parts more (punchier); negative values saturate them less (smoother)." },
+                { "Tone",   "Tone: tilts this band darker (negative) or brighter (positive) after the saturation." },
+                { "Level",  "Level: output level of this band." },
+                { "Mute",   "Mute: silences this band." },
+                { "Solo",   "Solo: hear only the soloed bands." },
+                { "Bypass", "Bypass: passes this band through clean." },
+            };
+            if (auto it = satBand.find (id.substring (2)); it != satBand.end())
                 return it->second;
         }
         return {};

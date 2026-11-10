@@ -117,6 +117,7 @@ public:
         boost.attach (s, ID::clip (stage, "Boost"));
         character.attach (s, ID::clip (stage, "Char"));
         offset.attach (s, ID::clip (stage, "Bias"));
+        spatial.attach (s, ID::clip (stage, "Spatial"));
         loFilter.attach (s, ID::clip (stage, "LoFilt"));
         hiFilter.attach (s, ID::clip (stage, "HiFilt"));
         shelfFreq.attach (s, ID::clip (stage, "ShelfF"));
@@ -128,7 +129,7 @@ public:
         drive.label.setColour (juce::Label::textColourId, Colours_::accent);
 
         for (juce::Component* c : std::initializer_list<juce::Component*> {
-                 &power, &dcButton, &type, &oversampling, &transfer, &drive, &boost, &character, &offset,
+                 &power, &dcButton, &type, &oversampling, &transfer, &drive, &boost, &character, &offset, &spatial,
                  &loFilter, &hiFilter, &shelfFreq, &shelfGain, &mix, &output, &inMeter, &outMeter })
             addAndMakeVisible (c);
 
@@ -188,10 +189,11 @@ public:
         shapeCaption = middle.removeFromBottom (16);
         middle.removeFromBottom (6);
         drive.setBounds (middle.withSizeKeepingCentre (juce::jmin (middle.getWidth(), middle.getHeight() + 20), middle.getHeight()));
-        const int w3 = shapeRow.getWidth() / 3;
-        boost.setBounds (shapeRow.removeFromLeft (w3));
-        character.setBounds (shapeRow.removeFromLeft (w3));
-        offset.setBounds (shapeRow);
+        const int w4 = shapeRow.getWidth() / 4;
+        boost.setBounds (shapeRow.removeFromLeft (w4));
+        character.setBounds (shapeRow.removeFromLeft (w4));
+        offset.setBounds (shapeRow.removeFromLeft (w4));
+        spatial.setBounds (shapeRow);
     }
 
 private:
@@ -212,7 +214,7 @@ private:
     juce::TextButton dcButton { "DC FILTER" };
     ChoiceBox type { "Type" }, oversampling { "Oversampling" };
     TransferDisplay transfer;
-    Knob drive { "Drive" }, boost { "Boost" }, character { "Characteristic" }, offset { "Offset" };
+    Knob drive { "Drive" }, boost { "Boost" }, character { "Character" }, offset { "Offset" }, spatial { "Spatial" };
     Knob loFilter { "Lo Filter" }, hiFilter { "Hi Filter" }, shelfFreq { "Shelf Freq" }, shelfGain { "Shelf Gain" };
     Knob mix { "Mix" }, output { "Output" };
     LevelMeter inMeter, outMeter;

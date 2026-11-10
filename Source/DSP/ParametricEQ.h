@@ -10,16 +10,20 @@ namespace eq
 
     struct Coeffs { double b0 = 1, b1 = 0, b2 = 0, a1 = 0, a2 = 0; };
 
+    /** Pro-Q-style per-band stereo placement. */
+    enum class Placement { Stereo = 0, Left, Right, Mid, Side };
+
     struct BandSettings
     {
         bool on = false;
+        Placement placement = Placement::Stereo;
         BandType type = BandType::Bell;
         float freq = 1000.0f, gainDb = 0.0f, q = 0.707f;
         int slope = 1; // 0 = 12, 1 = 24, 2 = 48 dB/oct
 
         bool operator== (const BandSettings& o) const
         {
-            return on == o.on && type == o.type && freq == o.freq && gainDb == o.gainDb && q == o.q && slope == o.slope;
+            return on == o.on && placement == o.placement && type == o.type && freq == o.freq && gainDb == o.gainDb && q == o.q && slope == o.slope;
         }
         bool operator!= (const BandSettings& o) const { return ! (*this == o); }
     };
@@ -160,48 +164,85 @@ namespace eq
         void reset()
         {
             for (auto& band : filters)
-                for (auto& f : band)
-                    f.reset();
+                for (auto& ch : band)
+                    for (auto& f : ch)
+                        f.reset();
         }
 
         void setBand (int b, const BandSettings& s)
         {
-            if (s == settings[b])
+            auto& cur = settings[(size_t) b];
+            if (s == cur)
                 return;
 
-            const bool topologyChanged = s.on != settings[b].on || s.type != settings[b].type || s.slope != settings[b].slope;
-            settings[b] = s;
+            const bool topologyChanged = s.on != cur.on || s.type != cur.type || s.slope != cur.slope || s.placement != cur.placement;
+            cur = s;
             rebuild (b);
             if (topologyChanged)
-                for (auto& f : filters[b])
-                    f.reset();
+                for (auto& ch : filters[(size_t) b])
+                    for (auto& f : ch)
+                        f.reset();
         }
 
-        void process (float* data, int numSamples) noexcept
+        /** Stereo processing; each band works on Stereo (L and R), Left, Right, Mid or Side. */
+        void process (float* left, float* right, int numSamples) noexcept
         {
             for (int b = 0; b < NumBands; ++b)
             {
-                const int n = designs[b].numStages;
-                for (int st = 0; st < n; ++st)
+                const int n = designs[(size_t) b].numStages;
+                if (n == 0) continue;
+                auto& f = filters[(size_t) b];
+
+                switch (settings[(size_t) b].placement)
                 {
-                    auto& f = filters[b][st];
-                    for (int i = 0; i < numSamples; ++i)
-                        data[i] = f.process (data[i]);
+                    case Placement::Stereo:
+                        runStages (f[0], n, left, numSamples);
+                        runStages (f[1], n, right, numSamples);
+                        break;
+                    case Placement::Left:  runStages (f[0], n, left, numSamples);  break;
+                    case Placement::Right: runStages (f[1], n, right, numSamples); break;
+                    case Placement::Mid:
+                    case Placement::Side:
+                    {
+                        const bool mid = settings[(size_t) b].placement == Placement::Mid;
+                        for (int i = 0; i < numSamples; ++i)
+                        {
+                            float m = 0.5f * (left[i] + right[i]);
+                            float s = 0.5f * (left[i] - right[i]);
+                            float& target = mid ? m : s;
+                            for (int st = 0; st < n; ++st)
+                                target = f[0][(size_t) st].process (target);
+                            left[i] = m + s;
+                            right[i] = m - s;
+                        }
+                        break;
+                    }
                 }
             }
         }
 
     private:
+        static void runStages (std::array<Biquad, maxStages>& stages, int n, float* data, int numSamples) noexcept
+        {
+            for (int st = 0; st < n; ++st)
+            {
+                auto& f = stages[(size_t) st];
+                for (int i = 0; i < numSamples; ++i)
+                    data[i] = f.process (data[i]);
+            }
+        }
+
         void rebuild (int b)
         {
-            designs[b] = design (settings[b], sampleRate);
-            for (int st = 0; st < designs[b].numStages; ++st)
-                filters[b][st].c = designs[b].stages[st];
+            designs[(size_t) b] = design (settings[(size_t) b], sampleRate);
+            for (auto& ch : filters[(size_t) b])
+                for (int st = 0; st < designs[(size_t) b].numStages; ++st)
+                    ch[(size_t) st].c = designs[(size_t) b].stages[(size_t) st];
         }
 
         double sampleRate = 44100.0;
         std::array<BandSettings, NumBands> settings {};
         std::array<BandDesign, NumBands> designs {};
-        std::array<std::array<Biquad, maxStages>, NumBands> filters {};
+        std::array<std::array<std::array<Biquad, maxStages>, 2>, NumBands> filters {};
     };
 }

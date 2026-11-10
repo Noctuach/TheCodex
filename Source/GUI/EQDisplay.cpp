@@ -57,6 +57,7 @@ eq::BandSettings EQDisplay::readBand (int b) const
     s.gainDb = apvts.getRawParameterValue (ID::band (b, "Gain"))->load();
     s.q      = apvts.getRawParameterValue (ID::band (b, "Q"))->load();
     s.slope  = (int) apvts.getRawParameterValue (ID::band (b, "Slope"))->load();
+    s.placement = (eq::Placement) (int) apvts.getRawParameterValue (ID::band (b, "Place"))->load();
     return s;
 }
 
@@ -209,27 +210,41 @@ void EQDisplay::drawCurves (Graphics& g)
     const double sr = proc.getSampleRate() > 0 ? proc.getSampleRate() : 48000.0;
 
     std::array<eq::BandDesign, Params::numBands> designs;
+    std::array<eq::Placement, Params::numBands> places {};
+    bool msSplit = false;   // any band working on only Mid or only Side?
     for (int b = 0; b < Params::numBands; ++b)
-        designs[(size_t) b] = eq::design (readBand (b), sr);
+    {
+        const auto bs = readBand (b);
+        designs[(size_t) b] = eq::design (bs, sr);
+        places[(size_t) b] = bs.placement;
+        msSplit = msSplit || (bs.on && (bs.placement == eq::Placement::Mid || bs.placement == eq::Placement::Side));
+    }
 
     const int x0 = (int) plot.getX(), x1 = (int) plot.getRight();
-    Path total, sel;
+    Path total, side, sel;
     const bool selOn = readBand (selected).on;
 
     for (int x = x0; x <= x1; ++x)
     {
         const double f = xToFreq ((float) x);
-        double sumDb = 0.0;
+        double sumDb = 0.0, sideDb = 0.0;
         for (int b = 0; b < Params::numBands; ++b)
         {
             if (designs[(size_t) b].numStages == 0) continue;
             const double db = 20.0 * std::log10 (jmax (1.0e-6, eq::magnitude (designs[(size_t) b], f, sr)));
-            sumDb += db;
+            const auto pl = places[(size_t) b];
+            if (pl != eq::Placement::Side) sumDb += db;    // main curve: everything that reaches the mid / channels
+            if (pl != eq::Placement::Mid)  sideDb += db;   // side curve
             if (b == selected)
             {
                 const float y = jlimit (plot.getY() - 2.0f, plot.getBottom() + 2.0f, gainToY ((float) db));
                 if (x == x0) sel.startNewSubPath ((float) x, y); else sel.lineTo ((float) x, y);
             }
+        }
+        if (msSplit)
+        {
+            const float ys = jlimit (plot.getY() - 2.0f, plot.getBottom() + 2.0f, gainToY ((float) sideDb));
+            if (x == x0) side.startNewSubPath ((float) x, ys); else side.lineTo ((float) x, ys);
         }
         const float y = jlimit (plot.getY() - 2.0f, plot.getBottom() + 2.0f, gainToY ((float) sumDb));
         if (x == x0) total.startNewSubPath ((float) x, y); else total.lineTo ((float) x, y);
@@ -248,6 +263,26 @@ void EQDisplay::drawCurves (Graphics& g)
         g.strokePath (sel, PathStrokeType (1.2f));
     }
 
+    if (msSplit)
+    {
+        Path dashed;
+        const float dashes[] = { 6.0f, 4.0f };
+        PathStrokeType (2.0f).createDashedStroke (dashed, side, dashes, 2);
+        g.setColour (Colours_::accent2.withAlpha (0.25f));
+        g.strokePath (side, PathStrokeType (5.0f));
+        g.setColour (Colours_::accent2);
+        g.fillPath (dashed);
+
+        // legend
+        auto legend = Rectangle<float> (plot.getX() + 10.0f, plot.getY() + 8.0f, 150.0f, 14.0f);
+        g.setFont (Fonts::label (11.0f, 0.14f));
+        g.setColour (Colour (0xffd6f0ff));
+        g.fillRect (legend.getX(), legend.getCentreY() - 1.0f, 16.0f, 2.0f);
+        g.drawText ("MID", legend.withTrimmedLeft (22.0f), Justification::centredLeft);
+        g.setColour (Colours_::accent2);
+        g.fillRect (legend.getX() + 60.0f, legend.getCentreY() - 1.0f, 16.0f, 2.0f);
+        g.drawText ("SIDE", legend.withTrimmedLeft (82.0f), Justification::centredLeft);
+    }
     Colours_::strokeGlow (g, total, Colour (0xffd6f0ff), 2.0f);
 }
 
@@ -284,6 +319,21 @@ void EQDisplay::drawNodes (Graphics& g)
             g.drawEllipse (circle.expanded (3.0f), 1.5f);
         }
 
+        if (s.placement != eq::Placement::Stereo)
+        {
+            const char* tag = s.placement == eq::Placement::Left ? "L" : s.placement == eq::Placement::Right ? "R"
+                            : s.placement == eq::Placement::Mid ? "M" : "S";
+            auto badge = Rectangle<float> (13.0f, 13.0f).withCentre (pos.translated (10.0f, -10.0f));
+            g.setColour (s.placement == eq::Placement::Side ? Colours_::accent2 : Colours_::panelTop);
+            g.fillEllipse (badge);
+            g.setColour (col);
+            g.drawEllipse (badge, 1.0f);
+            g.setColour (Colours::white);
+            g.setFont (Fonts::label (10.0f, 0.0f));
+            g.drawText (tag, badge, Justification::centred);
+            g.setFont (Fonts::semibold (10.0f));
+        }
+
         if (b == hover || b == dragging)
         {
             const String typeNames[] = { "Low Cut", "Low Shelf", "Bell", "Notch", "High Shelf", "High Cut" };
@@ -291,9 +341,11 @@ void EQDisplay::drawNodes (Graphics& g)
                         + (s.freq < 1000 ? String (s.freq, 1) + " Hz" : String (s.freq / 1000.0f, 2) + " kHz");
             if (typeUsesGain (s.type)) text << "  " << (s.gainDb > 0 ? "+" : "") << String (s.gainDb, 1) << " dB";
             text << "  Q " << String (s.q, 2);
+            const char* placeNames[] = { "", "  Left", "  Right", "  Mid", "  Side" };
+            text << placeNames[(int) s.placement];
             if (! s.on) text << "  (off)";
 
-            const float w = 230.0f;
+            const float w = 262.0f;
             auto box = Rectangle<float> (w, 18.0f).withCentre (pos.translated (0, -22.0f));
             box = box.constrainedWithin (plot);
             g.setColour (Colours_::panelTop.withAlpha (0.95f));
@@ -454,6 +506,12 @@ void EQDisplay::showBandMenu (int b)
         slopes.addItem (20 + sl, slopeNames[sl], true, s.slope == sl);
     menu.addSubMenu ("Slope", slopes, s.type == eq::BandType::LowCut || s.type == eq::BandType::HighCut);
 
+    PopupMenu placement;
+    const char* placeNames[] = { "Stereo", "Left", "Right", "Mid", "Side" };
+    for (int pIdx = 0; pIdx < 5; ++pIdx)
+        placement.addItem (40 + pIdx, placeNames[pIdx], true, (int) s.placement == pIdx);
+    menu.addSubMenu ("Stereo placement", placement);
+
     menu.addSeparator();
     menu.addItem (30, s.on ? "Disable band" : "Enable band");
     menu.addItem (31, "Reset gain");
@@ -476,6 +534,7 @@ void EQDisplay::showBandMenu (int b)
             else if (result >= 20 && result <= 22) set ("Slope", (float) (result - 20));
             else if (result == 30) set ("On", safe->readBand (b).on ? 0.0f : 1.0f);
             else if (result == 31) set ("Gain", 0.0f);
+            else if (result >= 40 && result <= 44) set ("Place", (float) (result - 40));
         });
 }
 
@@ -529,6 +588,7 @@ BandControls::BandControls (AudioProcessorValueTreeState& s) : apvts (s)
     for (Component* c : { (Component*) &range12, (Component*) &range24, (Component*) &analyzerButton, (Component*) &resetButton })
         addAndMakeVisible (c);
 
+    addAndMakeVisible (placement);
     for (Component* c : { (Component*) &type, (Component*) &slope, (Component*) &freq, (Component*) &gain, (Component*) &q })
         addAndMakeVisible (c);
 
@@ -547,6 +607,7 @@ void BandControls::setBand (int b)
     onAttachment = std::make_unique<AudioProcessorValueTreeState::ButtonAttachment> (apvts, ID::band (b, "On"), onButton);
     type.attach (apvts, ID::band (b, "Type"));
     slope.attach (apvts, ID::band (b, "Slope"));
+    placement.attach (apvts, ID::band (b, "Place"));
     freq.attach (apvts, ID::band (b, "Freq"));
     gain.attach (apvts, ID::band (b, "Gain"));
     q.attach (apvts, ID::band (b, "Q"));
@@ -573,7 +634,7 @@ void BandControls::paint (Graphics& g)
 void BandControls::resized()
 {
     auto r = getLocalBounds();
-    auto left = r.removeFromLeft (210);
+    auto left = r.removeFromLeft (200);
     left.removeFromTop (18);
     auto buttons = left.removeFromTop (28);
     for (auto& btn : bandButtons)
@@ -582,26 +643,28 @@ void BandControls::resized()
     onButton.setBounds (left.removeFromTop (26).removeFromLeft (26));
 
     // Display tools on the far right
-    toolsArea = r.removeFromRight (250);
+    toolsArea = r.removeFromRight (226);
     {
         auto t = toolsArea;
         t.removeFromTop (18);
         auto row1 = t.removeFromTop (28);
-        range12.setBounds (row1.removeFromLeft (80));
-        range24.setBounds (row1.removeFromLeft (80));
+        range12.setBounds (row1.removeFromLeft (76));
+        range24.setBounds (row1.removeFromLeft (76));
         t.removeFromTop (8);
         auto row2 = t.removeFromTop (26);
-        analyzerButton.setBounds (row2.removeFromLeft (110));
-        row2.removeFromLeft (10);
-        resetButton.setBounds (row2.removeFromLeft (120));
+        analyzerButton.setBounds (row2.removeFromLeft (104));
+        row2.removeFromLeft (8);
+        resetButton.setBounds (row2.removeFromLeft (112));
     }
-    r.removeFromRight (36);
+    r.removeFromRight (30);
 
-    r.removeFromLeft (14);
-    type.setBounds (r.removeFromLeft (150).withTrimmedTop (8).withHeight (48));
-    r.removeFromLeft (12);
-    slope.setBounds (r.removeFromLeft (130).withTrimmedTop (8).withHeight (48));
-    r.removeFromLeft (16);
+    r.removeFromLeft (10);
+    type.setBounds (r.removeFromLeft (128).withTrimmedTop (8).withHeight (48));
+    r.removeFromLeft (10);
+    slope.setBounds (r.removeFromLeft (116).withTrimmedTop (8).withHeight (48));
+    r.removeFromLeft (10);
+    placement.setBounds (r.removeFromLeft (108).withTrimmedTop (8).withHeight (48));
+    r.removeFromLeft (10);
     const int kw = juce::jmin (100, r.getWidth() / 3);
     for (auto* k : { &freq, &gain, &q })
         k->setBounds (r.removeFromLeft (kw));

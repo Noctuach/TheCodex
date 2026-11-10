@@ -16,21 +16,22 @@ namespace
 MainView::MainView (CodexProcessor& p, PropertiesFile* settingsFile)
     : proc (p), settings (settingsFile),
       presetBar (p.presets),
+      tunerAnalyser (p), tunerChip (tunerAnalyser),
       engineSwitch (*p.apvts.getParameter (ID::engine), { "SYNTH", "909" }, Help::forParameter (ID::engine)),
       pitchEnvDisplay (p.apvts, ID::pAttack, ID::pDecay, ID::pSustain, ID::pRelease, ID::pCurve, Colours_::accent2),
       ampEnvDisplay (p.apvts, ID::aAttack, ID::aDecay, ID::aSustain, ID::aRelease, ID::aCurve, Colours_::accent),
       eqDisplay (p), bandControls (p.apvts),
       unit1 (p, 1, "DISTORTION 1  " + dot + "  PRE-EQ"),
       unit2 (p, 2, "DISTORTION 2  " + dot + "  POST-EQ"),
-      scope (p), tuner (p),
+      scopePage (p, tunerAnalyser),
+      saturationPage (p, scopePage.getHistory()),
       aboutOverlay (JucePlugin_VersionString)
 {
     auto& s = p.apvts;
 
     // ---- Header ----
-    kickButton.setComponentID ("kick");
-    kickButton.setTooltip ("KICK: Plays the kick in the selected key (hold to hear the full tail).");
-    kickButton.onPress = [this] (bool down) { proc.triggerPreview (down); };
+    previewButton.setTooltip ("Preview: plays the kick in the selected key (hold to hear the full tail).");
+    previewButton.onPress = [this] (bool down) { proc.triggerPreview (down); };
 
     undoButton.setTooltip ("Undo");
     redoButton.setTooltip ("Redo");
@@ -54,11 +55,14 @@ MainView::MainView (CodexProcessor& p, PropertiesFile* settingsFile)
     keyBox.attach (s, ID::key);
     octaveBox.attach (s, ID::octave);
     keyModeBox.attach (s, ID::keyMode);
+    outGain.attach (s, ID::outGain);
 
-    for (auto* tab : { &kickTabButton, &distTabButton })
-        tab->setComponentID ("tab");
-    kickTabButton.onClick = [this] { showTab (0); };
-    distTabButton.onClick = [this] { showTab (1); };
+    for (int i = 0; i < (int) tabButtons.size(); ++i)
+    {
+        tabButtons[(size_t) i].setComponentID ("tab");
+        tabButtons[(size_t) i].onClick = [this, i] { showTab (i); };
+        addAndMakeVisible (tabButtons[(size_t) i]);
+    }
 
     // ---- Source ----
     wave.attach (s, ID::wave);
@@ -92,33 +96,13 @@ MainView::MainView (CodexProcessor& p, PropertiesFile* settingsFile)
     bandControls.onRangeChanged = [this] (float db) { eqDisplay.setDisplayRange (db); };
     bandControls.onAnalyzerToggled = [this] (bool on) { eqDisplay.setAnalyzerEnabled (on); };
 
-    // ---- Distortion quick controls ----
-    for (int i = 0; i < 2; ++i)
-    {
-        auto& q = quick[i];
-        const int stage = i + 1;
-        q.onAttachment = std::make_unique<AudioProcessorValueTreeState::ButtonAttachment> (s, ID::clip (stage, "On"), q.on);
-        q.on.setTooltip (Help::forParameter (ID::clip (stage, "On")));
-        q.mode.attach (s, ID::clip (stage, "Mode"));
-        q.drive.attach (s, ID::clip (stage, "Drive"));
-        q.character.attach (s, ID::clip (stage, "Char"));
-        q.mix.attach (s, ID::clip (stage, "Mix"));
-        q.edit.setComponentID ("pill");
-        q.edit.setTooltip ("Open the full distortion unit (filters, offset, oversampling, transfer curve)");
-        q.edit.onClick = [this] { showTab (1); };
-        for (Component* c : std::initializer_list<Component*> { &q.on, &q.edit, &q.mode, &q.drive, &q.character, &q.mix })
-            addAndMakeVisible (c);
-    }
-
-    outGain.attach (s, ID::outGain);
-
     for (Component* c : std::initializer_list<Component*> {
-             &undoButton, &redoButton, &menuButton, &presetBar, &keyBox, &octaveBox, &keyModeBox, &kickButton,
-             &kickTabButton, &distTabButton,
+             &undoButton, &redoButton, &menuButton, &presetBar, &keyBox, &octaveBox, &keyModeBox,
+             &previewButton, &outGain, &meterL, &meterR, &tunerChip,
              &engineSwitch, &wave, &model, &tune, &phase, &clickLevel, &clickDecay, &clickTone, &tune909, &attack909, &decay909,
              &pitchEnvDisplay, &pAmount, &pAttack, &pDecay, &pSustain, &pRelease, &pCurve,
              &ampEnvDisplay, &aAttack, &aDecay, &aSustain, &aRelease, &aCurve,
-             &eqDisplay, &bandControls, &unit1, &unit2, &scope, &tuner, &outGain, &meter })
+             &eqDisplay, &bandControls, &unit1, &unit2, &scopePage, &saturationPage })
         addAndMakeVisible (c);
     addChildComponent (engineNotice);
 
@@ -143,7 +127,8 @@ void MainView::setTooltipsEnabled (bool enabled)
 
 void MainView::timerCallback()
 {
-    meter.setLevel (proc.getAndResetPeak());
+    meterL.setLevel (proc.getAndResetPeak (0));
+    meterR.setLevel (proc.getAndResetPeak (1));
     undoButton.setEnabled (proc.undoManager.canUndo());
     redoButton.setEnabled (proc.undoManager.canRedo());
 }
@@ -250,10 +235,10 @@ void MainView::showTab (int tab)
         c->setVisible (tab == 0);
     unit1.setVisible (tab == 1);
     unit2.setVisible (tab == 1);
-    kickTabButton.setToggleState (tab == 0, dontSendNotification);
-    distTabButton.setToggleState (tab == 1, dontSendNotification);
-    for (auto& q : quick)
-        q.edit.setVisible (tab == 0);
+    saturationPage.setVisible (tab == 2);
+    scopePage.setVisible (tab == 3);
+    for (int i = 0; i < (int) tabButtons.size(); ++i)
+        tabButtons[(size_t) i].setToggleState (i == tab, dontSendNotification);
     updateEngineView();
     repaint();
 }
@@ -303,24 +288,25 @@ void MainView::paint (Graphics& g)
     g.setColour (Colours_::outline);
     g.drawHorizontalLine (tabBar.getBottom() - 1, (float) tabBar.getX(), (float) tabBar.getRight());
     {
-        // signal-flow breadcrumb, current stage highlighted per tab
-        const StringArray steps { "OSC", "DIST 1", "EQ", "DIST 2", "OUT" };
+        // signal-flow breadcrumb, the stage of the current tab highlighted
+        const StringArray steps { "OSC", "DIST 1", "EQ", "DIST 2", "SAT", "OUT" };
         const auto font = Font (Fonts::label (12.0f, 0.16f));
         g.setFont (font);
-        float x = (float) tabBar.getRight();
+        float x = (float) breadcrumbArea.getRight();
         for (int i = steps.size() - 1; i >= 0; --i)
         {
             GlyphArrangement ga;
             ga.addLineOfText (font, steps[i], 0, 0);
             const float w = ga.getBoundingBox (0, -1, true).getWidth();
             x -= w;
-            const bool hi = currentTab == 0 ? (i == 0 || i == 2) : (i == 1 || i == 3);
+            const bool hi = currentTab == 0 ? (i == 0 || i == 2) : currentTab == 1 ? (i == 1 || i == 3)
+                          : currentTab == 2 ? i == 4 : i == 5;
             g.setColour (hi ? Colours_::accent : Colours_::textFaint);
             g.drawText (steps[i], Rectangle<float> (x, (float) tabBar.getY(), w + 2.0f, (float) tabBar.getHeight() - 2.0f), Justification::centredLeft);
             if (i > 0)
             {
-                x -= 22.0f;
-                Icons::draw (g, Icons::chevronRight(), Rectangle<float> (x + 6.0f, (float) tabBar.getCentreY() - 6.0f, 10.0f, 10.0f), Colours_::textFaint, 1.3f);
+                x -= 20.0f;
+                Icons::draw (g, Icons::chevronRight(), Rectangle<float> (x + 5.0f, (float) tabBar.getCentreY() - 6.0f, 10.0f, 10.0f), Colours_::textFaint, 1.3f);
             }
         }
     }
@@ -332,9 +318,6 @@ void MainView::paint (Graphics& g)
         drawSectionPanel (g, ampArea, engineSwitch.getIndex() == 1 ? "AMP GATE" : "AMP ENVELOPE", Colours_::accent);
         drawSectionPanel (g, eqArea, "EQUALIZER", Colours_::accent);
     }
-    drawSectionPanel (g, quickAreas[0], "DIST 1", Colours_::accent);
-    drawSectionPanel (g, quickAreas[1], "DIST 2", Colours_::accent);
-    drawSectionPanel (g, outArea, "OUTPUT", Colours_::accent);
 }
 
 void MainView::EngineNotice::paint (Graphics& g)
@@ -372,9 +355,13 @@ void MainView::resized()
         h.removeFromLeft (22);
 
         menuButton.setBounds (lower (h.removeFromRight (34)));
-        h.removeFromRight (10);
-        kickButton.setBounds (h.removeFromRight (116).withTrimmedTop (4).withTrimmedBottom (2));
-        h.removeFromRight (18);
+        h.removeFromRight (12);
+        meterR.setBounds (h.removeFromRight (9).withTrimmedTop (4).withTrimmedBottom (2));
+        h.removeFromRight (3);
+        meterL.setBounds (h.removeFromRight (9).withTrimmedTop (4).withTrimmedBottom (2));
+        h.removeFromRight (8);
+        outGain.setBounds (h.removeFromRight (112).withTrimmedTop (6).withHeight (42));
+        h.removeFromRight (16);
         keyModeBox.setBounds (h.removeFromRight (112));
         h.removeFromRight (8);
         octaveBox.setBounds (h.removeFromRight (64));
@@ -387,28 +374,33 @@ void MainView::resized()
 
     r.removeFromTop (14);
     tabBar = r.removeFromTop (32);
-    kickTabButton.setBounds (tabBar.withWidth (90));
-    distTabButton.setBounds (tabBar.withTrimmedLeft (98).withWidth (140));
+    {
+        auto t = tabBar;
+        const int widths[] = { 84, 136, 132, 88 };
+        for (int i = 0; i < 4; ++i)
+        {
+            tabButtons[(size_t) i].setBounds (t.removeFromLeft (widths[i]));
+            t.removeFromLeft (6);
+        }
+        breadcrumbArea = t.removeFromRight (330);
+        t.removeFromRight (16);
+        previewButton.setBounds (t.removeFromRight (30).withSizeKeepingCentre (30, 26).translated (0, -2));
+        t.removeFromRight (8);
+        tunerChip.setBounds (t.removeFromRight (150).withSizeKeepingCentre (150, 26).translated (0, -2));
+    }
     r.removeFromTop (12);
 
-    // ---- Bottom row (always visible) ----
-    auto bottom = r.removeFromBottom (156);
-    r.removeFromBottom (12);
-    quickAreas[0] = bottom.removeFromLeft (350);
-    bottom.removeFromLeft (12);
-    quickAreas[1] = bottom.removeFromLeft (350);
-    bottom.removeFromLeft (12);
-    outArea = bottom;
-
-    // ---- Distortion tab ----
+    // ---- Distortion / saturation / scope pages ----
     {
         auto u = r;
         unit1.setBounds (u.removeFromLeft ((u.getWidth() - 12) / 2));
         u.removeFromLeft (12);
         unit2.setBounds (u);
     }
+    saturationPage.setBounds (r);
+    scopePage.setBounds (r);
 
-    // ---- Kick tab ----
+    // ---- Kick page ----
     auto rowA = r.removeFromTop (222);
     sourceArea = rowA.removeFromLeft (344);
     rowA.removeFromLeft (12);
@@ -432,7 +424,7 @@ void MainView::resized()
     auto layoutEnv = [] (Rectangle<int> area, EnvelopeDisplay& display, std::initializer_list<Knob*> knobs)
     {
         auto c = area.reduced (10).withTrimmedTop (30);
-        display.setBounds (c.removeFromTop (64));
+        display.setBounds (c.removeFromTop (70));
         c.removeFromTop (6);
         const int w = c.getWidth() / (int) knobs.size();
         for (auto* k : knobs)
@@ -444,38 +436,9 @@ void MainView::resized()
 
     {
         auto c = eqArea.reduced (10).withTrimmedTop (30);
-        bandControls.setBounds (c.removeFromBottom (82));
+        bandControls.setBounds (c.removeFromBottom (84));
         c.removeFromBottom (8);
         eqDisplay.setBounds (c);
-    }
-
-    // ---- Quick distortion panels ----
-    for (int i = 0; i < 2; ++i)
-    {
-        auto& q = quick[i];
-        const auto area = quickAreas[i];
-        q.on.setBounds (area.withHeight (28).removeFromRight (32).reduced (4));
-        q.edit.setBounds (area.withHeight (28).withTrimmedRight (36).removeFromRight (54).reduced (2, 5));
-        auto c = area.reduced (10).withTrimmedTop (30);
-        auto left = c.removeFromLeft (112);
-        q.mode.setBounds (left.withSizeKeepingCentre (left.getWidth(), 46));
-        c.removeFromLeft (4);
-        const int w = c.getWidth() / 3;
-        q.drive.setBounds (c.removeFromLeft (w));
-        q.character.setBounds (c.removeFromLeft (w));
-        q.mix.setBounds (c);
-    }
-
-    // ---- Output: scope, tuner, level ----
-    {
-        auto c = outArea.reduced (10).withTrimmedTop (30);
-        meter.setBounds (c.removeFromRight (14));
-        c.removeFromRight (6);
-        outGain.setBounds (c.removeFromRight (74));
-        c.removeFromRight (6);
-        tuner.setBounds (c.removeFromRight (164));
-        c.removeFromRight (8);
-        scope.setBounds (c);
     }
 
     saveOverlay.setBounds (getLocalBounds());

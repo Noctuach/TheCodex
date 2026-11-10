@@ -36,6 +36,7 @@ public:
         float loFilterHz = 20000.0f, hiFilterHz = 20.0f, shelfHz = 6000.0f, shelfDb = 0.0f;
         bool  dcFilter = true;
         int   oversampling = 2; // index into oversamplingNames()
+        float spatial = 0.0f;   // 0 = identical L/R, 1 = different distortion per channel (stereo)
     };
 
     void prepare (double sr, int maxBlockSize)
@@ -44,7 +45,7 @@ public:
         for (int i = 0; i < 3; ++i)
         {
             oversamplers[(size_t) i] = std::make_unique<juce::dsp::Oversampling<float>> (
-                1, i + 1, juce::dsp::Oversampling<float>::filterHalfBandPolyphaseIIR, true, false);
+                2, i + 1, juce::dsp::Oversampling<float>::filterHalfBandPolyphaseIIR, true, false);
             oversamplers[(size_t) i]->initProcessing ((size_t) maxBlockSize);
         }
         dcR = (float) std::exp (-juce::MathConstants<double>::twoPi * 10.0 / sr);
@@ -57,8 +58,9 @@ public:
     {
         for (auto& os : oversamplers)
             if (os != nullptr) os->reset();
-        for (auto* f : { &loFilter, &hiFilter, &shelf }) f->reset();
-        dcX = dcY = 0.0f;
+        for (int ch = 0; ch < 2; ++ch)
+            for (auto* f : { &loFilter[ch], &hiFilter[ch], &shelf[ch] }) f->reset();
+        dcX = { 0.0f, 0.0f }; dcY = { 0.0f, 0.0f };
     }
 
     /** Latency in base-rate samples for the current oversampling setting. */
@@ -74,40 +76,45 @@ public:
         applySettings (false);
     }
 
-    void process (float* data, int numSamples) noexcept
+    void process (float* left, float* right, int numSamples) noexcept
     {
         float inPk = 0.0f;
         for (int i = 0; i < numSamples; ++i)
         {
-            data[i] *= boost.getNextValue();
-            inPk = std::max (inPk, std::abs (data[i]));
+            const float g = boost.getNextValue();
+            left[i] *= g;
+            right[i] *= g;
+            inPk = std::max (inPk, std::max (std::abs (left[i]), std::abs (right[i])));
         }
 
         if (activeOs >= 0)
         {
-            float* channels[] = { data };
-            juce::dsp::AudioBlock<float> block (channels, 1, (size_t) numSamples);
+            float* channels[] = { left, right };
+            juce::dsp::AudioBlock<float> block (channels, 2, (size_t) numSamples);
             auto up = oversamplers[(size_t) activeOs]->processSamplesUp (block);
-            processSamples (up.getChannelPointer (0), (int) up.getNumSamples());
+            processSamples (up.getChannelPointer (0), up.getChannelPointer (1), (int) up.getNumSamples());
             oversamplers[(size_t) activeOs]->processSamplesDown (block);
         }
         else
         {
-            processSamples (data, numSamples);
+            processSamples (left, right, numSamples);
         }
 
         float outPk = 0.0f;
-        for (int i = 0; i < numSamples; ++i)
-        {
-            if (settings.dcFilter)
+        float* chans[] = { left, right };
+        for (int ch = 0; ch < 2; ++ch)
+            for (int i = 0; i < numSamples; ++i)
             {
-                const float x = data[i];
-                dcY = x - dcX + dcR * dcY;
-                dcX = x;
-                data[i] = dcY;
+                float& v = chans[ch][i];
+                if (settings.dcFilter)
+                {
+                    const float x = v;
+                    dcY[(size_t) ch] = x - dcX[(size_t) ch] + dcR * dcY[(size_t) ch];
+                    dcX[(size_t) ch] = x;
+                    v = dcY[(size_t) ch];
+                }
+                outPk = std::max (outPk, std::abs (v));
             }
-            outPk = std::max (outPk, std::abs (data[i]));
-        }
 
         if (inPk > inPeak.load())   inPeak.store (inPk);
         if (outPk > outPeak.load()) outPeak.store (outPk);
@@ -180,10 +187,11 @@ private:
         {
             if (os >= 0 && oversamplers[(size_t) os] != nullptr)
                 oversamplers[(size_t) os]->reset();
-            for (auto* s : { &drive, &mix, &outGain, &offset, &character })
+            for (auto* s : { &drive, &mix, &outGain, &offset, &character, &spatial })
                 s->reset (rate, 0.02);
             boost.reset (baseRate, 0.02);
-            for (auto* f : { &loFilter, &hiFilter, &shelf }) f->reset();
+            for (int ch = 0; ch < 2; ++ch)
+                for (auto* f : { &loFilter[ch], &hiFilter[ch], &shelf[ch] }) f->reset();
             lastFilterRate = 0.0;
         }
 
@@ -195,6 +203,7 @@ private:
         setTarget (outGain, s.enabled ? juce::Decibels::decibelsToGain (s.outDb) : 1.0f, force || rateChanged);
         setTarget (offset, s.offset, force || rateChanged);
         setTarget (character, s.character, force || rateChanged);
+        setTarget (spatial, s.spatial, force || rateChanged);
 
         // Wet filters (redesigned only when something changed)
         if (rate != lastFilterRate || s.loFilterHz != lastLo || s.hiFilterHz != lastHi || s.shelfHz != lastShelfHz || s.shelfDb != lastShelfDb)
@@ -202,9 +211,12 @@ private:
             eq::BandSettings lp; lp.on = true; lp.type = eq::BandType::HighCut; lp.freq = s.loFilterHz; lp.slope = 0;
             eq::BandSettings hp; hp.on = true; hp.type = eq::BandType::LowCut;  hp.freq = s.hiFilterHz; hp.slope = 0;
             eq::BandSettings sh; sh.on = true; sh.type = eq::BandType::HighShelf; sh.freq = s.shelfHz; sh.gainDb = s.shelfDb;
-            loFilter.c = eq::design (lp, rate).stages[0];
-            hiFilter.c = eq::design (hp, rate).stages[0];
-            shelf.c    = eq::design (sh, rate).stages[0];
+            for (int ch = 0; ch < 2; ++ch)
+            {
+                loFilter[ch].c = eq::design (lp, rate).stages[0];
+                hiFilter[ch].c = eq::design (hp, rate).stages[0];
+                shelf[ch].c    = eq::design (sh, rate).stages[0];
+            }
             loActive = s.loFilterHz < 19900.0f;
             hiActive = s.hiFilterHz > 20.5f;
             shelfActive = std::abs (s.shelfDb) > 0.01f;
@@ -219,17 +231,28 @@ private:
         else      v.setTargetValue (target);
     }
 
-    void processSamples (float* p, int n) noexcept
+    void processSamples (float* l, float* r, int n) noexcept
     {
+        float* chans[] = { l, r };
         for (int i = 0; i < n; ++i)
         {
-            const float dry = p[i];
-            float w = loActive ? loFilter.process (dry) : dry;
-            w = transfer (mode, w, drive.getNextValue(), offset.getNextValue(), character.getNextValue());
-            if (hiActive)    w = hiFilter.process (w);
-            if (shelfActive) w = shelf.process (w);
-            const float m = mix.getNextValue();
-            p[i] = (dry + m * (w - dry)) * outGain.getNextValue();
+            const float d = drive.getNextValue(), off = offset.getNextValue(), chr = character.getNextValue();
+            const float sp = spatial.getNextValue(), m = mix.getNextValue(), og = outGain.getNextValue();
+
+            // Spatial: the two channels hit slightly different curves (drive and operating point),
+            // which creates stereo harmonics from a mono input.
+            const float driveSpread = 1.0f + 0.6f * sp, offsetSpread = 0.3f * sp;
+            for (int ch = 0; ch < 2; ++ch)
+            {
+                const float dry = chans[ch][i];
+                const float chDrive  = ch == 0 ? d * driveSpread : d / driveSpread;
+                const float chOffset = ch == 0 ? off + offsetSpread : off - offsetSpread;
+                float w = loActive ? loFilter[ch].process (dry) : dry;
+                w = transfer (mode, w, chDrive, chOffset, chr);
+                if (hiActive)    w = hiFilter[ch].process (w);
+                if (shelfActive) w = shelf[ch].process (w);
+                chans[ch][i] = (dry + m * (w - dry)) * og;
+            }
         }
     }
 
@@ -239,12 +262,13 @@ private:
     int mode = HardClip;
     Settings settings;
 
-    juce::SmoothedValue<float> drive, boost, mix, outGain, offset, character;
-    eq::Biquad loFilter, hiFilter, shelf;
+    juce::SmoothedValue<float> drive, boost, mix, outGain, offset, character, spatial;
+    eq::Biquad loFilter[2], hiFilter[2], shelf[2];
     bool loActive = false, hiActive = false, shelfActive = false;
     double lastFilterRate = 0.0;
     float lastLo = -1.0f, lastHi = -1.0f, lastShelfHz = -1.0f, lastShelfDb = -100.0f;
 
-    float dcR = 0.999f, dcX = 0.0f, dcY = 0.0f;
+    float dcR = 0.999f;
+    std::array<float, 2> dcX { 0.0f, 0.0f }, dcY { 0.0f, 0.0f };
     std::atomic<float> inPeak { 0.0f }, outPeak { 0.0f };
 };

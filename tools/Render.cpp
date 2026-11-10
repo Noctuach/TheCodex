@@ -85,6 +85,8 @@ static void snapshot (CodexProcessor& proc, const juce::AudioBuffer<float>& audi
     {
         proc.analyzer.push (audio.getReadPointer (0, (int) (0.05 * sr) + i * 2400), 4096);
         proc.tunerFeed.push (audio.getReadPointer (0, (int) (0.1 * sr) + i * 2400), 2400);
+        proc.scopeFeedL.push (audio.getReadPointer (0, (int) (0.05 * sr) + i * 2400), 2400);
+        proc.scopeFeedR.push (audio.getReadPointer (1, (int) (0.05 * sr) + i * 2400), 2400);
         juce::MessageManager::getInstance()->runDispatchLoopUntil (60);
     }
     auto img = editor->createComponentSnapshot (editor->getLocalBounds(), true, 2.0f);
@@ -222,6 +224,83 @@ int main (int argc, char** argv)
         if (! supported) ++failures;
     }
 
+    // ---- Stereo: spatial, M/S EQ ----
+    {
+        auto sideDb = [] (const juce::AudioBuffer<float>& b, double from, double to)
+        {
+            double m = 0, s = 0;
+            for (int i = (int) (from * sr); i < (int) (to * sr); ++i)
+            {
+                const double L = b.getSample (0, i), R = b.getSample (1, i);
+                m += 0.25 * (L + R) * (L + R); s += 0.25 * (L - R) * (L - R);
+            }
+            return 10.0 * std::log10 ((s + 1e-20) / (m + 1e-20));
+        };
+        proc.presets.loadPreset (8);
+        const double monoSide = sideDb (render (proc, 1), 0.0, 0.3);
+        setParam (proc, ID::clip (2, "Spatial"), 1.0f);
+        const double wideSide = sideDb (render (proc, 1), 0.0, 0.3);
+        // Spatial on distortion 1 (before the EQ), distortion 2 off, then a full-band Side cut on the EQ
+        setParam (proc, ID::clip (2, "Spatial"), 0.0f); setParam (proc, ID::clip (1, "Spatial"), 1.0f);
+        setParam (proc, ID::clip (2, "On"), 0.0f);
+        const double uncutSide = sideDb (render (proc, 1), 0.0, 0.3);
+        setParam (proc, ID::band (5, "On"), 1.0f); setParam (proc, ID::band (5, "Type"), 0.0f);
+        setParam (proc, ID::band (5, "Freq"), 20000.0f); setParam (proc, ID::band (5, "Slope"), 2.0f);
+        setParam (proc, ID::band (5, "Place"), 4.0f);
+        const double cutSide = sideDb (render (proc, 1), 0.0, 0.3);
+        std::cout << "\nSide vs Mid energy: spatial off " << juce::String (monoSide, 1) << " dB, spatial on " << juce::String (wideSide, 1)
+                  << " dB; spatial before EQ " << juce::String (uncutSide, 1) << " dB -> with EQ Side cut " << juce::String (cutSide, 1) << " dB\n";
+        if (monoSide > -100.0 || wideSide < -40.0 || cutSide > uncutSide - 20.0) { ++failures; std::cout << "   <-- CHECK stereo\n"; }
+    }
+
+    // ---- Saturation: bands must sum flat when bypassed; all styles stay finite ----
+    {
+        std::cout << "Saturation crossovers, all bands bypassed (2 and 6 bands per slope), level change dB:";
+        juce::Random rng (7);
+        for (int slope = 0; slope < 4; ++slope)
+            for (int nb : { 2, 6 })
+            {
+                sat::MultibandSaturator satProc;
+                sat::Settings st;
+                st.enabled = true; st.numBands = nb; st.slope = slope; st.oversampling = 0;
+                for (auto& b : st.bands) b.bypass = true;
+                satProc.setSettings (st);
+                satProc.prepare (sr, 512);
+                double in = 0, out = 0;
+                for (int blk = 0; blk < 100; ++blk)
+                {
+                    float l[512], r[512];
+                    for (int i = 0; i < 512; ++i) { l[i] = r[i] = rng.nextFloat() * 2.0f - 1.0f; if (blk > 10) in += (double) l[i] * l[i]; }
+                    satProc.process (l, r, 512);
+                    if (blk > 10) for (int i = 0; i < 512; ++i) out += (double) l[i] * l[i];
+                }
+                const double d = 10.0 * std::log10 (out / in);
+                std::cout << " " << juce::String (d, 2);
+                if (std::abs (d) > 0.3) { ++failures; std::cout << "(!)"; }
+            }
+        std::cout << "\n";
+
+        proc.presets.loadPreset (8);
+        setParam (proc, ID::sat ("On"), 1.0f);
+        setParam (proc, ID::sat ("Bands"), 1.0f);
+        bool allFinite = true; float worst = -100.0f; juce::String worstStyle;
+        for (int style = 0; style < (int) sat::styles().size(); ++style)
+        {
+            setParam (proc, ID::satBand (0, "Style"), (float) style);
+            setParam (proc, ID::satBand (0, "Drive"), 36.0f);
+            setParam (proc, ID::satBand (0, "Fb"), 1.0f);
+            setParam (proc, ID::satBand (0, "Dyn"), 1.0f);
+            auto a = render (proc, 1);
+            for (int i = 0; i < a.getNumSamples(); ++i) allFinite &= std::isfinite (a.getSample (0, i));
+            const float pk = juce::Decibels::gainToDecibels (a.getMagnitude (0, 0, a.getNumSamples()));
+            if (pk > worst) { worst = pk; worstStyle = sat::styles()[(size_t) style].name; }
+        }
+        std::cout << "Saturation, all 19 styles at max drive / feedback / dynamics: " << (allFinite ? "finite" : "NaN!")
+                  << ", loudest peak " << juce::String (worst, 1) << " dBFS (" << worstStyle << ")\n";
+        if (! allFinite || worst > 18.0f) ++failures;
+        setParam (proc, ID::sat ("On"), 0.0f);
+    }
+
     // ---- State round trip ----
     proc.presets.loadPreset (9);
     juce::MemoryBlock state;
@@ -237,6 +316,22 @@ int main (int argc, char** argv)
     snapshot (proc, render (proc, 1), outDir.getChildFile ("ui_909.png"));
     proc.presets.loadPreset (10); // 909 Rawstyle
     snapshot (proc, render (proc, 1), outDir.getChildFile ("ui_distortion.png"), 1);
+    {
+        // Stereo features: spatial distortion, a Side low cut and multiband saturation
+        setParam (proc, ID::clip (2, "Spatial"), 0.6f);
+        setParam (proc, ID::band (5, "On"), 1.0f);
+        setParam (proc, ID::band (5, "Type"), 0.0f);
+        setParam (proc, ID::band (5, "Freq"), 150.0f);
+        setParam (proc, ID::band (5, "Place"), 4.0f);
+        setParam (proc, ID::sat ("On"), 1.0f);
+        setParam (proc, ID::sat ("Bands"), 4.0f);
+        auto stereoAudio = render (proc, 1);
+        snapshot (proc, stereoAudio, outDir.getChildFile ("ui_stereo_eq.png"), 0);
+        snapshot (proc, stereoAudio, outDir.getChildFile ("ui_saturation.png"), 2);
+        snapshot (proc, stereoAudio, outDir.getChildFile ("ui_scope.png"), 3);
+        writeWav (stereoAudio, outDir.getChildFile ("stereo_demo.wav"));
+        proc.presets.loadPreset (10);
+    }
     snapshot (proc, render (proc, 1), outDir.getChildFile ("ui_about.png"), 0, 1);
     snapshot (proc, render (proc, 1), outDir.getChildFile ("ui_save.png"), 0, 2);
     {

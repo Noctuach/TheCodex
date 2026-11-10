@@ -96,7 +96,7 @@ private:
 
     juce::TextButton bandButtons[6];
     PowerButton onButton;
-    ChoiceBox type { "Type" }, slope { "Slope" };
+    ChoiceBox type { "Type" }, slope { "Slope" }, placement { "Stereo" };
     Knob freq { "Freq" }, gain { "Gain" }, q { "Q" };
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> onAttachment;
     juce::TextButton range12 { juce::String (juce::CharPointer_UTF8 ("\xc2\xb1" "12 dB")) }, range24 { juce::String (juce::CharPointer_UTF8 ("\xc2\xb1" "24 dB")) };

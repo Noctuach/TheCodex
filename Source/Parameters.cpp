@@ -1,6 +1,7 @@
 #include "Parameters.h"
 #include "DSP/ClipDistortion.h"
 #include "DSP/Kick909.h"
+#include "DSP/MultibandSaturator.h"
 
 using namespace juce;
 
@@ -111,6 +112,7 @@ AudioProcessorValueTreeState::ParameterLayout Params::createLayout()
         addFloat (l, ID::clip (stage, "Out"), n + "Output", { -24.0f, 12.0f, 0.01f }, -6.0f, dbText);
         addBool (l, ID::clip (stage, "DC"), n + "DC Filter", true);
         addChoice (l, ID::clip (stage, "OS"), n + "Oversampling", ClipDistortion::oversamplingNames(), 2);
+        addFloat (l, ID::clip (stage, "Spatial"), n + "Spatial", { 0.0f, 1.0f }, 0.0f, pctText);
     }
 
     // ---------------- EQ ----------------
@@ -128,6 +130,39 @@ AudioProcessorValueTreeState::ParameterLayout Params::createLayout()
         addFloat (l, ID::band (b, "Gain"), n + "Gain", { -24.0f, 24.0f, 0.01f }, 0.0f, dbText);
         addFloat (l, ID::band (b, "Q"), n + "Q", skewed (0.1f, 18.0f, 1.0f), 0.707f, [] (float v) { return String (v, 2); });
         addChoice (l, ID::band (b, "Slope"), n + "Slope", slopes, 1);
+        addChoice (l, ID::band (b, "Place"), n + "Stereo Placement", { "Stereo", "Left", "Right", "Mid", "Side" }, 0);
+    }
+
+    // ---------------- Saturation (multiband) ----------------
+    addBool (l, ID::sat ("On"), "Saturation On", false);
+    l.add (std::make_unique<AudioParameterInt> (ParameterID { ID::sat ("Bands"), 1 }, "Saturation Bands", 1, sat::maxBands, 3));
+    addChoice (l, ID::sat ("Slope"), "Saturation Crossover Slope", sat::slopeNames(), 2);
+    addChoice (l, ID::sat ("OS"), "Saturation Oversampling", sat::oversamplingNames(), 1);
+    addFloat (l, ID::sat ("Mix"), "Saturation Mix", { 0.0f, 1.0f }, 1.0f, pctText);
+    addFloat (l, ID::sat ("Out"), "Saturation Output", { -24.0f, 12.0f, 0.01f }, 0.0f, dbText);
+    {
+        const float defX[] = { 120.0f, 400.0f, 1200.0f, 3500.0f, 9000.0f };
+        for (int j = 0; j < sat::maxBands - 1; ++j)
+            addFloat (l, ID::sat (("X" + String (j + 1)).toRawUTF8()), "Saturation Crossover " + String (j + 1),
+                      skewed (30.0f, 16000.0f, 700.0f), defX[j], hzText);
+    }
+    StringArray styleNames;
+    for (const auto& st : sat::styles()) styleNames.add (st.name);
+    const int defStyles[] = { 1, 1, 4, 3, 8, 0 };
+    for (int b = 0; b < sat::maxBands; ++b)
+    {
+        const String n = "Sat Band " + String (b + 1) + " ";
+        addChoice (l, ID::satBand (b, "Style"), n + "Style", styleNames, defStyles[b]);
+        addFloat (l, ID::satBand (b, "Drive"), n + "Drive", { 0.0f, 36.0f, 0.01f }, 6.0f, dbText);
+        addFloat (l, ID::satBand (b, "Mix"), n + "Mix", { 0.0f, 1.0f }, 1.0f, pctText);
+        addFloat (l, ID::satBand (b, "Fb"), n + "Feedback", { 0.0f, 1.0f }, 0.0f, pctText);
+        addFloat (l, ID::satBand (b, "FbFreq"), n + "Feedback Freq", skewed (20.0f, 20000.0f, 640.0f), 1000.0f, hzText);
+        addFloat (l, ID::satBand (b, "Dyn"), n + "Dynamics", { -1.0f, 1.0f, 0.001f }, 0.0f, [] (float v) { return String (roundToInt (v * 100.0f)) + " %"; });
+        addFloat (l, ID::satBand (b, "Tone"), n + "Tone", { -1.0f, 1.0f, 0.001f }, 0.0f, [] (float v) { return String (roundToInt (v * 100.0f)) + " %"; });
+        addFloat (l, ID::satBand (b, "Level"), n + "Level", { -24.0f, 12.0f, 0.01f }, 0.0f, dbText);
+        addBool (l, ID::satBand (b, "Mute"), n + "Mute", false);
+        addBool (l, ID::satBand (b, "Solo"), n + "Solo", false);
+        addBool (l, ID::satBand (b, "Bypass"), n + "Bypass", false);
     }
 
     // ---------------- Output ----------------

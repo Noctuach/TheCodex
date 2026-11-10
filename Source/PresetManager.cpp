@@ -130,13 +130,32 @@ PresetManager::PresetManager (AudioProcessorValueTreeState& s) : apvts (s)
          .clip (1, CD::Diode, 24.0f, -9.0f, 0.1f).band (1, LowCut, 32.0f).band (3, Bell, 450.0f, 5.0f, 1.2f)
          .band (4, Notch, 1500.0f, 0.0f, 3.0f).clip (2, CD::HardClip, 12.0f, -6.0f).character (1, 0.25f));
 
+    // ---- Stereo / saturation showcases ----
+    // Spatial distortion for width, with a Side low cut so everything below 150 Hz stays mono
+    add ("909 Wide Rawstyle", Builder().kick909 (2, 0.55f, 0.7f, 0.55f).set (ID::aRelease, 100.0f)
+         .clip (1, CD::HardClip, 26.0f, -10.0f).set (ID::clip (1, "Spatial"), 0.5f)
+         .band (1, LowCut, 150.0f, 0.0f, 0.707f, 2).set (ID::band (0, "Place"), 4.0f)   // band 1: Side low cut
+         .band (3, Bell, 383.0f, 6.0f, 1.0f).band (4, Bell, 1800.0f, -5.0f, 2.0f)
+         .clip (2, CD::Diode, 12.0f, -6.0f).set (ID::clip (2, "Spatial"), 0.3f));
+
+    // Multiband saturation: warm lows, taped mids, driven top
+    add ("Saturated Euphoric", Builder().synth (2, 40.0f, 150.0f, 3.5f).amp (1500.0f, 0.85f, 300.0f)
+         .click (0.1f, 4.0f, 3500.0f).clip (1, CD::SoftClip, 12.0f, -4.0f).band (3, Bell, 160.0f, 3.0f, 1.0f)
+         .clip (2, CD::Tube, 4.0f, -3.0f)
+         .set (ID::sat ("On"), 1.0f).set (ID::sat ("Bands"), 3.0f).set (ID::sat ("X1"), 150.0f).set (ID::sat ("X2"), 2500.0f)
+         .set (ID::satBand (0, "Style"), 1.0f).set (ID::satBand (0, "Drive"), 8.0f)
+         .set (ID::satBand (1, "Style"), 4.0f).set (ID::satBand (1, "Drive"), 12.0f).set (ID::satBand (1, "Dyn"), 0.3f)
+         .set (ID::satBand (2, "Style"), 9.0f).set (ID::satBand (2, "Drive"), 6.0f).set (ID::satBand (2, "Tone"), -0.3f)
+         .set (ID::satBand (2, "Level"), -6.0f));
+
     // Output levels matched to about -3 dBFS peak in the key of F (measured with tools/CodexRender),
     // so switching presets does not jump in volume.
     const std::map<String, float> outputLevels {
         { "Oldskool Raw", 0.3f }, { "Euphoric Tail", -1.3f }, { "Early Hardstyle", 0.4f }, { "Punchy Tok", -1.8f },
         { "Zaag Kick", 1.4f }, { "Rotterdam Gabber", -0.2f }, { "909 Clean", -3.7f }, { "909 Oldskool Hardstyle", 1.4f },
         { "909 Euphoric", -0.9f }, { "909 Rawstyle", -0.8f }, { "909 Gabber Overdrive", 1.6f }, { "909 Tok", -3.3f },
-        { "909 Boom Tail", -0.2f }, { "909 Fuzz Box", 1.7f }, { "909 Bitcrushed", 1.9f }, { "909 Hard Attack Raw", -0.1f } };
+        { "909 Boom Tail", -0.2f }, { "909 Fuzz Box", 1.7f }, { "909 Bitcrushed", 1.9f }, { "909 Hard Attack Raw", -0.1f },
+        { "909 Wide Rawstyle", 3.0f }, { "Saturated Euphoric", -9.1f } };
     for (auto& preset : factory)
         if (auto it = outputLevels.find (preset.name); it != outputLevels.end())
         {

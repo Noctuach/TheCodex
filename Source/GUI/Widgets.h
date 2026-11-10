@@ -316,3 +316,57 @@ inline void drawGroupCaption (juce::Graphics& g, juce::Rectangle<int> r, const j
     g.setColour (Colours_::outline);
     g.drawHorizontalLine (r.getCentreY(), x, (float) r.getRight());
 }
+
+/** Icon button that reports press and release (used for the preview / play button). */
+class PressButton : public IconButton
+{
+public:
+    using IconButton::IconButton;
+    std::function<void (bool)> onPress;
+    void buttonStateChanged() override
+    {
+        const bool down = isDown();
+        if (down != wasDown) { wasDown = down; if (onPress) onPress (down); }
+    }
+private:
+    bool wasDown = false;
+};
+
+/** Small knob with caption and value beside it, for the header. */
+class HeaderKnob : public juce::Component
+{
+public:
+    explicit HeaderKnob (const juce::String& caption) : title (caption.toUpperCase())
+    {
+        slider.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
+        slider.setTextBoxStyle (juce::Slider::NoTextBox, true, 0, 0);
+        slider.setMouseDragSensitivity (220);
+        slider.onValueChange = [this] { repaint(); };
+        addAndMakeVisible (slider);
+    }
+
+    void attach (juce::AudioProcessorValueTreeState& s, const juce::String& id)
+    {
+        attachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (s, id, slider);
+        configureParameterSlider (slider, s, id);
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        auto r = getLocalBounds().toFloat().withTrimmedLeft ((float) getHeight() + 4.0f);
+        g.setColour (Colours_::textDim);
+        g.setFont (Fonts::label (11.5f, 0.14f));
+        g.drawText (title, r.removeFromTop (r.getHeight() * 0.5f), juce::Justification::bottomLeft);
+        g.setColour (Colours_::text);
+        g.setFont (Fonts::medium (13.5f));
+        g.drawText (slider.getTextFromValue (slider.getValue()), r, juce::Justification::topLeft);
+    }
+
+    void resized() override { slider.setBounds (getLocalBounds().removeFromLeft (getHeight())); }
+
+    juce::Slider slider;
+
+private:
+    juce::String title;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> attachment;
+};

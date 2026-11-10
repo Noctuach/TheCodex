@@ -1,27 +1,27 @@
 # Codex
 
 **A free hardstyle kick synthesizer.** Codex builds kicks the way they were made before sample packs: a swept oscillator
-(or a synthesized 909), distortion, EQ, and distortion again. There are no samples; every kick is generated in real time,
-in the key of your track.
+(or a synthesized 909), distortion, EQ, distortion again and multiband saturation. There are no samples; every kick is
+generated in real time, in the key of your track.
 
-![Codex: kick page](docs/screenshot.png)
+![Codex: kick page with mid/side EQ](docs/screenshot.png)
 
-| 909 engine | Distortion page |
-|---|---|
-| ![909 engine](docs/screenshot-909.png) | ![Distortion page](docs/screenshot-distortion.png) |
+| Distortion | Saturation | Scope |
+|---|---|---|
+| ![Distortion page](docs/screenshot-distortion.png) | ![Saturation page](docs/screenshot-saturation.png) | ![Scope page](docs/screenshot-scope.png) |
 
 Formats: **VST3** (Windows, macOS, Linux), **AU** (macOS) and a **Standalone** app.
 
 ---
 
 ## Quick start
-1. Load Codex on an instrument track and play any note (or press **KICK** in the top bar).
+1. Load Codex on an instrument track and play any note (or hold the **play** button next to the root-note readout).
 2. Set **KEY** to the key of your track. With *Fixed Key* mode, every MIDI note plays the kick in that key.
 3. Browse the presets with the arrows next to the preset name.
 4. Hover over any control to see what it does.
 
-The **tuner** (bottom right) measures the actual root note coming out of the plugin, after all distortion,
-so you can see your kick is in key.
+The **ROOT** readout in the tab bar is a tuner: it measures the actual root note coming out of the plugin, after all
+distortion, so you can see your kick is in key. It turns green within 10 cents of the selected key.
 
 ## Your first hardstyle kick, step by step
 1. Start from **Init** (or **909 Clean** for the 909 engine).
@@ -33,7 +33,10 @@ so you can see your kick is in key.
    around 300–500 Hz; whatever you boost here gets pushed hardest by the second distortion.
 6. **Second distortion:** *Dist 2* with *Hard Clip* or *Diode* and a lower drive (6–14 dB). Use its *Hi Filter* (40–80 Hz)
    to keep the sub clean.
-7. Check the tuner and the output meter (keep the peak marker out of the red).
+7. Optional: on the *Saturation* page, switch on multiband saturation to colour lows, mids and highs differently.
+8. Optional width: turn up *Spatial* on a distortion unit, then add an EQ band with **Side** placement as a low cut
+   (100–200 Hz) so the low end stays mono.
+9. Check the ROOT readout and the output meter (keep the peak marker out of the red).
 
 ## Controls
 
@@ -46,7 +49,9 @@ so you can see your kick is in key.
 | Key / Oct | Root note, **F to E** (F1 = 43.65 Hz … E2 = 82.41 Hz), plus an octave shift. Presets never change the key. |
 | Key Mode | *Fixed Key* plays the selected key from any MIDI note; *Follow MIDI* plays the note you press. |
 | KICK | Plays the kick in the selected key. |
+| Output | Final output level, with a stereo meter. |
 | Menu | Save/delete presets, open the preset folder, interface size (75–200 %), tooltips on/off, About. |
+| ROOT / play | Tuner readout of the output's root note, and a play button that previews the kick in the selected key. |
 
 ### Kick page
 | Section | Controls |
@@ -55,10 +60,10 @@ so you can see your kick is in key.
 | **Source: 909** | Synthesized 909-style bass drum. *909 Model* (Classic, Long Tail, Punch, Deep, Hard Attack, Gabber, Early Hardstyle, Boom, Driven, Short Tok) plus the original's *Tune* (sweep depth), *Attack* (click) and *Decay*. |
 | **Pitch Envelope** | ADSR for the pitch sweep, with *Amount* (semitones above the root) and *Curve*. Inactive in 909 mode. |
 | **Amp Envelope** | ADSR for volume with *Curve*. In 909 mode it acts as a gate (attack and release only). |
-| **Equalizer** | 6 bands: Low/High Cut (12/24/48 dB/oct), Low/High Shelf, Bell, Notch. Live spectrum analyzer, ±12/±24 dB view. |
+| **Equalizer** | 6 bands: Low/High Cut (12/24/48 dB/oct), Low/High Shelf, Bell, Notch. Each band has a **stereo placement**: Stereo, Left, Right, **Mid** or **Side**. When bands work on Mid or Side only, the display shows a separate dashed Side curve. Live spectrum analyzer, ±12/±24 dB view. |
 
 **EQ mouse controls:** drag a node to set frequency/gain · mouse wheel for Q · double-click a node to turn it on/off ·
-double-click empty space to add a band · right-click a node for type and slope · Shift for fine moves.
+double-click empty space to add a band · right-click a node for type, slope and stereo placement · Shift for fine moves.
 
 ### Distortion page
 Two full distortion units, one **before** and one **after** the EQ:
@@ -66,15 +71,27 @@ Two full distortion units, one **before** and one **after** the EQ:
 | Group | Controls |
 |---|---|
 | Type | 12 curves: Hard Clip, Soft Clip, Tanh, Overdrive, Tube, Diode, Fuzz, Sine Fold, Tri Fold, Rectify, Bitcrush, Asym Clip. The display shows the live transfer curve and the current input level. |
-| Shape | *Drive*, *Boost* (input gain on dry and wet), *Characteristic* (morphs any curve towards a square wave), *Offset* (asymmetry). |
+| Shape | *Drive*, *Boost* (input gain on dry and wet), *Character* (morphs any curve towards a square wave), *Offset* (asymmetry), *Spatial* (distorts left and right differently for stereo width). |
 | Wet filters / tone | *Lo Filter* (low-pass before the distortion), *Hi Filter* (high-pass after it), *Shelf Freq/Gain*. |
 | Output | *Mix* (dry/wet), *Output*. |
 | Options | *Oversampling* (Off/2x/4x/8x) and *DC Filter*. |
 
-The bottom row of the kick page has quick controls for both stages; **EDIT** opens the full unit.
+### Saturation page
+Multiband saturation after Distortion 2, modelled on the feature set of classic multiband saturators:
 
-### Output
-**Scope** (the first 500 ms of every hit), **tuner**, output level and meter.
+| Group | Controls |
+|---|---|
+| Bands | 1–6 bands. Drag the crossover lines on the display; crossover slope 6/12/24/48 dB/oct (Linkwitz-Riley, phase-aligned so bands sum flat). M / S / B badges on each band: mute, solo, bypass. |
+| Per band | *Style* (19 styles: Tube, Tape, Transformer, Amp, Clip and FX categories), *Drive*, *Mix*, *Level*, *Feedback* + *Feedback Freq* (resonant feedback), *Dynamics* (more or less saturation on loud parts), *Tone* (tilt). |
+| Global | Power, *Oversampling* (Off/2x/4x), *Mix*, *Output*. |
+
+### Scope page
+| Panel | What it shows |
+|---|---|
+| Oscilloscope | *HIT* captures every kick from the note-on; *FREE* runs continuously. Window 100 ms – 2 s. Channels: L/R overlaid, Mid, Side, Left or Right. |
+| Stereo field | Vectorscope in *M/S* (mono = vertical line) or *L/R* orientation, with correlation and width meters. |
+| Spectrum | Mid, Side or L/R; slope 0 / 3 / 4.5 dB per octave; peak hold. |
+| Tuner, Levels | Full tuner; left/right peak and RMS meters with peak read-outs (click to reset). |
 
 ### Mouse and keyboard
 Double-click any knob to reset it · Shift-drag for fine control · click a value to type it in · drag the bottom-right

@@ -55,3 +55,22 @@ Steinberg's Distroyer (introduced in Cubase 10) covers everything from smooth ov
 - **Boost** (on dry and wet), **Oversampling**, plus **Shelf Freq / Gain**, **Tone**, **Spatial**, **Mix** and **Output** in recent versions ([Cubase 14 reference](https://www.steinberg.help/r/cubase-pro/cubaseplugref/14.0/en/_shared/topics/plug_ref/distroyer_r.html)).
 
 **In Codex:** each distortion stage follows that signal flow (Boost → Lo Filter → Drive/curve/Offset → Characteristic → Hi Filter → Shelf → Mix → Output → DC Filter) in its own blue-themed design. Codex adds a selectable base curve (12 types) under the Characteristic morph, and a live transfer-curve display. *Spatial* is left out because the kick is mono. The full Steinberg and Sound on Sound pages were blocked from the build environment, so this section is based on search summaries of those pages.
+
+## Mid/side EQ: FabFilter Pro-Q 3 as a reference
+- Pro-Q 3 sets the stereo channel **per band**: Stereo, Left, Right, Mid or Side. Pro-Q 2 only had one L/R or M/S mode for the whole instance ([MusicRadar](https://musicradar.com/news/fabfilter-pro-q-3-is-coming-and-you-dont-have-long-to-wait-for-it), [Sage Audio](https://www.sageaudio.com/blog/audio-plugins/fabfilter-pro-q-3-10-things-you-need-to-know.php)).
+- The placement is set from the band's right-click menu ("Stereo Placement"). A classic use is a Side-only low cut to keep the low end mono ([Sage Audio](https://www.sageaudio.com/blog/audio-plugins/fabfilter-pro-q-3-10-things-you-need-to-know.php)).
+
+**In Codex:** each EQ band has a Stereo/Left/Right/Mid/Side placement (band strip, node right-click menu and a badge on the node). The display draws the Mid curve and, when any band is Mid- or Side-only, a dashed Side curve.
+Because a kick is generated in mono, the distortion units also gained Distroyer's **Spatial** control, which distorts left and right differently. That is what creates stereo content for the M/S EQ, saturation and stereo scope to work on.
+
+## Multiband saturation: FabFilter Saturn 1 / 2 as a reference
+- Saturn 2: up to **6 bands**, crossover slopes **6, 12, 24 and 48 dB/oct**. Per band: drive, mix, feedback, dynamics, tone and level. There are 28 styles grouped as tube, tape, transformer, amp and FX; Saturn 1 had 16 ([FabFilter help](https://www.fabfilter.com/help/saturn), [MusicTech](https://www.musictech.net/news/fabfilter-saturn-2/), [Magnetic Mag](https://magneticmag.com/2023/02/fabfilters-saturn-2-review/)).
+
+**In Codex:** the same band structure and per-band controls (plus mute/solo/bypass), with 19 original styles in the same categories (names and curves are Codex's own). Crossovers are Linkwitz-Riley with all-pass compensation; the test tool verifies that bypassed bands sum flat at every slope.
+
+## Scope page: Vengeance VPS Scope as a reference
+- VPS Scope combines an oscilloscope (synced or free running, zoomable), a spectrum analyzer and a stereo field view (vector-scope, correlation, M/S modes) ([KVR](https://www.kvraudio.com/product/vps-scope-by-vengeance-sound), [MusicRadar](https://musicradar.com/computermusic/free-pc-mac-analyser-plugin-vengeance-sound-scope-618493)).
+
+**In Codex:** a hit-synced or free-running oscilloscope (100 ms – 2 s, L/R/M/S), a vectorscope with correlation and width, a spectrum with slope and peak hold, a tuner and L/R level meters.
+
+The FabFilter help pages could not be opened from the build environment (blocked host), so these notes are based on search results quoting them, plus reviews.

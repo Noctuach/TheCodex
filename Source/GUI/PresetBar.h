@@ -76,8 +76,9 @@ private:
 class SegmentedChoice : public juce::Component
 {
 public:
-    SegmentedChoice (juce::RangedAudioParameter& p, const juce::StringArray& labels, const juce::String& tooltip)
-        : attachment (p, [this] (float v) { setIndex (juce::roundToInt (v)); })
+    /** valueOffset: parameter value of the first button (e.g. 1 for an integer parameter starting at 1). */
+    SegmentedChoice (juce::RangedAudioParameter& p, const juce::StringArray& labels, const juce::String& tooltip, int valueOffset = 0)
+        : offset (valueOffset), attachment (p, [this] (float v) { setIndex (juce::roundToInt (v) - offset); })
     {
         for (int i = 0; i < labels.size(); ++i)
         {
@@ -88,7 +89,7 @@ public:
             if (i > 0) edges |= juce::Button::ConnectedOnLeft;
             if (i < labels.size() - 1) edges |= juce::Button::ConnectedOnRight;
             b->setConnectedEdges (edges);
-            b->onClick = [this, i] { attachment.setValueAsCompleteGesture ((float) i); };
+            b->onClick = [this, i] { attachment.setValueAsCompleteGesture ((float) (i + offset)); };
             addAndMakeVisible (b);
         }
         attachment.sendInitialUpdate();
@@ -114,6 +115,7 @@ private:
     }
 
     juce::OwnedArray<juce::TextButton> buttons;
+    int offset = 0;
     juce::ParameterAttachment attachment;
     int index = 0;
 };

@@ -45,6 +45,9 @@ namespace ID
     inline juce::String clip (int stage, const char* suffix) { return "d" + juce::String (stage) + suffix; }
     // EQ bands: "b1Freq" ... "b6Slope"
     inline juce::String band (int bandIndex, const char* suffix) { return "b" + juce::String (bandIndex + 1) + suffix; }
+    // Saturation: global "satOn", "satBands", ... and per band "s1Style" ... "s6Bypass"
+    inline juce::String sat (const char* suffix) { return juce::String ("sat") + suffix; }
+    inline juce::String satBand (int bandIndex, const char* suffix) { return "s" + juce::String (bandIndex + 1) + suffix; }
 }
 
 namespace Params

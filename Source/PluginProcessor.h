@@ -4,6 +4,7 @@
 #include "DSP/KickVoice.h"
 #include "DSP/ClipDistortion.h"
 #include "DSP/ParametricEQ.h"
+#include "DSP/MultibandSaturator.h"
 #include "PresetManager.h"
 
 /** Lock-free single-producer/single-consumer sample FIFO feeding the spectrum analyzer. */
@@ -65,25 +66,31 @@ public:
     void getStateInformation (juce::MemoryBlock& destData) override;
     void setStateInformation (const void* data, int sizeInBytes) override;
 
-    /** Called by the GUI "KICK" button: press = note on, release = note off. */
+    /** Called by the GUI preview button: press = note on, release = note off. */
     void triggerPreview (bool down) { (down ? previewOn : previewOff).store (true); }
 
     ClipDistortion& getClip (int stage) { return stage == 1 ? clip1 : clip2; }
+    sat::MultibandSaturator& getSaturator() { return saturator; }
 
-    /** Peak since last read (for the GUI meter). */
-    float getAndResetPeak() { return peak.exchange (0.0f); }
+    /** Output peak since last read, per channel (0 = left, 1 = right). */
+    float getAndResetPeak (int channel) { return peaks[(size_t) channel].exchange (0.0f); }
 
     juce::UndoManager undoManager;
     juce::AudioProcessorValueTreeState apvts;
     PresetManager presets { apvts };
 
     //==========================================================================
-    // Kick scope: min/max waveform of the most recent hit (written by the audio thread, read by the GUI)
-    static constexpr int scopePoints = 600;
-    static constexpr double scopeSeconds = 0.5;
-    std::array<float, scopePoints> scopeMin {}, scopeMax {};
+    // Hit-synced scope capture: min/max of Left, Right, Mid and Side for each display point
+    // (written by the audio thread from each note-on, read by the GUI).
+    static constexpr int scopePoints = 800;
+    enum ScopeChannel { ScopeLeft = 0, ScopeRight, ScopeMid, ScopeSide, numScopeChannels };
+    std::array<std::array<float, scopePoints>, numScopeChannels> scopeMin {}, scopeMax {};
     std::atomic<int> scopeWritten { 0 }, scopeGeneration { 0 };
-    AnalyzerFifo analyzer, tunerFeed;
+    std::atomic<float> scopeWindowSeconds { 0.5f };   // set by the GUI
+    std::atomic<float> scopeCapturedSeconds { 0.5f }; // window of the current capture
+
+    /** Mid signal for the EQ analyzer and the tuner; left/right for the scope page. */
+    AnalyzerFifo analyzer, tunerFeed, scopeFeedL, scopeFeedR;
 
     /** MIDI note of the selected key (F1..E2, shifted by the octave setting). */
     int getKeyNote() const;
@@ -94,23 +101,26 @@ private:
     void updateParameters();
     void handleMidi (const juce::MidiMessage&, int positionInChunk);
     void startScope();
-    void feedScope (float sample) noexcept;
+    void feedScope (float left, float right) noexcept;
+    void updateLatency();
 
     static constexpr int chunkSize = 256;
 
     KickVoice voice;
     ClipDistortion clip1, clip2;
     eq::ParametricEQ<Params::numBands> equaliser;
-    std::vector<float> mono;
+    sat::MultibandSaturator saturator;
+    std::vector<float> left, right, mid;
     juce::SmoothedValue<float> outGain;
 
     std::atomic<bool> previewOn { false }, previewOff { false };
     int captureArmAt = -1, scopePos = -1, scopeCount = 0, scopeSamplesPerPoint = 40;
-    float scopeCurMin = 0.0f, scopeCurMax = 0.0f;
-    std::atomic<float> peak { 0.0f };
+    std::array<float, numScopeChannels> scopeCurMin {}, scopeCurMax {};
+    std::array<std::atomic<float>, 2> peaks {};
 
-    struct BandParams { std::atomic<float>* on, * type, * freq, * gain, * q, * slope; };
-    struct ClipParams { std::atomic<float> *on, *mode, *drive, *boost, *chr, *bias, *loFilt, *hiFilt, *shelfF, *shelfG, *mix, *out, *dc, *os; };
+    struct BandParams { std::atomic<float>* on, * type, * freq, * gain, * q, * slope, * place; };
+    struct ClipParams { std::atomic<float> *on, *mode, *drive, *boost, *chr, *bias, *loFilt, *hiFilt, *shelfF, *shelfG, *mix, *out, *dc, *os, *spatial; };
+    struct SatBandParams { std::atomic<float> *style, *drive, *mix, *fb, *fbFreq, *dyn, *tone, *level, *mute, *solo, *bypass; };
 
     std::atomic<float>* p (const juce::String& id) { return apvts.getRawParameterValue (id); }
 
@@ -121,6 +131,9 @@ private:
     std::atomic<float> *outGainParam;
     ClipParams clipParams[2];
     BandParams bandParams[Params::numBands];
+    std::atomic<float> *satOn, *satBands, *satSlope, *satOs, *satMix, *satOut;
+    std::array<std::atomic<float>*, sat::maxBands - 1> satX {};
+    SatBandParams satBandParams[sat::maxBands];
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (CodexProcessor)
 };

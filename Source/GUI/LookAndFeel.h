@@ -113,6 +113,12 @@ namespace Icons
         p.applyTransform (juce::AffineTransform::scale (-1.0f, 1.0f).translated (1.0f, 0.0f));
         return p;
     }
+    inline juce::Path play()
+    {
+        juce::Path p;
+        p.startNewSubPath (0.32f, 0.2f); p.lineTo (0.78f, 0.5f); p.lineTo (0.32f, 0.8f); p.closeSubPath();
+        return p;
+    }
     inline juce::Path menu()
     {
         juce::Path p;

@@ -24,12 +24,23 @@ CodexProcessor::CodexProcessor()
     {
         auto c = [&] (const char* sfx) { return p (ID::clip (s + 1, sfx)); };
         clipParams[s] = { c ("On"), c ("Mode"), c ("Drive"), c ("Boost"), c ("Char"), c ("Bias"), c ("LoFilt"), c ("HiFilt"),
-                          c ("ShelfF"), c ("ShelfG"), c ("Mix"), c ("Out"), c ("DC"), c ("OS") };
+                          c ("ShelfF"), c ("ShelfG"), c ("Mix"), c ("Out"), c ("DC"), c ("OS"), c ("Spatial") };
     }
 
     for (int b = 0; b < Params::numBands; ++b)
         bandParams[b] = { p (ID::band (b, "On")), p (ID::band (b, "Type")), p (ID::band (b, "Freq")),
-                          p (ID::band (b, "Gain")), p (ID::band (b, "Q")), p (ID::band (b, "Slope")) };
+                          p (ID::band (b, "Gain")), p (ID::band (b, "Q")), p (ID::band (b, "Slope")), p (ID::band (b, "Place")) };
+
+    satOn = p (ID::sat ("On")); satBands = p (ID::sat ("Bands")); satSlope = p (ID::sat ("Slope"));
+    satOs = p (ID::sat ("OS")); satMix = p (ID::sat ("Mix")); satOut = p (ID::sat ("Out"));
+    for (int j = 0; j < sat::maxBands - 1; ++j)
+        satX[(size_t) j] = p (ID::sat (("X" + juce::String (j + 1)).toRawUTF8()));
+    for (int b = 0; b < sat::maxBands; ++b)
+    {
+        auto c = [&] (const char* sfx) { return p (ID::satBand (b, sfx)); };
+        satBandParams[b] = { c ("Style"), c ("Drive"), c ("Mix"), c ("Fb"), c ("FbFreq"), c ("Dyn"), c ("Tone"),
+                             c ("Level"), c ("Mute"), c ("Solo"), c ("Bypass") };
+    }
 
     undoManager.clearUndoHistory(); // start with a clean history
 }
@@ -42,8 +53,8 @@ bool CodexProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
 
 void CodexProcessor::prepareToPlay (double sampleRate, int)
 {
-    mono.assign ((size_t) chunkSize, 0.0f);
-    scopeSamplesPerPoint = juce::jmax (1, juce::roundToInt (sampleRate * scopeSeconds / scopePoints));
+    for (auto* v : { &left, &right, &mid })
+        v->assign ((size_t) chunkSize, 0.0f);
     scopePos = -1;
 
     voice.prepare (sampleRate);
@@ -51,12 +62,21 @@ void CodexProcessor::prepareToPlay (double sampleRate, int)
     clip1.prepare (sampleRate, chunkSize);
     clip2.prepare (sampleRate, chunkSize);
     equaliser.prepare (sampleRate);
+    saturator.prepare (sampleRate, chunkSize);
     updateParameters();
 
     outGain.reset (sampleRate, 0.02);
     outGain.setCurrentAndTargetValue (juce::Decibels::decibelsToGain (outGainParam->load()));
 
-    setLatencySamples (juce::roundToInt (clip1.getLatencyInSamples() + clip2.getLatencyInSamples()));
+    updateLatency();
+}
+
+void CodexProcessor::updateLatency()
+{
+    const int latency = juce::roundToInt (clip1.getLatencyInSamples() + clip2.getLatencyInSamples()
+                                          + saturator.getLatencyInSamples());
+    if (latency != getLatencySamples())
+        setLatencySamples (latency);
 }
 
 int CodexProcessor::getKeyNote() const
@@ -106,6 +126,7 @@ void CodexProcessor::updateParameters()
         cs.outDb        = c.out->load();
         cs.dcFilter     = c.dc->load() > 0.5f;
         cs.oversampling = (int) c.os->load();
+        cs.spatial      = c.spatial->load();
         clips[i]->setSettings (cs);
     }
 
@@ -119,39 +140,75 @@ void CodexProcessor::updateParameters()
         bs.gainDb = bp.gain->load();
         bs.q      = bp.q->load();
         bs.slope  = (int) bp.slope->load();
+        bs.placement = (eq::Placement) (int) bp.place->load();
         equaliser.setBand (b, bs);
     }
 
+    sat::Settings ss;
+    ss.enabled      = satOn->load() > 0.5f;
+    ss.numBands     = juce::jlimit (1, sat::maxBands, (int) satBands->load());
+    ss.slope        = (int) satSlope->load();
+    ss.oversampling = (int) satOs->load();
+    ss.mix          = satMix->load();
+    ss.outDb        = satOut->load();
+    for (int j = 0; j < sat::maxBands - 1; ++j)
+        ss.crossovers[(size_t) j] = satX[(size_t) j]->load();
+    for (int b = 0; b < sat::maxBands; ++b)
+    {
+        const auto& sp = satBandParams[b];
+        auto& bs = ss.bands[(size_t) b];
+        bs.style = (int) sp.style->load();
+        bs.driveDb = sp.drive->load();
+        bs.mix = sp.mix->load();
+        bs.feedback = sp.fb->load();
+        bs.feedbackHz = sp.fbFreq->load();
+        bs.dynamics = sp.dyn->load();
+        bs.tone = sp.tone->load();
+        bs.levelDb = sp.level->load();
+        bs.mute = sp.mute->load() > 0.5f;
+        bs.solo = sp.solo->load() > 0.5f;
+        bs.bypass = sp.bypass->load() > 0.5f;
+    }
+    saturator.setSettings (ss);
+
     outGain.setTargetValue (juce::Decibels::decibelsToGain (outGainParam->load()));
 
-    // Oversampling changes the latency: report it to the host
-    const int latency = juce::roundToInt (clip1.getLatencyInSamples() + clip2.getLatencyInSamples());
-    if (latency != getLatencySamples())
-        setLatencySamples (latency);
+    // Oversampling and the saturation stage change the latency: report it to the host
+    updateLatency();
 }
 
 void CodexProcessor::startScope()
 {
+    const float window = juce::jlimit (0.05f, 2.0f, scopeWindowSeconds.load());
+    scopeCapturedSeconds.store (window);
+    scopeSamplesPerPoint = juce::jmax (1, juce::roundToInt (getSampleRate() * window / scopePoints));
     scopePos = 0;
     scopeCount = 0;
-    scopeCurMin = 1.0e9f;
-    scopeCurMax = -1.0e9f;
+    scopeCurMin.fill (1.0e9f);
+    scopeCurMax.fill (-1.0e9f);
     scopeWritten.store (0);
     scopeGeneration.fetch_add (1);
 }
 
-void CodexProcessor::feedScope (float x) noexcept
+void CodexProcessor::feedScope (float l, float r) noexcept
 {
-    scopeCurMin = std::min (scopeCurMin, x);
-    scopeCurMax = std::max (scopeCurMax, x);
+    const float v[] = { l, r, 0.5f * (l + r), 0.5f * (l - r) };
+    for (size_t c = 0; c < numScopeChannels; ++c)
+    {
+        scopeCurMin[c] = std::min (scopeCurMin[c], v[c]);
+        scopeCurMax[c] = std::max (scopeCurMax[c], v[c]);
+    }
     if (++scopeCount >= scopeSamplesPerPoint)
     {
-        scopeMin[(size_t) scopePos] = scopeCurMin;
-        scopeMax[(size_t) scopePos] = scopeCurMax;
+        for (size_t c = 0; c < numScopeChannels; ++c)
+        {
+            scopeMin[c][(size_t) scopePos] = scopeCurMin[c];
+            scopeMax[c][(size_t) scopePos] = scopeCurMax[c];
+        }
         scopeWritten.store (scopePos + 1);
         scopeCount = 0;
-        scopeCurMin = 1.0e9f;
-        scopeCurMax = -1.0e9f;
+        scopeCurMin.fill (1.0e9f);
+        scopeCurMax.fill (-1.0e9f);
         if (++scopePos >= scopePoints)
             scopePos = -1;
     }
@@ -176,7 +233,7 @@ void CodexProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiB
     juce::ScopedNoDenormals noDenormals;
     updateParameters();
 
-    // GUI "KICK" button always plays the selected key (uses an out-of-range note id so MIDI can't cut it)
+    // GUI preview button always plays the selected key (uses an out-of-range note id so MIDI can't cut it)
     constexpr int previewId = 128;
     if (previewOn.exchange (false))  { voice.noteOn (previewId, (float) getKeyNote()); captureArmAt = 0; }
     if (previewOff.exchange (false)) voice.noteOff (previewId);
@@ -184,14 +241,16 @@ void CodexProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiB
     const int numSamples  = buffer.getNumSamples();
     const int numChannels = buffer.getNumChannels();
     auto midiIt = midi.begin();
-    float blockPeak = 0.0f;
+    std::array<float, 2> blockPeak { 0.0f, 0.0f };
 
     for (int start = 0; start < numSamples; start += chunkSize)
     {
         const int n = std::min (chunkSize, numSamples - start);
-        float* x = mono.data();
+        float* l = left.data();
+        float* r = right.data();
+        float* m = mid.data();
 
-        // Render the voice, splitting at MIDI events for sample-accurate triggering
+        // Render the (mono) voice, splitting at MIDI events for sample-accurate triggering
         int pos = 0;
         while (pos < n)
         {
@@ -203,33 +262,49 @@ void CodexProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiB
                 if (t <= pos) { handleMidi (meta.getMessage(), pos); ++midiIt; }
                 else          { next = std::min (t, n); break; }
             }
-            voice.render (x + pos, next - pos);
+            voice.render (l + pos, next - pos);
             pos = next;
         }
+        std::copy (l, l + n, r);
 
-        // Old-school chain: distort -> EQ -> distort again
-        clip1.process (x, n);
-        equaliser.process (x, n);
-        clip2.process (x, n);
+        // Old-school chain: distort -> EQ -> distort again -> multiband saturation (stereo from here on)
+        clip1.process (l, r, n);
+        equaliser.process (l, r, n);
+        clip2.process (l, r, n);
+        saturator.process (l, r, n);
 
         for (int i = 0; i < n; ++i)
         {
-            x[i] *= outGain.getNextValue();
-            blockPeak = std::max (blockPeak, std::abs (x[i]));
+            const float g = outGain.getNextValue();
+            l[i] *= g;
+            r[i] *= g;
+            m[i] = 0.5f * (l[i] + r[i]);
+            blockPeak[0] = std::max (blockPeak[0], std::abs (l[i]));
+            blockPeak[1] = std::max (blockPeak[1], std::abs (r[i]));
             if (i == captureArmAt) startScope();
-            if (scopePos >= 0) feedScope (x[i]);
+            if (scopePos >= 0) feedScope (l[i], r[i]);
         }
         captureArmAt = -1;
 
-        for (int ch = 0; ch < numChannels; ++ch)
-            buffer.copyFrom (ch, start, x, n);
+        if (numChannels >= 2)
+        {
+            buffer.copyFrom (0, start, l, n);
+            buffer.copyFrom (1, start, r, n);
+            for (int ch = 2; ch < numChannels; ++ch)
+                buffer.clear (ch, start, n);
+        }
+        else if (numChannels == 1)
+            buffer.copyFrom (0, start, m, n);
 
-        analyzer.push (x, n);
-        tunerFeed.push (x, n);
+        analyzer.push (m, n);
+        tunerFeed.push (m, n);
+        scopeFeedL.push (l, n);
+        scopeFeedR.push (r, n);
     }
 
-    if (blockPeak > peak.load())
-        peak.store (blockPeak);
+    for (int c = 0; c < 2; ++c)
+        if (blockPeak[(size_t) c] > peaks[(size_t) c].load())
+            peaks[(size_t) c].store (blockPeak[(size_t) c]);
 }
 
 void CodexProcessor::getStateInformation (juce::MemoryBlock& destData)
