@@ -4,6 +4,7 @@ All notable changes to Codex. Versions follow [Semantic Versioning](https://semv
 
 ## [Unreleased]
 ### Added
+- Quick guide (menu), keyboard shortcuts, and a "*" marker on the preset name when the sound has been edited.
 - **Sub layer** (kick page): a clean sine on the oscillator's own phase (follows the sweep), faded in after the punch,
   low-passed and added after all effects, delayed by the chain latency so it stays aligned. **ALIGN** finds the best
   phase automatically (on 909 Rawstyle: +9.8 dB of clean fundamental).

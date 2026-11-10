@@ -160,7 +160,15 @@ Stereo room reverb at the end of the chain, for width and ambience. The layout f
 
 ### Mouse and keyboard
 Double-click any knob to reset it · Shift-drag for fine control · click a value to type it in · drag the bottom-right
-corner to resize the window.
+corner to resize the window. **Menu → Quick guide** shows all gestures on one page.
+
+| Shortcut (Cmd on macOS) | Action |
+|---|---|
+| Ctrl+Z / Ctrl+Shift+Z (or Ctrl+Y) | Undo / redo |
+| Ctrl+B | Preset browser |
+| Ctrl+S | Save preset |
+| Ctrl+Left / Ctrl+Right | Previous / next preset |
+| Delete (EQ display) | Delete the selected band |
 
 ---
 
