@@ -100,6 +100,7 @@ public:
 private:
     void applyScale (float scale);
 
+    bool initialised = false;   // only save the window size once the user can actually change it
     CodexLookAndFeel lnf;
     juce::ApplicationProperties appProperties;
     MainView view;

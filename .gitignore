@@ -4,3 +4,5 @@ build/
 *.user
 renders/
 test-output/
+dist/
+build-win/

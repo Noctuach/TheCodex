@@ -451,7 +451,11 @@ CodexEditor::CodexEditor (CodexProcessor& p)
           PropertiesFile::Options o;
           o.applicationName = "Codex";
           o.filenameSuffix = ".settings";
+         #if JUCE_LINUX
+          o.folderName = ".config/Codex";   // keep the user's home folder tidy
+         #else
           o.folderName = "Codex";
+         #endif
           o.osxLibrarySubFolder = "Application Support";
           o.millisecondsBeforeSaving = 500;
           appProperties.setStorageParameters (o);
@@ -462,13 +466,22 @@ CodexEditor::CodexEditor (CodexProcessor& p)
     addAndMakeVisible (view);
     view.onScaleRequested = [this] (float s) { applyScale (s); };
 
+    // Read the saved size first: setting the resize limits below triggers resized() calls
+    // that must not overwrite it.
+    float scale = 1.0f;
+    auto* s = appProperties.getUserSettings();
+    if (s != nullptr && s->containsKey (scaleKey))
+        scale = (float) s->getDoubleValue (scaleKey, 1.0);
+    else if (auto* display = Desktop::getInstance().getDisplays().getPrimaryDisplay())
+        scale = jmin (1.0f, 0.85f * (float) display->userArea.getHeight() / (float) MainView::baseHeight);   // fit smaller screens
+
     const auto w = MainView::baseWidth, h = MainView::baseHeight;
     setResizable (true, true);
     setResizeLimits (roundToInt (w * 0.6), roundToInt (h * 0.6), w * 2, h * 2);
     getConstrainer()->setFixedAspectRatio ((double) w / (double) h);
 
-    auto* s = appProperties.getUserSettings();
-    applyScale (s != nullptr ? (float) s->getDoubleValue (scaleKey, 1.0) : 1.0f);
+    applyScale (scale);
+    initialised = true;
 }
 
 CodexEditor::~CodexEditor()
@@ -487,6 +500,7 @@ void CodexEditor::resized()
     const float scale = (float) getWidth() / (float) MainView::baseWidth;
     view.setTransform (AffineTransform::scale (scale));
     view.setBounds (0, 0, MainView::baseWidth, MainView::baseHeight);
-    if (auto* s = appProperties.getUserSettings())
-        s->setValue (scaleKey, scale);
+    if (initialised)
+        if (auto* s = appProperties.getUserSettings())
+            s->setValue (scaleKey, scale);
 }

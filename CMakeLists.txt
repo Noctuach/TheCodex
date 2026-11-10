@@ -63,7 +63,9 @@ set(HK_SOURCES
 
 target_sources(Codex PRIVATE ${HK_SOURCES})
 
-set(HK_DEFS JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_VST3_CAN_REPLACE_VST2=0)
+# JUCE_VST3_EMULATE_MIDI_CC_WITH_PARAMETERS=0: Codex does not use MIDI CCs, so do not add 2048
+# hidden CC parameters to the host's automation list.
+set(HK_DEFS JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_VST3_CAN_REPLACE_VST2=0 JUCE_VST3_EMULATE_MIDI_CC_WITH_PARAMETERS=0)
 target_compile_definitions(Codex PUBLIC ${HK_DEFS})
 
 target_link_libraries(Codex
@@ -79,4 +81,12 @@ if(HK_BUILD_TOOLS)
     target_link_libraries(CodexRender
         PRIVATE CodexAssets juce::juce_audio_utils juce::juce_dsp
         PUBLIC juce::juce_recommended_config_flags juce::juce_recommended_warning_flags)
+
+    # Loads the built VST3 through JUCE's plug-in hosting, like a DAW would
+    juce_add_console_app(CodexHostTest PRODUCT_NAME "CodexHostTest")
+    target_sources(CodexHostTest PRIVATE tools/HostTest.cpp)
+    target_compile_definitions(CodexHostTest PRIVATE JUCE_PLUGINHOST_VST3=1 JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_STANDALONE_APPLICATION=1)
+    target_link_libraries(CodexHostTest
+        PRIVATE juce::juce_audio_utils juce::juce_audio_processors
+        PUBLIC juce::juce_recommended_config_flags)
 endif()

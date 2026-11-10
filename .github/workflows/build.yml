@@ -57,6 +57,12 @@ jobs:
         if: runner.os == 'Linux'
         run: xvfb-run -a ./build/CodexRender_artefacts/Release/CodexRender test-output
 
+      - name: Host test (loads the VST3 like a DAW, plays notes, state, presets, editor)
+        if: runner.os == 'Linux'
+        run: |
+          cd build/Codex_artefacts/Release/VST3
+          xvfb-run -a ../../../CodexHostTest_artefacts/Release/CodexHostTest Codex.vst3
+
       - name: Ad-hoc code sign (macOS)
         if: runner.os == 'macOS'
         run: |
