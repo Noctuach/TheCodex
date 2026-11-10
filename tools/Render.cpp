@@ -722,6 +722,42 @@ int main (int argc, char** argv)
         failures += bad;
     }
 
+    // ---- Fuzz: random values for every parameter, several sample rates: always finite and bounded ----
+    {
+        int bad = 0;
+        juce::Random rng (20261110);
+        const double rates[] = { 44100.0, 48000.0, 96000.0 };
+        const int iterations = 60;
+        float worstPeak = 0.0f;
+        for (int it = 0; it < iterations; ++it)
+        {
+            proc.presets.loadPreset (rng.nextInt (proc.presets.getNumFactory()));
+            for (auto* prm : proc.getParameters())
+                if (rng.nextFloat() < 0.35f)   // perturb about a third of the parameters each time
+                    prm->setValueNotifyingHost (rng.nextFloat());
+            // keep the linear-phase EQs at moderate resolution so the fuzz stays quick
+            for (int e = 0; e < 2; ++e) setParam (proc, ID::eqRes (e), 0.0f);
+            const double rate = rates[it % 3];
+            const auto out = render (proc, 1, 48 + rng.nextInt (24), rate, it % 2 ? 512 : 100);
+            bool finite = true;
+            for (int ch = 0; ch < 2 && finite; ++ch)
+                for (int i = 0; i < out.getNumSamples(); ++i)
+                    if (! std::isfinite (out.getSample (ch, i))) { finite = false; break; }
+            const float pk = out.getMagnitude (0, out.getNumSamples());
+            worstPeak = std::max (worstPeak, pk);
+            if (! finite || pk > 7.95f) { ++bad; std::cout << "   fuzz iteration " << it << ": " << (finite ? "peak " + juce::String (pk) : juce::String ("NaN/inf")) << "\n"; }
+        }
+        std::cout << "\nFuzz: " << iterations << " random settings at 44.1 / 48 / 96 kHz, worst peak "
+                  << juce::String (juce::Decibels::gainToDecibels (worstPeak), 1) << " dBFS: " << (bad == 0 ? "OK" : "FAILED") << "\n";
+        failures += bad;
+        proc.presets.loadPreset (0);
+        // presets never touch the key settings: put them back by hand
+        for (const auto& id : { ID::key, ID::octave, ID::keyMode })
+            if (auto* prm = proc.apvts.getParameter (id)) prm->setValueNotifyingHost (prm->getDefaultValue());
+        proc.setRateAndBufferSizeDetails (sr, block);
+        proc.prepareToPlay (sr, block);
+    }
+
     // ---- Every key, both engines ----
     std::cout << "\nKey   target Hz   synth Hz   909 Hz\n";
     for (int k = 0; k < 12; ++k)

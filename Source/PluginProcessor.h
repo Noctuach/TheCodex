@@ -80,6 +80,7 @@ public:
     /** Share of the available processing time used by the audio callback (0..1, for the CPU readout). */
     double getCpuLoad() const { return loadMeasurer.getLoadAsProportion(); }
     OutputClipper& getClipper() { return clipper; }
+    std::atomic<bool> safetyTripped { false };   // set if a non-finite sample was ever replaced (diagnostics)
     /** True when every filter is ready (linear-phase EQ filters built and installed); used before offline renders. */
     bool isSettled() const { return equalisers[0].isLinearUpToDate() && equalisers[1].isLinearUpToDate(); }
 

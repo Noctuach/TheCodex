@@ -454,6 +454,15 @@ void CodexProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiB
         }
         clipper.process (l, r, n);         // optional output clipper (off by default)
 
+        // Safety guard (always on, far above any musical level): never pass NaN / inf, never exceed +18 dBFS
+        constexpr float safetyCeiling = 7.94f;
+        for (int i = 0; i < n; ++i)
+        {
+            if (! std::isfinite (l[i]) || ! std::isfinite (r[i])) { l[i] = r[i] = 0.0f; safetyTripped.store (true); continue; }
+            l[i] = juce::jlimit (-safetyCeiling, safetyCeiling, l[i]);
+            r[i] = juce::jlimit (-safetyCeiling, safetyCeiling, r[i]);
+        }
+
         for (int i = 0; i < n; ++i)
         {
             m[i] = 0.5f * (l[i] + r[i]);
