@@ -178,6 +178,7 @@ MainView::MainView (CodexProcessor& p, PropertiesFile* settingsFile)
 
     addChildComponent (saveOverlay);
     addChildComponent (browserOverlay);
+    addChildComponent (guideOverlay);
     presetBar.onBrowseRequested = [this] { browserOverlay.open(); };
     addChildComponent (aboutOverlay);
 
@@ -235,6 +236,7 @@ void MainView::showMainMenu()
     menu.addSubMenu ("Interface size", sizes);
     menu.addItem (7, "Show tooltips", true, tooltipWindow != nullptr);
     menu.addSeparator();
+    menu.addItem (10, "Quick guide");
     menu.addItem (8, "About Codex");
 
     SafePointer<MainView> safe (this);
@@ -247,6 +249,7 @@ void MainView::showMainMenu()
             {
                 case 1: v.presetBar.onSaveRequested(); break;
                 case 9: v.browserOverlay.open(); break;
+                case 10: v.guideOverlay.open(); break;
                 case 2: v.proc.presets.deleteUserPreset (v.proc.presets.getCurrentName()); v.presetBar.refresh(); break;
                 case 3: v.proc.presets.getUserDirectory().startAsProcess(); break;
                 case 4: v.proc.presets.refreshUserPresets(); v.presetBar.refresh(); break;
@@ -640,6 +643,7 @@ void MainView::resized()
 
     saveOverlay.setBounds (getLocalBounds());
     browserOverlay.setBounds (getLocalBounds());
+    guideOverlay.setBounds (getLocalBounds());
     aboutOverlay.setBounds (getLocalBounds());
 }
 

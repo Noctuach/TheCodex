@@ -171,3 +171,66 @@ private:
     juce::String version;
     IconButton closeButton { "close", Icons::close(), false };
 };
+
+/** Quick guide: getting started, mouse gestures and keyboard shortcuts on one page. */
+class QuickGuideOverlay : public Overlay
+{
+public:
+    QuickGuideOverlay()
+    {
+        cardSize = { 860, 470 };
+        closeButton.onClick = [this] { close(); };
+        addAndMakeVisible (closeButton);
+    }
+
+private:
+    void paintCard (juce::Graphics& g, juce::Rectangle<int> c) override
+    {
+        using namespace juce;
+        auto r = c.reduced (30, 24).toFloat();
+        g.setColour (Colours_::text);
+        g.setFont (Fonts::display (22.0f, 0.18f));
+        g.drawText ("QUICK GUIDE", r.removeFromTop (30.0f), Justification::centredLeft);
+        r.removeFromTop (12.0f);
+
+        const auto dot = String::fromUTF8 ("  \xc2\xb7  ");
+        // "Ctrl+" or the command symbol, as the platform writes it
+        const auto cmd = KeyPress ('z', ModifierKeys::commandModifier, 0).getTextDescriptionWithIcons()
+                             .upToLastOccurrenceOf ("+", true, false).removeCharacters (" ");
+        auto col = [&] (Rectangle<float> area, std::initializer_list<std::pair<const char*, String>> rows)
+        {
+            for (const auto& [title, body] : rows)
+            {
+                g.setColour (Colours_::accent);
+                g.setFont (Fonts::label (11.5f, 0.12f));
+                g.drawText (title, area.removeFromTop (16.0f), Justification::centredLeft);
+                g.setColour (Colours_::text);
+                g.setFont (Fonts::regular (13.0f));
+                const int lines = jmax (1, (int) std::ceil (GlyphArrangement::getStringWidth (Font (Fonts::regular (13.0f)), body) / (area.getWidth() - 10.0f)) + body.containsChar ('\n'));
+                const float h = 17.0f * (float) lines + 2.0f;
+                g.drawFittedText (body, area.removeFromTop (h).toNearestInt(), Justification::topLeft, lines + 1, 1.0f);
+                area.removeFromTop (10.0f);
+            }
+        };
+        auto left = r.removeFromLeft (r.getWidth() * 0.5f - 12.0f);
+        r.removeFromLeft (24.0f);
+        col (left, {
+            { "1  KEY", String::fromUTF8 ("Set KEY (F to E) to the key of your track. Every MIDI note plays the kick in that key; the ROOT readout confirms it.") },
+            { "2  PRESET", String::fromUTF8 ("Browse with the arrows or the grid button (search, categories, favourites). '*' after the name = edited.") },
+            { "3  SHAPE THE HIT", String::fromUTF8 ("KICK page: pitch and amp envelopes (ADSR or DRAW). DISTORTION: two units with Pre/Post filter and drawable X-Shaper. EQ sits between them.") },
+            { "4  POLISH", String::fromUTF8 ("SATURATION, COMPRESSOR, EQ 2 and SPACE are off until you switch them on. SUB LAYER adds a clean fundamental: press ALIGN.") },
+            { "5  FINISH", String::fromUTF8 ("Macros (Punch, Dirt, Tail, Width) for quick moves, CLIP for loudness, then DRAG KICK straight onto a track in your DAW.") },
+        });
+        col (r, {
+            { "KNOBS", String::fromUTF8 ("Drag up/down  \xc2\xb7  Shift: fine  \xc2\xb7  double-click: default  \xc2\xb7  click the value to type it.") },
+            { "EQ DISPLAY", String::fromUTF8 ("Double-click: add band  \xc2\xb7  drag: frequency/gain  \xc2\xb7  wheel: Q / slope  \xc2\xb7  Alt-click: bypass  \xc2\xb7  right-click: shape, placement, delete  \xc2\xb7  Delete key: delete band.") },
+            { "DRAW ENVELOPES / X-SHAPER", String::fromUTF8 ("Drag points; drag the diamonds to bend a segment  \xc2\xb7  double-click: add or delete a point  \xc2\xb7  right-click: preset shapes.") },
+            { "SHORTCUTS", cmd + "Z undo" + dot + cmd + "Shift+Z redo" + dot + cmd + "B browse presets" + dot + cmd + "S save preset" + dot + cmd + "Left/Right previous/next preset." },
+            { "HELP", String::fromUTF8 ("Hover over any control for an explanation (menu: Show tooltips).") },
+        });
+    }
+
+    void layoutCard (juce::Rectangle<int> c) override { closeButton.setBounds (c.getRight() - 46, c.getY() + 18, 28, 28); }
+
+    IconButton closeButton { "close", Icons::close(), false };
+};
