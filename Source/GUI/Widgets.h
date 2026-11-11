@@ -188,7 +188,9 @@ public:
 
         area = inner();
 
-        const float A = cached[0], D = cached[1], S = cached[2], R = cached[3], C = cached[4];
+        // clamped: the cache starts at -1 until the first parameter read (sqrt (-1) would give a NaN path)
+        const float A = juce::jmax (0.0f, cached[0]), D = juce::jmax (0.0f, cached[1]), S = juce::jlimit (0.0f, 1.0f, cached[2]),
+                    R = juce::jmax (0.0f, cached[3]), C = cached[4];
         // sqrt time scaling keeps short and long stages readable at once
         const float wa = std::sqrt (A), wd = std::sqrt (D), wr = std::sqrt (R);
         const float ws = (wa + wd + wr) * 0.25f + 1.0f;
