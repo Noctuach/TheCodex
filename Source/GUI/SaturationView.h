@@ -148,7 +148,7 @@ public:
                 g.fillRoundedRectangle (badge, 3.0f);
                 g.setColour (on ? onCol : Colours_::outline);
                 g.drawRoundedRectangle (badge, 3.0f, 1.0f);
-                g.setColour (on ? Colour (0xff04101e) : Colours_::textDim);
+                g.setColour (on ? Colour (0xff140900) : Colours_::textDim);
                 g.setFont (Fonts::label (11.0f, 0.05f));
                 g.drawText (k == 0 ? "M" : k == 1 ? "S" : "B", badge, Justification::centred);
             }
@@ -188,7 +188,7 @@ public:
             g.fillRoundedRectangle (h, 5.0f);
             g.setColour (Colours_::band (b));
             g.drawRoundedRectangle (h, 5.0f, 1.2f);
-            g.setColour (hot ? Colour (0xff04101e) : Colours_::text);
+            g.setColour (hot ? Colour (0xff140900) : Colours_::text);
             g.setFont (Fonts::medium (11.5f));
             const float lvDb = value (ID::satBand (b, "Level"));
             g.drawText ((altHeld && hot ? "DRV " + String (value (ID::satBand (b, "Drive")), 1)
@@ -207,7 +207,7 @@ public:
             g.fillRoundedRectangle (handle, 9.0f);
             g.setColour (hot ? Colours_::accent : Colours_::outlineHi);
             g.drawRoundedRectangle (handle, 9.0f, 1.0f);
-            g.setColour (hot ? Colour (0xff04101e) : Colours_::text);
+            g.setColour (hot ? Colour (0xff140900) : Colours_::text);
             g.setFont (Fonts::medium (11.5f));
             const float f = crossover (j);
             g.drawText (f < 1000 ? String (roundToInt (f)) : String (f / 1000.0f, 1) + "k", handle, Justification::centred);
@@ -220,7 +220,7 @@ public:
             g.setColour (Colours_::accent);
             g.fillEllipse (plus);
             Icons::draw (g, [] { Path p; p.startNewSubPath (0.5f, 0.22f); p.lineTo (0.5f, 0.78f); p.startNewSubPath (0.22f, 0.5f); p.lineTo (0.78f, 0.5f); return p; }(),
-                         plus.reduced (3.0f), Colour (0xff04101e), 2.0f);
+                         plus.reduced (3.0f), Colour (0xff140900), 2.0f);
         }
 
         if (! enabled)

@@ -68,7 +68,7 @@ public:
         save.onClick = [this] { commit(); };
         cancel.onClick = [this] { close(); };
         save.setColour (juce::TextButton::buttonColourId, Colours_::accent);
-        save.setColour (juce::TextButton::textColourOffId, juce::Colour (0xff04101e));
+        save.setColour (juce::TextButton::textColourOffId, juce::Colour (0xff140900));
         for (auto* c : std::initializer_list<juce::Component*> { &name, &save, &cancel }) addAndMakeVisible (c);
     }
 

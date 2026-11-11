@@ -109,7 +109,7 @@ public:
         float cents = (shownNote - (float) nearest) * 100.0f;
         if (std::abs (cents) < 0.05f) cents = 0.0f;   // never show "-0.0"
         const bool onTarget = hasReading && std::abs (shownNote - target) < 0.1f;   // within 10 cents
-        const auto noteColour = ! hasReading ? Colours_::textDim : (onTarget ? Colour (0xff51e5a0) : Colours_::accent);
+        const auto noteColour = ! hasReading ? Colours_::textDim : (onTarget ? Colours_::good : Colours_::accent);
 
         // Bottom line: target
         auto bottom = r.removeFromBottom (14.0f);

@@ -13,11 +13,11 @@ namespace
     {
         switch (p)
         {
-            case eq::Placement::Left:  return Colour (0xffffb84d);
-            case eq::Placement::Right: return Colour (0xffff6b6b);
+            case eq::Placement::Left:  return Colour (0xffffd24d);
+            case eq::Placement::Right: return Colour (0xffff5a3c);
             case eq::Placement::Mid:   return Colours_::good;
             case eq::Placement::Side:  return Colours_::accent2;
-            default:                   return Colour (0xffd6f0ff);
+            default:                   return Colour (0xfff5efe6);
         }
     }
     const char* placementName (eq::Placement p)

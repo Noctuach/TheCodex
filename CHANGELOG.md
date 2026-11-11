@@ -10,6 +10,7 @@ All notable changes to Codex. Versions follow [Semantic Versioning](https://semv
 - Preset "Reverb-First Rawstyle".
 
 ### Changed
+- New colour scheme: true black with a sun-orange accent (peach for the pitch envelope, warm tones for the bands).
 - Space Mix keeps the dry kick at full level up to 50 % (it used to fall to -3 dB at 50 % and silence at 100 %, which made the kick fade when the reverb was turned up).
 
 ### Added (earlier)

@@ -3,31 +3,31 @@
 #include "CodexAssets.h"
 
 //==============================================================================
-/** Colour palette: clean graphite with a cool blue accent (flat, studio-tool look). */
+/** Colour palette: true black with a sun-orange accent (flat, studio-tool look). */
 namespace Colours_
 {
-    const juce::Colour background { 0xff0c0e12 };
-    const juce::Colour panel      { 0xff14171d };
-    const juce::Colour panelTop   { 0xff181b22 };
-    const juce::Colour header     { 0xff181b22 };
-    const juce::Colour display    { 0xff0a0b0e };
-    const juce::Colour outline    { 0xff242831 };
-    const juce::Colour outlineHi  { 0xff343a46 };
-    const juce::Colour knobTrack  { 0xff252a33 };
-    const juce::Colour accent     { 0xff45a6ff }; // primary blue
-    const juce::Colour accentHi   { 0xffa3d2ff };
-    const juce::Colour accent2    { 0xff9487ff }; // violet (pitch envelope)
-    const juce::Colour good       { 0xff4fd49a };
-    const juce::Colour warn       { 0xffff5a6a };
-    const juce::Colour text       { 0xffe8ebf0 };
-    const juce::Colour textDim    { 0xff8b929e };
-    const juce::Colour textFaint  { 0xff545a65 };
-    const juce::Colour grid       { 0xff171a20 };
+    const juce::Colour background { 0xff050505 };
+    const juce::Colour panel      { 0xff0f0f0f };
+    const juce::Colour panelTop   { 0xff141414 };
+    const juce::Colour header     { 0xff121212 };
+    const juce::Colour display    { 0xff080808 };
+    const juce::Colour outline    { 0xff232323 };
+    const juce::Colour outlineHi  { 0xff363636 };
+    const juce::Colour knobTrack  { 0xff262626 };
+    const juce::Colour accent     { 0xffff8c1a }; // sun orange
+    const juce::Colour accentHi   { 0xffffc078 };
+    const juce::Colour accent2    { 0xffffd0a0 }; // peach (pitch envelope)
+    const juce::Colour good       { 0xff6fdc8c };
+    const juce::Colour warn       { 0xffff4d4d };
+    const juce::Colour text       { 0xffefedea };
+    const juce::Colour textDim    { 0xff9a9590 };
+    const juce::Colour textFaint  { 0xff5c5955 };
+    const juce::Colour grid       { 0xff161616 };
 
     inline juce::Colour band (int i)
     {
-        static const juce::Colour c[] = { juce::Colour (0xffff5c8a), juce::Colour (0xffffa94d), juce::Colour (0xffffe066),
-                                          juce::Colour (0xff51e5a0), juce::Colour (0xff4dd2ff), juce::Colour (0xffa98bff) };
+        static const juce::Colour c[] = { juce::Colour (0xffff5a36), juce::Colour (0xffff8c1a), juce::Colour (0xffffc04d),
+                                          juce::Colour (0xfffff0c2), juce::Colour (0xffd9895c), juce::Colour (0xffb85c3a) };
         return c[i % 6];
     }
 
@@ -261,7 +261,7 @@ public:
         setColour (juce::TextButton::buttonColourId, display);
         setColour (juce::TextButton::buttonOnColourId, accent);
         setColour (juce::TextButton::textColourOffId, textDim);
-        setColour (juce::TextButton::textColourOnId, juce::Colour (0xff04101e));
+        setColour (juce::TextButton::textColourOnId, juce::Colour (0xff140900));
         setColour (juce::TooltipWindow::backgroundColourId, panelTop);
         setColour (juce::TooltipWindow::textColourId, text);
         setColour (juce::TooltipWindow::outlineColourId, outlineHi);
@@ -312,8 +312,8 @@ public:
         // Flat body with a hairline rim
         const float bodyR = arcR - lineW * 2.2f;
         const auto body = juce::Rectangle<float> (bodyR * 2.0f, bodyR * 2.0f).withCentre (centre);
-        g.setGradientFill (juce::ColourGradient (juce::Colour (0xff272c36), centre.x, body.getY(),
-                                                 juce::Colour (0xff1b1f27), centre.x, body.getBottom(), false));
+        g.setGradientFill (juce::ColourGradient (juce::Colour (0xff2a2a2a), centre.x, body.getY(),
+                                                 juce::Colour (0xff181818), centre.x, body.getBottom(), false));
         g.fillEllipse (body);
         g.setColour (hot ? outlineHi.brighter (0.2f) : outlineHi);
         g.drawEllipse (body.reduced (0.5f), 1.0f);
@@ -358,7 +358,7 @@ public:
         const auto thumb = juce::Rectangle<float> (26.0f, 12.0f).withCentre ({ cx, pos });
         g.setColour (juce::Colours::black.withAlpha (0.4f));
         g.fillRoundedRectangle (thumb.translated (0.0f, 1.5f), 4.0f);
-        g.setGradientFill (juce::ColourGradient (juce::Colour (0xff2c3a63), cx, thumb.getY(), juce::Colour (0xff141c33), cx, thumb.getBottom(), false));
+        g.setGradientFill (juce::ColourGradient (juce::Colour (0xff5a3414), cx, thumb.getY(), juce::Colour (0xff24150a), cx, thumb.getBottom(), false));
         g.fillRoundedRectangle (thumb, 4.0f);
         g.setColour (col);
         g.drawRoundedRectangle (thumb, 4.0f, 1.2f);
@@ -544,7 +544,7 @@ public:
     {
         const auto id = b.getComponentID();
         juce::Colour c;
-        if (id == "kick")      c = juce::Colour (0xff04101e);
+        if (id == "kick")      c = juce::Colour (0xff140900);
         else if (id == "tab")  c = b.getToggleState() ? Colours_::text : (over ? Colours_::text.withAlpha (0.8f) : Colours_::textDim);
         else if (id == "pill") c = b.getToggleState() ? Colours_::accentHi : Colours_::textDim;
         else if (id == "seg")  c = b.getToggleState() ? Colours_::accentHi : (over ? Colours_::text : Colours_::textDim);
