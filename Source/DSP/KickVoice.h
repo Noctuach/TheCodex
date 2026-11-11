@@ -220,7 +220,7 @@ private:
 
             // The sweeps land exactly on the root (instead of approaching it forever), so the
             // tail is in key: each envelope is offset by a small floor and clamped at zero.
-            constexpr float floorLevel = 0.02f, floorNorm = 1.0f / (1.0f - floorLevel);
+            constexpr float floorLevel = 0.06f, floorNorm = 1.0f / (1.0f - floorLevel);   // the sweep lands on the root after ~2.8 time constants
             const float fastEnv = std::max (0.0f, (fast909 - floorLevel) * floorNorm);
             const float slowEnv = std::max (0.0f, (slow909 - floorLevel) * floorNorm);
             advancePhase (settings.tuneSemis + sweepScale * (model.sweepSemis * fastEnv + model.slowSemis * slowEnv));

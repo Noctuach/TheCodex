@@ -47,6 +47,28 @@ static juce::AudioBuffer<float> render (CodexProcessor& proc, int hits, int midi
 }
 
 // Same approach as the GUI tuner: decimate to ~6 kHz and run the detector on the tail.
+/** Fundamental by a high-resolution FFT (Hann, zero-padded, parabolic peak) between 30 and 120 Hz: an independent
+    reference for the time-domain pitch detector. */
+static float fftFundamental (const juce::AudioBuffer<float>& b, double startSec, double lenSec, double rate = sr)
+{
+    const int order = 18, N = 1 << order;
+    const int start = (int) (startSec * rate), len = juce::jmin ((int) (lenSec * rate), b.getNumSamples() - start, N);
+    std::vector<float> data ((size_t) N * 2, 0.0f);
+    for (int i = 0; i < len; ++i)
+    {
+        const double w = 0.5 - 0.5 * std::cos (juce::MathConstants<double>::twoPi * i / (len - 1));
+        data[(size_t) i] = 0.5f * (b.getSample (0, start + i) + b.getSample (1, start + i)) * (float) w;
+    }
+    juce::dsp::FFT fft (order);
+    fft.performFrequencyOnlyForwardTransform (data.data());
+    const int k0 = (int) (30.0 * N / rate), k1 = (int) (120.0 * N / rate);
+    int best = k0;
+    for (int k = k0; k <= k1; ++k) if (data[(size_t) k] > data[(size_t) best]) best = k;
+    const float a = data[(size_t) best - 1], c = data[(size_t) best], d = data[(size_t) best + 1];
+    const float off = 0.5f * (a - d) / (a - 2.0f * c + d);
+    return (float) ((best + off) * rate / N);
+}
+
 static float measurePitch (const juce::AudioBuffer<float>& b, double startSec, double lenSec, double rate = sr)
 {
     const int decim = juce::roundToInt (rate / 6000.0);
@@ -124,6 +146,9 @@ int main (int argc, char** argv)
         const float pk = juce::Decibels::gainToDecibels (audio.getMagnitude (0, 0, audio.getNumSamples()));
         const float hz = measurePitch (audio, 0.15, 0.17);
         const float cents = hz > 0 ? 1200.0f * std::log2 (hz / targetHz) : 0.0f;
+        if (std::getenv ("CODEX_FFT_PITCH") != nullptr)
+            std::cout << "        FFT fundamental " << juce::String (fftFundamental (audio, 0.15, 0.17), 2) << " Hz ("
+                      << juce::String (1200.0f * std::log2 (fftFundamental (audio, 0.15, 0.17) / targetHz), 1) << " c)\n";
         const bool ok = finite && pk < 1.0f && pk > -30.0f && hz > 0 && std::abs (cents) < 25.0f;
         failures += ok ? 0 : 1;
         std::cout << proc.presets.getFactoryNames()[i].paddedRight (' ', 26) << juce::String (pk, 1).paddedLeft (' ', 9)

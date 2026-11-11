@@ -63,6 +63,8 @@ All notable changes to Codex. Versions follow [Semantic Versioning](https://semv
 - The host's tail length follows the reverb decay.
 
 ### Fixed
+- Tuner read up to 22 cents sharp on heavily distorted kicks (bit-crushed, rawstyle): the pitch estimate is now refined on the windowed spectrum, and matches an FFT reference within 0.1 cent on every preset. The 909 presets were in tune all along.
+- 909 pitch sweep lands on the root sooner (floor level 0.06), so short kicks settle in key.
 - **No more clicks when parameters move during playback.** An automated audit jumps all 421 continuous parameters
   mid-note; 18 clicked (distortion Hi Filter / Shelf Gain / Tail Drive, saturation crossovers, Treble, Presence,
   Dynamics, Level Pan, compressor Output / Gain / Ratio). Filters and crossovers now glide, gains are smoothed and
