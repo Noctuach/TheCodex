@@ -324,7 +324,7 @@ public:
             const float y = juce::jmap (juce::jlimit (-36.0f, 24.0f, db), -36.0f, 24.0f, plot.getBottom(), plot.getY());
             if (x <= plot.getX()) p.startNewSubPath (x, y); else p.lineTo (x, y);
         }
-        const auto col = active ? Colours_::accent2 : Colours_::textFaint;
+        const auto col = active ? Colours_::accent2 : Colours_::textFaint.withMultipliedAlpha (0.55f);
         juce::Path fill (p);
         fill.lineTo (plot.getRight(), plot.getBottom());
         fill.lineTo (plot.getX(), plot.getBottom());

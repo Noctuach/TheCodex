@@ -599,8 +599,11 @@ void MainView::resized()
         auto velRow = c.removeFromBottom (100);
         velocityCaption = c.removeFromBottom (18);
         velocity.setBounds (velRow.withSizeKeepingCentre (96, velRow.getHeight()));
-        const int rowH = jmin (110, c.getHeight() / 2);
-        auto row1 = c.removeFromTop (rowH), row2 = c.removeFromTop (rowH);
+        const int rowGap = 14;   // keeps the first row's values clear of the second row's captions
+        const int rowH = jmin (110, (c.getHeight() - rowGap) / 2);
+        auto row1 = c.removeFromTop (rowH);
+        c.removeFromTop (rowGap);
+        auto row2 = c.removeFromTop (rowH);
         subLevel.setBounds (row1.removeFromLeft (row1.getWidth() / 2)); subLowPass.setBounds (row1);
         subFade.setBounds (row2.removeFromLeft (row2.getWidth() / 2)); subPhase.setBounds (row2);
         subAlign.setBounds (subPhase.getBounds().withY (subPhase.getBottom() + 2).withHeight (22).withSizeKeepingCentre (64, 22));
