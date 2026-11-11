@@ -149,3 +149,19 @@ Modelled on what dedicated kick synthesizers offer: breakpoint (draw) envelopes 
 with automatic phase alignment, drag-the-kick-into-the-DAW export, macros, A/B compare, a categorised preset browser
 with favourites, an oversampled output clipper and a CPU readout. Typical presets use 2-3 % of one CPU core; the
 absolute worst case (every module on at maximum quality, two 24-band linear-phase EQs, 16x oversampling) about 50 %.
+
+## Sonic Charge Microtonic as a reference (distortion and gain staging)
+
+Microtonic's voices are deliberately simple. The signal path is an oscillator plus a noise generator, then a mix, an EQ and a single **Distort** amount (0-100).
+
+Its distortion is famously "raw": there is no oversampling, so the aliasing is part of the sound. A drum stays at a similar perceived loudness while you turn Distort up, so the amount reads as a colour control rather than a volume control.
+
+What Codex took from this:
+
+- **Raw mode** (oversampling menu, last entry): it switches off the oversampling *and* the ADAA anti-aliasing, so the shaper folds back like a cheap clipper or a 2000s hardware box. It is useful for gritty rawstyle top end. The offline tests confirm that it aliases more than "Off" and stays click-free.
+- **Auto Gain** (AUTO pill next to DC in the distortion header): a slow, 1 s mean-square match between the stage's input and output. Drive and mode changes are heard as tone, not level, and it is safe on the kick's transient.
+- The simple mental model of "one amount, sensible staging" shaped the Punch/Tail split. The tail drive is a single offset in dB against the main drive, rather than a second full chain.
+
+## "Hydra" (open question)
+
+No distortion or kick plugin called Hydra could be identified. The candidates are the ASM Hydrasynth (a wavetable/"mutant" synth) and older synths with that name. Nothing was implemented for this yet; it is waiting on the exact product.
