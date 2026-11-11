@@ -265,6 +265,8 @@ public:
         setColour (juce::TooltipWindow::backgroundColourId, panelTop);
         setColour (juce::TooltipWindow::textColourId, text);
         setColour (juce::TooltipWindow::outlineColourId, outlineHi);
+        setColour (juce::ScrollBar::thumbColourId, accent.withAlpha (0.55f));
+        setColour (juce::ScrollBar::trackColourId, juce::Colours::transparentBlack);
     }
 
     // Every default font in the UI uses the embedded Barlow faces
