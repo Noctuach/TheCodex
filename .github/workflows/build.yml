@@ -55,6 +55,8 @@ jobs:
 
       - name: Offline tests (renders presets, checks tuning in all keys, sample rates and block sizes)
         if: runner.os == 'Linux'
+        env:
+          CODEX_CLICK_AUDIT: 1   # also jump every parameter mid-note and fail on any click
         run: xvfb-run -a ./build/CodexRender_artefacts/Release/CodexRender test-output
 
       - name: Host test (loads the VST3 like a DAW, plays notes, state, presets, editor)

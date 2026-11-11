@@ -144,10 +144,12 @@ public:
     void process (float* left, float* right, int numSamples, const float* hitMs = nullptr) noexcept
     {
         // per-sample drive multiplier for the punch / tail split (computed at the base rate)
-        tailActive = hitMs != nullptr && std::abs (settings.tailDriveDb) > 0.01f && numSamples <= (int) tailMul.size();
+        tailActive = hitMs != nullptr && (std::abs (settings.tailDriveDb) > 0.01f || tailDb.isSmoothing()) && numSamples <= (int) tailMul.size();
         if (tailActive)
-            for (int i = 0; i < numSamples; ++i)
-                tailMul[(size_t) i] = juce::Decibels::decibelsToGain (tailDriveAt (settings.tailDriveDb, settings.splitMs, hitMs[i]));
+            for (int i = 0; i < numSamples; ++i)   // tail drive glides too (no step when the knob moves mid-note)
+                tailMul[(size_t) i] = juce::Decibels::decibelsToGain (tailDriveAt (tailDb.getNextValue(), settings.splitMs, hitMs[i]));
+        else
+            tailDb.skip (numSamples);
 
         float inPk = 0.0f;
         if (settings.autoGain && numSamples <= (int) autoIn.size())
@@ -409,22 +411,17 @@ private:
         downsampleHold = downsampleFactor (s.driveDb) * (float) osFactor;
 
         // Wet filters (redesigned only when something changed)
-        if (rate != lastFilterRate || s.loFilterHz != lastLo || s.hiFilterHz != lastHi || s.shelfHz != lastShelfHz || s.shelfDb != lastShelfDb)
+        // Wet filters glide to new settings (see glideFilters) so moving them never clicks; a rate change snaps them.
+        tgtLo = s.loFilterHz; tgtHi = s.hiFilterHz; tgtShelfHz = s.shelfHz; tgtShelfDb = s.shelfDb;
+        tailDb.setTargetValue (s.tailDriveDb);
+        if (rate != lastFilterRate || force)
         {
-            eq::BandSettings lp; lp.on = true; lp.type = eq::BandType::HighCut; lp.freq = s.loFilterHz; lp.slope = 1;
-            eq::BandSettings hp; hp.on = true; hp.type = eq::BandType::LowCut;  hp.freq = s.hiFilterHz; hp.slope = 1;
-            eq::BandSettings sh; sh.on = true; sh.type = eq::BandType::HighShelf; sh.freq = s.shelfHz; sh.gainDb = s.shelfDb;
-            for (int ch = 0; ch < 2; ++ch)
-            {
-                loFilter[ch].c = eq::design (lp, rate).stages[0];
-                hiFilter[ch].c = eq::design (hp, rate).stages[0];
-                phase[ch].setCutoffs (rate, s.loFilterHz, s.hiFilterHz);
-                shelf[ch].c    = eq::design (sh, rate).stages[0];
-            }
-            loActive = s.loFilterHz < 19900.0f;
-            hiActive = s.hiFilterHz > 20.5f;
-            shelfActive = std::abs (s.shelfDb) > 0.01f;
-            lastFilterRate = rate; lastLo = s.loFilterHz; lastHi = s.hiFilterHz; lastShelfHz = s.shelfHz; lastShelfDb = s.shelfDb;
+            curLo = tgtLo; curHi = tgtHi; curShelfHz = tgtShelfHz; curShelfDb = tgtShelfDb;
+            tailDb.reset (baseRate, 0.03);
+            tailDb.setCurrentAndTargetValue (s.tailDriveDb);
+            glideStep = (float) (1.0 - std::exp (-16.0 / (0.012 * rate)));   // ~12 ms glide, updated every 16 samples
+            designFilters (rate);
+            lastFilterRate = rate;
         }
         if (s.mode != mode || tableChanged)
         {
@@ -434,6 +431,37 @@ private:
             tableChanged = false;
         }
         mode = s.mode;
+    }
+
+    /** Moves the wet filters a step towards their targets (every 16 samples while gliding) and redesigns them. */
+    void glideFilters() noexcept
+    {
+        if (curLo == tgtLo && curHi == tgtHi && curShelfHz == tgtShelfHz && curShelfDb == tgtShelfDb) return;
+        auto glideLog = [this] (float& cur, float tgt)
+        {
+            cur = std::exp (std::log (cur) + glideStep * (std::log (tgt) - std::log (cur)));
+            if (std::abs (cur / tgt - 1.0f) < 0.002f) cur = tgt;
+        };
+        glideLog (curLo, tgtLo);
+        glideLog (curHi, tgtHi);
+        glideLog (curShelfHz, tgtShelfHz);
+        curShelfDb += glideStep * (tgtShelfDb - curShelfDb);
+        if (std::abs (curShelfDb - tgtShelfDb) < 0.01f) curShelfDb = tgtShelfDb;
+        designFilters (curRate);
+    }
+
+    void designFilters (double rate) noexcept
+    {
+        eq::BandSettings sh; sh.on = true; sh.type = eq::BandType::HighShelf; sh.freq = curShelfHz; sh.gainDb = curShelfDb;
+        const auto shelfC = eq::design (sh, rate).stages[0];
+        for (int ch = 0; ch < 2; ++ch)
+        {
+            phase[ch].setCutoffs (rate, curLo, curHi);
+            shelf[ch].c = shelfC;
+        }
+        loActive = curLo < 19900.0f;
+        hiActive = curHi > 20.5f;
+        shelfActive = std::abs (curShelfDb) > 0.01f;
     }
 
     template <typename Smoothed>
@@ -497,6 +525,7 @@ private:
         if (filterPos != 0) updateFilterCoefficients (filterCutoff.getCurrentValue());
         for (int i = 0; i < n; ++i)
         {
+            if ((i & 15) == 0) glideFilters();
             const float d = drive.getNextValue() * (tailActive ? tailMul[(size_t) (i / osFactor)] : 1.0f);
             const float off = offset.getNextValue(), chr = character.getNextValue();
             const float sp = spatial.getNextValue(), m = mix.getNextValue(), og = outGain.getNextValue();
@@ -562,6 +591,9 @@ private:
     double baseRate = 44100.0;
     std::array<std::unique_ptr<juce::dsp::Oversampling<float>>, 4> oversamplers;
     std::vector<float> tailMul, autoIn;
+    juce::SmoothedValue<float> tailDb;
+    float tgtLo = 20000.0f, tgtHi = 20.0f, tgtShelfHz = 6000.0f, tgtShelfDb = 0.0f;
+    float curLo = 20000.0f, curHi = 20.0f, curShelfHz = 6000.0f, curShelfDb = 0.0f, glideStep = 0.05f;
     float autoCoef = 0.0f, msIn = 0.0f, msOut = 0.0f, autoGainNow = 1.0f;
     bool rawMode = false;
     bool tailActive = false;

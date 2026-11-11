@@ -134,8 +134,16 @@ namespace comp
             }
             frameLen = juce::jmax (32, (int) (rate / 400.0));   // ~400 frames per second for the display
             lastXf.fill (-1.0f);
+            paramGlide = (float) (1.0 - std::exp (-1.0 / (0.01 * rate)));
+            for (auto& m : makeupSmooth) m.reset (rate, 0.02);
+            outSmooth.reset (rate, 0.02);
+            mixSmooth.reset (rate, 0.02);
             reset();
             setSettings (settings);
+            smoothBands = settings.bands;   // start at the settings, glide from there
+            for (int b = 0; b < maxBands; ++b) makeupSmooth[(size_t) b].setCurrentAndTargetValue (makeup[(size_t) b]);
+            outSmooth.setCurrentAndTargetValue (outGain);
+            mixSmooth.setCurrentAndTargetValue (settings.mix);
         }
 
         void reset()
@@ -204,6 +212,8 @@ namespace comp
                 makeup[(size_t) b] = juce::Decibels::decibelsToGain (bs.gainDb + (s.autoGain ? autoMakeup (bs, s.style, s.limit) : 0.0f));
             }
             outGain = juce::Decibels::decibelsToGain (s.outDb);
+            for (int b = 0; b < maxBands; ++b) makeupSmooth[(size_t) b].setTargetValue (makeup[(size_t) b]);
+            outSmooth.setTargetValue (outGain);
         }
 
         void process (float* l, float* r, int n) noexcept
@@ -241,11 +251,13 @@ namespace comp
             const float rmsC = (float) std::exp (-1.0 / ((style == Smooth || style == Bus ? 0.025 : style == Punch ? 0.008 : 0.012) * rate));
             const float peakC = (float) std::exp (-1.0 / (0.02 * rate));
             const float memUp = (float) (1.0 / (2.0 * rate)), memDown = (float) (1.0 / (6.0 * rate));
-            const float dryMix = 1.0f - settings.mix, wetMix = settings.mix;
+            mixSmooth.setTargetValue (settings.mix);
             const int len = (int) channels[0].dryDelay.size();
 
             for (int i = 0; i < n; ++i)
             {
+                const float outNow = outSmooth.getNextValue();
+                const float wetMix = mixSmooth.getNextValue(), dryMix = 1.0f - wetMix;
                 std::array<std::array<float, maxBands>, 2> sig {};
                 float inPeak = 0.0f;
                 for (int c = 0; c < 2; ++c)
@@ -264,7 +276,15 @@ namespace comp
                 std::array<float, 2> out {};
                 for (int b = 0; b < nb; ++b)
                 {
-                    const auto& bs = settings.bands[(size_t) b];
+                    // static curve parameters glide (~10 ms) so threshold / ratio / knee / range moves never step
+                    auto& sm = smoothBands[(size_t) b];
+                    const auto& tgt = settings.bands[(size_t) b];
+                    sm.thresholdDb += paramGlide * (tgt.thresholdDb - sm.thresholdDb);
+                    sm.ratio       += paramGlide * (tgt.ratio - sm.ratio);
+                    sm.kneeDb      += paramGlide * (tgt.kneeDb - sm.kneeDb);
+                    sm.rangeDb     += paramGlide * (tgt.rangeDb - sm.rangeDb);
+                    sm.direction = tgt.direction; sm.mute = tgt.mute; sm.solo = tgt.solo; sm.bypass = tgt.bypass;
+                    const auto& bs = sm;
                     auto& st = bands[(size_t) b];
 
                     // ---- detector: stereo-linked, side-chain high-passed, peak or RMS; feedback styles use the output ----
@@ -324,7 +344,7 @@ namespace comp
                     }
                     st.memory = std::abs (st.gr) > 2.0f ? st.memory + memUp * (1.0f - st.memory) : st.memory * (1.0f - memDown);
 
-                    const float g = juce::Decibels::decibelsToGain (st.gr) * makeup[(size_t) b];
+                    const float g = juce::Decibels::decibelsToGain (st.gr) * makeupSmooth[(size_t) b].getNextValue();
                     for (int c = 0; c < 2; ++c)
                     {
                         auto& ch = channels[(size_t) c];
@@ -349,7 +369,7 @@ namespace comp
                     for (int j = 0; j < nb - 1; ++j) dryAligned = ch.dryPhase[(size_t) j].process (dryAligned);
                     ch.dryDelay[(size_t) ch.pos] = dryAligned;
                     const float dry = ch.dryDelay[(size_t) ((ch.pos - lookSamples + len) % len)];
-                    const float y = (dry * dryMix + out[(size_t) c] * wetMix) * outGain;
+                    const float y = (dry * dryMix + out[(size_t) c] * wetMix) * outNow;
                     chans[c][i] = y;
                     outPeak = juce::jmax (outPeak, std::abs (y));
                     ch.pos = (ch.pos + 1) % len;
@@ -401,7 +421,10 @@ namespace comp
         std::array<float, maxBands> makeup {};
         std::array<float, maxBands - 1> lastXf {};
         int lastBands = -1, lookSamples = 0, frameLen = 120, frameCount = 0;
-        float scG = 0.0f, outGain = 1.0f, frameIn = 0.0f, frameOut = 0.0f;
+        float scG = 0.0f, outGain = 1.0f, frameIn = 0.0f, frameOut = 0.0f, paramGlide = 0.001f;
+        std::array<BandSettings, maxBands> smoothBands {};
+        std::array<juce::SmoothedValue<float>, maxBands> makeupSmooth;
+        juce::SmoothedValue<float> outSmooth, mixSmooth;
         bool anySolo = false;
     };
 }

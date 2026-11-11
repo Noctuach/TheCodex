@@ -63,6 +63,10 @@ All notable changes to Codex. Versions follow [Semantic Versioning](https://semv
 - The host's tail length follows the reverb decay.
 
 ### Fixed
+- **No more clicks when parameters move during playback.** An automated audit jumps all 421 continuous parameters
+  mid-note; 18 clicked (distortion Hi Filter / Shelf Gain / Tail Drive, saturation crossovers, Treble, Presence,
+  Dynamics, Level Pan, compressor Output / Gain / Ratio). Filters and crossovers now glide, gains are smoothed and
+  the compressor's curve parameters move smoothly; the audit now runs in CI and fails on any click.
 - Closing the editor could touch freed memory (Compressor page: button attachments destroyed after their buttons),
   a possible crash or hang when the plugin window closes. Found with AddressSanitizer; the full test suite now runs
   clean under it.

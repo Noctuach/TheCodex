@@ -841,6 +841,7 @@ int main (int argc, char** argv)
             }
         }
         std::cout << "\nClick audit: " << tested << " parameters jumped mid-note, " << (int) clicky.size() << " clicked\n";
+        failures += (int) clicky.size();
         proc.presets.loadPreset (0);
     }
 

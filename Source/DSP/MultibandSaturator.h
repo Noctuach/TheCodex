@@ -344,7 +344,9 @@ namespace sat
                 constants.smearStep = (float) (0.02 * 48000.0 / rate);
                 for (auto* v : { &globalMix, &globalOut, &globalIn }) v->reset (rate, 0.02);
                 for (int b = 0; b < maxBands; ++b)
-                    for (auto* v : { &drive[(size_t) b], &mixes[(size_t) b], &levels[(size_t) b] }) v->reset (rate, 0.02);
+                    for (auto* v : { &drive[(size_t) b], &mixes[(size_t) b], &levels[(size_t) b], &levelPans[(size_t) b] }) v->reset (rate, 0.02);
+                glideK = (float) (1.0 - std::exp (-32.0 / (0.012 * rate)));   // ~12 ms glides, updated every 32 samples
+                dynSlew = (float) (1.0 - std::exp (-8.0 / (0.004 * rate)));   // ~4 ms (dynamics gain is updated every 8 samples)
                 last = Settings {};
                 last.numBands = -1;
             }
@@ -363,7 +365,10 @@ namespace sat
                 xf[(size_t) j] = juce::jlimit (prev * 1.05f, (float) (rate * 0.45), s.crossovers[(size_t) j]);
                 prev = xf[(size_t) j];
             }
-            const bool xoverChanged = s.slope != last.slope || s.numBands != last.numBands || xf != lastXf;
+            const bool topology = rateChanged || s.slope != last.slope || s.numBands != last.numBands;
+            targetXf = xf;
+            if (! topology) xf = lastXf;   // a frequency change glides in processSamples (no click)
+            const bool xoverChanged = topology || lastXf != xf;
             if (xoverChanged)
             {
                 for (auto& ch : channels)
@@ -396,26 +401,19 @@ namespace sat
                 target (mixes[(size_t) b], bs.mix);
                 target (levels[(size_t) b], juce::Decibels::decibelsToGain (bs.levelDb));
 
-                if (rateChanged || bs.style != lb.style || bs.feedbackHz != lb.feedbackHz || bs.bassDb != lb.bassDb
-                    || bs.midDb != lb.midDb || bs.trebleDb != lb.trebleDb || bs.presenceDb != lb.presenceDb)
+                target (levelPans[(size_t) b], bs.levelPan);
+                toneTarget[(size_t) b] = { bs.bassDb, bs.midDb, bs.trebleDb, bs.presenceDb };
+                if (rateChanged) { toneCurrent[(size_t) b] = toneTarget[(size_t) b]; designTone (b); }
+                if (rateChanged || bs.style != lb.style || bs.feedbackHz != lb.feedbackHz)
                 {
                     // feedback: band-pass (constant 0 dB peak) at the feedback frequency
                     const double w0 = juce::MathConstants<double>::twoPi * std::min ((double) bs.feedbackHz, rate * 0.45) / rate;
                     const double alpha = std::sin (w0) / (2.0 * 2.0), cw = std::cos (w0), a0 = 1.0 + alpha;
                     const eq::Coeffs bp { alpha / a0, 0.0, -alpha / a0, -2.0 * cw / a0, (1.0 - alpha) / a0 };
-                    // tone controls: bass (low shelf 120 Hz), mid (bell 800 Hz), treble (high shelf 5 kHz), presence (bell 3 kHz)
-                    auto bell = [this] (double f, double gainDb, double q)
-                    {
-                        eq::BandSettings bb; bb.on = true; bb.type = eq::BandType::Bell; bb.freq = (float) f; bb.gainDb = (float) gainDb; bb.q = (float) q;
-                        return eq::design (bb, rate).stages[0];
-                    };
-                    const std::array<eq::Coeffs, 4> toneCoeffs { eq::shelf (false, 120.0, bs.bassDb, 0.7, rate), bell (800.0, bs.midDb, 0.7),
-                                                                 eq::shelf (true, 5000.0, bs.trebleDb, 0.7, rate), bell (3000.0, bs.presenceDb, 1.2) };
                     for (auto& ch : channels)
                     {
                         auto& st = ch.bands[(size_t) b];
                         st.feedbackFilter.c = bp;
-                        for (size_t t = 0; t < 4; ++t) st.tone[t].c = toneCoeffs[t];
                         if (rateChanged || bs.style != lb.style)
                         {
                             st.style.reset();
@@ -429,6 +427,61 @@ namespace sat
             last = s;
         }
 
+        /** Tone controls: bass (low shelf 120 Hz), mid (bell 800 Hz), treble (high shelf 5 kHz), presence (bell 3 kHz). */
+        void designTone (int b) noexcept
+        {
+            const auto& g = toneCurrent[(size_t) b];
+            auto bell = [this] (double f, double gainDb, double q)
+            {
+                eq::BandSettings bb; bb.on = true; bb.type = eq::BandType::Bell; bb.freq = (float) f; bb.gainDb = (float) gainDb; bb.q = (float) q;
+                return eq::design (bb, rate).stages[0];
+            };
+            const std::array<eq::Coeffs, 4> c { eq::shelf (false, 120.0, g[0], 0.7, rate), bell (800.0, g[1], 0.7),
+                                                eq::shelf (true, 5000.0, g[2], 0.7, rate), bell (3000.0, g[3], 1.2) };
+            for (auto& ch : channels)
+                for (size_t t = 0; t < 4; ++t) ch.bands[(size_t) b].tone[t].c = c[t];
+        }
+
+        void designCrossovers (const std::array<float, maxBands - 1>& xf) noexcept
+        {
+            for (auto& ch : channels)
+                for (int j = 0; j < maxBands - 1; ++j)
+                {
+                    designCrossover (settings.slope, xf[(size_t) j], rate, ch.xover[(size_t) j].lp, ch.xover[(size_t) j].hp);
+                    for (int i = 0; i < maxBands - 1; ++i)
+                        designCrossover (settings.slope, xf[(size_t) j], rate, ch.allpass[(size_t) i][(size_t) j].lp, ch.allpass[(size_t) i][(size_t) j].hp);
+                    designCrossover (settings.slope, xf[(size_t) j], rate, ch.dryPhase[(size_t) j].lp, ch.dryPhase[(size_t) j].hp);
+                }
+        }
+
+        /** Every 32 samples: crossovers and tone controls glide towards their targets (no clicks when they move). */
+        void glide() noexcept
+        {
+            const float k = glideK;
+            if (lastXf != targetXf)
+            {
+                for (size_t j = 0; j < lastXf.size(); ++j)
+                {
+                    auto& cur = lastXf[j];
+                    cur = std::exp (std::log (cur) + k * (std::log (targetXf[j]) - std::log (cur)));
+                    if (std::abs (cur / targetXf[j] - 1.0f) < 0.002f) cur = targetXf[j];
+                }
+                designCrossovers (lastXf);
+            }
+            for (int b = 0; b < maxBands; ++b)
+            {
+                auto& cur = toneCurrent[(size_t) b];
+                const auto& tgt = toneTarget[(size_t) b];
+                if (cur == tgt) continue;
+                for (size_t t = 0; t < 4; ++t)
+                {
+                    cur[t] += k * (tgt[t] - cur[t]);
+                    if (std::abs (cur[t] - tgt[t]) < 0.02f) cur[t] = tgt[t];
+                }
+                designTone (b);
+            }
+        }
+
         void processSamples (float* l, float* r, int n) noexcept
         {
             const int nb = juce::jlimit (1, maxBands, settings.numBands);
@@ -440,12 +493,14 @@ namespace sat
 
             for (int i = 0; i < n; ++i)
             {
-                std::array<float, maxBands> dr {}, mx {}, lv {};
+                if ((i & 31) == 0) glide();
+                std::array<float, maxBands> dr {}, mx {}, lv {}, lp {};
                 for (int b = 0; b < nb; ++b)
                 {
                     dr[(size_t) b] = drive[(size_t) b].getNextValue();
                     mx[(size_t) b] = mixes[(size_t) b].getNextValue();
                     lv[(size_t) b] = levels[(size_t) b].getNextValue();
+                    lp[(size_t) b] = levelPans[(size_t) b].getNextValue();
                 }
                 const float gm = globalMix.getNextValue(), go = globalOut.getNextValue(), gi = globalIn.getNextValue();
                 const bool ms = settings.channelMode == 1;
@@ -488,8 +543,9 @@ namespace sat
                             if (st.dynCounter-- <= 0)
                             {
                                 st.dynCounter = 7;
-                                st.dynGain = std::abs (bs.dynamics) < 0.001f ? 1.0f
+                                const float dynTarget = std::abs (bs.dynamics) < 0.001f ? 1.0f
                                            : juce::jlimit (0.03f, 4.0f, std::pow (juce::jmax (1.0e-4f, st.env / 0.25f), -0.85f * bs.dynamics));
+                                st.dynGain += dynSlew * (dynTarget - st.dynGain);   // slewed: a Dynamics change never steps
                             }
 
                             // Drive with pan: shifts the drive between the channels (L/R, or M/S in mid/side mode)
@@ -508,8 +564,8 @@ namespace sat
                             if (std::abs (bs.trebleDb) > 0.01f)   w = st.tone[2].process (w);
                             if (std::abs (bs.presenceDb) > 0.01f) w = st.tone[3].process (w);
 
-                            const float lvPan = c == 0 ? (bs.levelPan > 0.0f ? 1.0f - bs.levelPan : 1.0f)
-                                                       : (bs.levelPan < 0.0f ? 1.0f + bs.levelPan : 1.0f);
+                            const float pan = lp[(size_t) b];
+                            const float lvPan = c == 0 ? (pan > 0.0f ? 1.0f - pan : 1.0f) : (pan < 0.0f ? 1.0f + pan : 1.0f);
                             y = (dry + mx[(size_t) b] * (w - dry)) * lv[(size_t) b] * lvPan;
                         }
 
@@ -541,7 +597,10 @@ namespace sat
         std::array<std::unique_ptr<juce::dsp::Oversampling<float>>, 3> oversamplers;
         int activeOs = -2;
         Settings settings, last;
-        std::array<float, maxBands - 1> lastXf {};
+        std::array<float, maxBands - 1> lastXf {}, targetXf {};
+        std::array<std::array<float, 4>, maxBands> toneCurrent {}, toneTarget {};
+        std::array<juce::SmoothedValue<float>, maxBands> levelPans;
+        float glideK = 0.1f, dynSlew = 0.1f;
         StyleConstants constants;
         std::array<Channel, 2> channels {};
         juce::SmoothedValue<float> globalMix, globalOut, globalIn;
