@@ -64,6 +64,7 @@ All notable changes to Codex. Versions follow [Semantic Versioning](https://semv
   distortion units' Mix did the same around the Lo / Hi filters (4 dB at 30 Hz with the Hi Filter at 40 Hz). The dry
   signal now gets exactly the wet path's phase (crossover all-passes; Linkwitz-Riley Lo / Hi filters with matching
   all-passes; a half-sample all-pass for the anti-aliasing delay), so any Mix setting blends cleanly (within 0.1 dB).
+  The compressor's Mix had the same problem with 2-4 bands (up to 25 dB at a crossover) and is fixed the same way.
 - Linear-phase EQ rebuilt on a custom partitioned convolver: filters are designed on a worker thread and swapped in
   on the audio thread without losing the input history, so editing a band during playback is seamless and the
   reported latency always matches the running filter (previously the filter swap could briefly drop audio).

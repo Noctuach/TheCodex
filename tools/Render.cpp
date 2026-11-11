@@ -1046,6 +1046,57 @@ int main (int argc, char** argv)
             std::cout << "\n";
             if (worst > 0.5f) ++bad;
         }
+        // every other blend: compressor global Mix (multiband, lookahead), saturation band Mix with tone controls
+        {
+            auto sineThrough = [] (auto&& processor, float f)
+            {
+                const int N = 1 << 14, pre = 16384;
+                juce::AudioBuffer<float> b (2, N + pre);
+                for (int i = 0; i < b.getNumSamples(); ++i)
+                { const float v = 0.01f * (float) std::sin (juce::MathConstants<double>::twoPi * f * i / sr); b.setSample (0, i, v); b.setSample (1, i, v); }
+                for (int p = 0; p < b.getNumSamples(); p += 256) processor (b.getWritePointer (0, p), b.getWritePointer (1, p), std::min (256, b.getNumSamples() - p));
+                return juce::Decibels::gainToDecibels (b.getRMSLevel (0, pre, N) / (0.01f * 0.70710678f));
+            };
+            auto dipTable = [&] (const char* name, auto&& make)
+            {
+                float worst = 0.0f;
+                std::cout << "  " << juce::String (name).paddedRight (' ', 44);
+                for (float f : { 60.0f, 120.0f, 250.0f, 400.0f, 1000.0f, 3000.0f, 8000.0f })
+                {
+                    auto lv = [&] (float mix) { auto p = make (mix); return sineThrough ([&] (float* l, float* r, int n) { p->process (l, r, n); }, f); };
+                    const float dry = lv (0.0f), wet = lv (1.0f), half = lv (0.5f);
+                    const float avg = juce::Decibels::gainToDecibels (0.5f * (juce::Decibels::decibelsToGain (dry) + juce::Decibels::decibelsToGain (wet)));
+                    worst = std::max (worst, avg - half);
+                    std::cout << juce::String (avg - half, 1).paddedLeft (' ', 6);
+                }
+                std::cout << "\n";
+                return worst;
+            };
+            std::cout << "  Mix 50 % dip (dB) at                         60   120   250   400    1k    3k    8k\n";
+            const float c1 = dipTable ("Compressor 4 bands + lookahead, global Mix", [] (float mix)
+            {
+                auto c = std::make_unique<comp::MultibandCompressor>(); c->prepare (sr);
+                comp::Settings st; st.enabled = true; st.numBands = 4; st.lookahead = 3; st.mix = mix; st.autoGain = false;
+                for (auto& b : st.bands) { b.ratio = 1.0f; b.thresholdDb = 0.0f; }
+                c->setSettings (st); return c;
+            });
+            const float c2 = dipTable ("Saturation band Mix, tone controls on", [] (float mix)
+            {
+                auto m = std::make_unique<sat::MultibandSaturator>(); m->prepare (sr, 256);
+                sat::Settings st; st.enabled = true; st.numBands = 1; st.oversampling = 0;
+                auto& b = st.bands[0]; b.driveDb = 0.0f; b.style = 0; b.mix = mix; b.bassDb = 6.0f; b.trebleDb = -6.0f; b.presenceDb = 4.0f;
+                m->setSettings (st); return m;
+            });
+            const float c3 = dipTable ("Saturation band Mix, 2x oversampling", [] (float mix)
+            {
+                auto m = std::make_unique<sat::MultibandSaturator>(); m->prepare (sr, 256);
+                sat::Settings st; st.enabled = true; st.numBands = 2; st.oversampling = 1;
+                for (auto& b : st.bands) { b.driveDb = 0.0f; b.style = 0; b.mix = mix; }
+                m->setSettings (st); return m;
+            });
+            if (c1 > 0.5f || c3 > 0.5f) ++bad;
+            juce::ignoreUnused (c2);   // tone controls in parallel are an EQ effect: reported
+        }
         std::cout << "Distortion engine checks: " << (bad == 0 ? "OK" : "FAILED") << "\n";
         failures += bad;
     }

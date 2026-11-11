@@ -144,6 +144,7 @@ namespace comp
             {
                 for (auto& x : ch.xover) x.reset();
                 for (auto& row : ch.allpass) for (auto& a : row) a.reset();
+                for (auto& a : ch.dryPhase) a.reset();
                 for (auto& d : ch.delay) std::fill (d.begin(), d.end(), 0.0f);
                 std::fill (ch.dryDelay.begin(), ch.dryDelay.end(), 0.0f);
                 ch.pos = 0;
@@ -181,9 +182,12 @@ namespace comp
                             a.slope = 2;
                             sat::designCrossover (2, xf[(size_t) j], rate, a.lp, a.hp);
                         }
+                        auto& dp = ch.dryPhase[(size_t) j];
+                        dp.slope = 2;
+                        sat::designCrossover (2, xf[(size_t) j], rate, dp.lp, dp.hp);
                     }
                 if (s.numBands != lastBands)
-                    for (auto& ch : channels) { for (auto& x : ch.xover) x.reset(); for (auto& row : ch.allpass) for (auto& a : row) a.reset(); }
+                    for (auto& ch : channels) { for (auto& x : ch.xover) x.reset(); for (auto& row : ch.allpass) for (auto& a : row) a.reset(); for (auto& a : ch.dryPhase) a.reset(); }
                 lastXf = xf;
                 lastBands = s.numBands;
             }
@@ -340,7 +344,10 @@ namespace comp
                 for (int c = 0; c < 2; ++c)
                 {
                     auto& ch = channels[(size_t) c];
-                    ch.dryDelay[(size_t) ch.pos] = chans[c][i];
+                    // the bands' sum carries the crossovers' all-pass phase: the dry signal gets the same phase
+                    float dryAligned = chans[c][i];
+                    for (int j = 0; j < nb - 1; ++j) dryAligned = ch.dryPhase[(size_t) j].process (dryAligned);
+                    ch.dryDelay[(size_t) ch.pos] = dryAligned;
                     const float dry = ch.dryDelay[(size_t) ((ch.pos - lookSamples + len) % len)];
                     const float y = (dry * dryMix + out[(size_t) c] * wetMix) * outGain;
                     chans[c][i] = y;
@@ -381,6 +388,7 @@ namespace comp
         {
             std::array<sat::Crossover, maxBands - 1> xover {};
             std::array<std::array<sat::Allpass, maxBands - 1>, maxBands - 1> allpass {};
+            std::array<sat::Allpass, maxBands - 1> dryPhase {};   // crossover phase for the dry signal (notch-free Mix)
             std::array<std::vector<float>, maxBands> delay;
             std::vector<float> dryDelay;
             int pos = 0;
