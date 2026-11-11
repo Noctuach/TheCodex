@@ -95,3 +95,28 @@ jobs:
         with:
           name: Codex-${{ matrix.name }}
           path: dist/Codex
+
+  # Memory-safety check: the whole offline test suite (DSP, presets, GUI pages opened and closed) under
+  # AddressSanitizer + UndefinedBehaviorSanitizer. Catches buffer overruns and use-after-free early.
+  sanitizers:
+    name: Linux (sanitizers)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build xvfb libasound2-dev libfreetype-dev libx11-dev libxext-dev \
+            libxinerama-dev libxrandr-dev libxcursor-dev libfontconfig1-dev libgl1-mesa-dev
+      - name: Configure (ASan + UBSan)
+        run: |
+          cmake -S . -B build-asan -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHK_BUILD_TOOLS=ON \
+            -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer" \
+            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined" -DCMAKE_SHARED_LINKER_FLAGS="-fsanitize=address,undefined"
+      - name: Build tests
+        run: cmake --build build-asan --target CodexRender --parallel
+      - name: Run tests under the sanitizers
+        env:
+          ASAN_OPTIONS: detect_leaks=0:halt_on_error=1
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+        run: xvfb-run -a ./build-asan/CodexRender_artefacts/RelWithDebInfo/CodexRender test-output
