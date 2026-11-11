@@ -395,21 +395,37 @@ public:
 inline void drawSectionPanel (juce::Graphics& g, juce::Rectangle<int> r, const juce::String& title, juce::Colour dot)
 {
     using namespace juce;
-    // Flat card: one fill, a hairline border and a quiet header line (no gradients or shadows)
+    // Card: soft shadow, a barely-lit gradient, a machined top edge and a header band with an accent marker
     const auto rf = r.toFloat();
-    g.setColour (Colours_::panel);
+    g.setColour (Colours::black.withAlpha (0.45f));
+    g.fillRoundedRectangle (rf.translated (0.0f, 2.0f), 7.0f);
+    g.setGradientFill (ColourGradient (Colours_::panelTop, 0, rf.getY(), Colours_::panel, 0, rf.getBottom(), false));
     g.fillRoundedRectangle (rf, 6.0f);
-    g.setColour (Colours_::outline);
-    g.drawRoundedRectangle (rf.reduced (0.5f), 6.0f, 1.0f);
 
     auto strip = rf.withHeight (28.0f);
-    g.setColour (Colours_::outline.withAlpha (0.7f));
+    {
+        Path head;
+        head.addRoundedRectangle (strip.getX(), strip.getY(), strip.getWidth(), strip.getHeight(), 6.0f, 6.0f, true, true, false, false);
+        g.setColour (Colours::white.withAlpha (0.018f));
+        g.fillPath (head);
+    }
+    g.setColour (Colours_::outline);
+    g.drawRoundedRectangle (rf.reduced (0.5f), 6.0f, 1.0f);
+    g.setColour (Colours::white.withAlpha (0.06f));   // top edge catches the light
+    g.drawHorizontalLine ((int) rf.getY() + 1, rf.getX() + 6.0f, rf.getRight() - 6.0f);
+    g.setColour (Colours::black.withAlpha (0.5f));
     g.drawHorizontalLine ((int) strip.getBottom(), strip.getX() + 1.0f, strip.getRight() - 1.0f);
+    g.setColour (Colours_::outline.withAlpha (0.6f));
+    g.drawHorizontalLine ((int) strip.getBottom() + 1, strip.getX() + 1.0f, strip.getRight() - 1.0f);
 
+    // accent marker: a short glowing bar
+    const auto marker = Rectangle<float> (3.0f, 12.0f).withCentre ({ rf.getX() + 13.0f, strip.getCentreY() });
+    g.setColour (dot.withAlpha (0.25f));
+    g.fillRoundedRectangle (marker.expanded (2.0f), 2.5f);
     g.setColour (dot);
-    g.fillEllipse (Rectangle<float> (5.0f, 5.0f).withCentre ({ rf.getX() + 14.0f, strip.getCentreY() }));
-    g.setColour (Colours_::text.withAlpha (0.86f));
-    g.setFont (Fonts::label (13.0f, 0.1f));
+    g.fillRoundedRectangle (marker, 1.5f);
+    g.setColour (Colours_::text.withAlpha (0.92f));
+    g.setFont (Fonts::label (13.0f, 0.14f));
     g.drawText (title, strip.withTrimmedLeft (25.0f), Justification::centredLeft);
 }
 

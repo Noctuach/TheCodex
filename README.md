@@ -38,7 +38,7 @@ Formats: **VST3** (Windows, macOS, Linux), **AU** (macOS) and a **Standalone** a
 4. Hover over any control to see what it does.
 
 The **ROOT** readout in the tab bar is a tuner: it measures the actual root note coming out of the plugin, after all
-distortion, so you can see your kick is in key. It turns green within 10 cents of the selected key.
+distortion, so you can see your kick is in key. It turns orange within 10 cents of the selected key.
 
 ## Your first hardstyle kick, step by step
 1. Start from **Init** (or **909 Clean** for the 909 engine).

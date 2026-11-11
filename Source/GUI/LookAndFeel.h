@@ -17,7 +17,7 @@ namespace Colours_
     const juce::Colour accent     { 0xffff8c1a }; // sun orange
     const juce::Colour accentHi   { 0xffffc078 };
     const juce::Colour accent2    { 0xffffd0a0 }; // peach (pitch envelope)
-    const juce::Colour good       { 0xff6fdc8c };
+    const juce::Colour good       { 0xffffb347 }; // amber (in tune, mid channel);
     const juce::Colour warn       { 0xffff4d4d };
     const juce::Colour text       { 0xffefedea };
     const juce::Colour textDim    { 0xff9a9590 };
@@ -300,23 +300,37 @@ public:
         g.setColour (knobTrack);
         g.strokePath (track, juce::PathStrokeType (lineW, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
 
-        // Value arc
+        // Value arc with a soft glow
         if (std::abs (angle - from) > 0.001f)
         {
             juce::Path value;
             value.addCentredArc (centre.x, centre.y, arcR, arcR, 0.0f, juce::jmin (from, angle), juce::jmax (from, angle), true);
+            if (s.isEnabled())
+            {
+                g.setColour (arcColour.withAlpha (hot ? 0.22f : 0.13f));
+                g.strokePath (value, juce::PathStrokeType (lineW * 2.6f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            }
             g.setColour (arcColour);
             g.strokePath (value, juce::PathStrokeType (lineW, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
         }
 
-        // Flat body with a hairline rim
+        // Machined body: drop shadow, lit from above, bevelled rim, specular highlight
         const float bodyR = arcR - lineW * 2.2f;
         const auto body = juce::Rectangle<float> (bodyR * 2.0f, bodyR * 2.0f).withCentre (centre);
-        g.setGradientFill (juce::ColourGradient (juce::Colour (0xff2a2a2a), centre.x, body.getY(),
-                                                 juce::Colour (0xff181818), centre.x, body.getBottom(), false));
+        g.setColour (juce::Colours::black.withAlpha (0.55f));
+        g.fillEllipse (body.expanded (1.5f).translated (0.0f, 2.0f));
+        g.setGradientFill (juce::ColourGradient (juce::Colour (0xff343230), centre.x - bodyR * 0.35f, body.getY(),
+                                                 juce::Colour (0xff121212), centre.x + bodyR * 0.3f, body.getBottom(), true));
         g.fillEllipse (body);
-        g.setColour (hot ? outlineHi.brighter (0.2f) : outlineHi);
+        g.setGradientFill (juce::ColourGradient (juce::Colours::white.withAlpha (hot ? 0.22f : 0.14f), centre.x, body.getY(),
+                                                 juce::Colours::black.withAlpha (0.4f), centre.x, body.getBottom(), false));
         g.drawEllipse (body.reduced (0.5f), 1.0f);
+        {
+            juce::Path spec;
+            spec.addCentredArc (centre.x, centre.y, bodyR * 0.78f, bodyR * 0.78f, 0.0f, -0.9f, 0.9f, true);
+            g.setColour (juce::Colours::white.withAlpha (0.05f));
+            g.strokePath (spec, juce::PathStrokeType (bodyR * 0.18f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        }
 
         // Pointer
         const auto dir = juce::Point<float> (std::sin (angle), -std::cos (angle));
@@ -501,8 +515,13 @@ public:
         {
             if (b.getToggleState())
             {
+                const auto line = r.removeFromBottom (2.0f).reduced (6.0f, 0.0f);
+                // soft glow rising from the underline
+                g.setGradientFill (juce::ColourGradient (Colours_::accent.withAlpha (0.16f), line.getCentreX(), line.getY(),
+                                                         Colours_::accent.withAlpha (0.0f), line.getCentreX(), line.getY() - 14.0f, false));
+                g.fillRect (line.withY (line.getY() - 14.0f).withHeight (14.0f));
                 g.setColour (Colours_::accent);
-                g.fillRect (r.removeFromBottom (2.0f).reduced (6.0f, 0.0f));
+                g.fillRoundedRectangle (line, 1.0f);
             }
             return;
         }
@@ -510,7 +529,10 @@ public:
         if (id == "pill")
         {
             const bool on = b.getToggleState();
-            g.setColour (on ? Colours_::accent.withAlpha (0.16f) : (over ? Colours_::panelTop.brighter (0.04f) : Colours_::panelTop));
+            if (on)
+                g.setGradientFill (juce::ColourGradient (Colours_::accent.withAlpha (0.26f), 0, r.getY(), Colours_::accent.withAlpha (0.1f), 0, r.getBottom(), false));
+            else
+                g.setColour (over ? Colours_::panelTop.brighter (0.04f) : Colours_::panelTop);
             g.fillRoundedRectangle (r, 4.0f);
             g.setColour (on ? Colours_::accent.withAlpha (0.8f) : (over ? Colours_::outlineHi : Colours_::outline));
             g.drawRoundedRectangle (r, 4.0f, 1.0f);
@@ -525,7 +547,10 @@ public:
             juce::Path p;
             p.addRoundedRectangle (r.getX(), r.getY(), r.getWidth(), r.getHeight(), 4.0f, 4.0f,
                                    ! last, ! first, ! last, ! first);
-            g.setColour (on ? Colours_::accent.withAlpha (0.2f) : (over ? Colours_::panelTop.brighter (0.04f) : Colours_::panelTop));
+            if (on)
+                g.setGradientFill (juce::ColourGradient (Colours_::accent.withAlpha (0.3f), 0, r.getY(), Colours_::accent.withAlpha (0.12f), 0, r.getBottom(), false));
+            else
+                g.setColour (over ? Colours_::panelTop.brighter (0.04f) : Colours_::panelTop);
             g.fillPath (p);
             g.setColour (on ? Colours_::accent.withAlpha (0.8f) : Colours_::outline);
             g.strokePath (p, juce::PathStrokeType (1.0f));

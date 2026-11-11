@@ -268,7 +268,7 @@ public:
             g.fillRoundedRectangle (seg.reduced (1.0f), 4.0f);
             if (b == selected) { g.setColour (col.withAlpha (0.8f)); g.drawRoundedRectangle (seg.reduced (1.0f), 4.0f, 1.2f); }
 
-            // gain change meter (downward = red-ish bar from the top, upward = green from the bottom)
+            // gain change meter (downward = red-ish bar from the top, upward = amber from the bottom)
             const float gr = proc.getCompressor().currentGr[(size_t) b].load (std::memory_order_relaxed);
             smoothed[(size_t) b] += 0.35f * (gr - smoothed[(size_t) b]);
             const float h = juce::jlimit (0.0f, seg.getHeight() - 4.0f, std::abs (smoothed[(size_t) b]) / 24.0f * (seg.getHeight() - 4.0f));

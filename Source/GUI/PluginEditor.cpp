@@ -384,15 +384,29 @@ void MainView::showTab (int tab)
 //==============================================================================
 void MainView::paint (Graphics& g)
 {
-    // Background: flat graphite
+    // Background: black with a faint warm lift in the centre
     g.fillAll (Colours_::background);
+    g.setGradientFill (ColourGradient (Colour (0xff0d0b09), (float) getWidth() * 0.5f, (float) getHeight() * 0.45f,
+                                       Colours_::background, 0.0f, (float) getHeight() * 1.1f, true));
+    g.fillRect (getLocalBounds().withTrimmedTop (header.getBottom() + 8));
 
-    // Header bar
+    // Header bar: brushed-dark gradient with a sun-orange hairline that fades out at both ends
     const auto bar = getLocalBounds().removeFromTop (header.getBottom() + 8).toFloat();
-    g.setColour (Colours_::panel);
+    g.setGradientFill (ColourGradient (Colour (0xff161514), 0, bar.getY(), Colour (0xff0c0c0c), 0, bar.getBottom(), false));
     g.fillRect (bar);
-    g.setColour (Colours_::outline);
+    g.setColour (Colours::black);
     g.drawHorizontalLine ((int) bar.getBottom() - 1, 0, (float) getWidth());
+    {
+        ColourGradient line (Colours_::accent.withAlpha (0.0f), 0, 0, Colours_::accent.withAlpha (0.0f), (float) getWidth(), 0, false);
+        line.addColour (0.25, Colours_::accent.withAlpha (0.55f));
+        line.addColour (0.75, Colours_::accent.withAlpha (0.55f));
+        g.setGradientFill (line);
+        g.fillRect (Rectangle<float> (0.0f, bar.getBottom() - 1.0f, (float) getWidth(), 1.0f));
+        ColourGradient glow (Colours_::accent.withAlpha (0.07f), (float) getWidth() * 0.5f, bar.getBottom(),
+                             Colours_::accent.withAlpha (0.0f), (float) getWidth() * 0.5f, bar.getBottom() + 10.0f, false);
+        g.setGradientFill (glow);
+        g.fillRect (Rectangle<float> (0.0f, bar.getBottom(), (float) getWidth(), 10.0f));
+    }
 
     // Logo: mark + wordmark + subtitle
     {

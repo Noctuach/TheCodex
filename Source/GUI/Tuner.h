@@ -109,7 +109,7 @@ public:
         float cents = (shownNote - (float) nearest) * 100.0f;
         if (std::abs (cents) < 0.05f) cents = 0.0f;   // never show "-0.0"
         const bool onTarget = hasReading && std::abs (shownNote - target) < 0.1f;   // within 10 cents
-        const auto noteColour = ! hasReading ? Colours_::textDim : (onTarget ? Colours_::good : Colours_::accent);
+        const auto noteColour = ! hasReading ? Colours_::textDim : (onTarget ? Colours_::accent : Colours_::text);
 
         // Bottom line: target
         auto bottom = r.removeFromBottom (14.0f);
@@ -170,7 +170,7 @@ public:
     explicit TunerChip (TunerAnalyser& a) : analyser (a)
     {
         analyser.addChangeListener (this);
-        setTooltip ("Tuner: measured root note of the output. Green = within 10 cents of the selected key.");
+        setTooltip ("Tuner: measured root note of the output. Orange = within 10 cents of the selected key.");
     }
     ~TunerChip() override { analyser.removeChangeListener (this); }
 
@@ -187,7 +187,7 @@ public:
         float cents = (note - (float) nearest) * 100.0f;
         if (std::abs (cents) < 0.05f) cents = 0.0f;   // never show "-0.0"
         const bool onTarget = has && std::abs (note - target) < 0.1f;
-        const auto col = ! has ? Colours_::textDim : (onTarget ? Colours_::good : Colours_::accent);
+        const auto col = ! has ? Colours_::textDim : (onTarget ? Colours_::accent : Colours_::text);
         g.setColour (has ? col.withAlpha (0.6f) : Colours_::outline);
         g.drawRoundedRectangle (r, r.getHeight() * 0.5f, 1.0f);
 
