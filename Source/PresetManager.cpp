@@ -116,7 +116,8 @@ PresetManager::PresetManager (AudioProcessorValueTreeState& s) : apvts (s)
     add ("909 Rawstyle", Builder().kick909 (2, 0.55f, 0.7f, 0.55f).set (ID::aRelease, 100.0f)
          .clip (1, CD::HardClip, 28.0f, -10.0f).band (2, Bell, 50.0f, -4.0f, 1.5f).band (3, Bell, 383.0f, 6.0f, 1.0f)
          .band (4, Bell, 1800.0f, -5.0f, 2.0f).clip (2, CD::Diode, 12.0f, -6.0f)
-         .character (1, 0.35f, 0.0f, 9000.0f).character (2, 0.0f, 0.0f, 20000.0f, 40.0f));
+         .character (1, 0.35f, 0.0f, 9000.0f).character (2, 0.0f, 0.0f, 20000.0f, 40.0f)
+         .set (ID::clipOn, 1.0f).set (ID::clipCeiling, -1.0f));   // the diode's asymmetric peaks are clipped at the output
 
     add ("909 Gabber Overdrive", Builder().kick909 (5, 0.7f, 0.5f, 0.5f).set (ID::aRelease, 80.0f)
          .clip (1, CD::Overdrive, 34.0f, -10.0f).band (2, LowShelf, 80.0f, 6.0f, 0.7f).band (3, Bell, 800.0f, -9.0f, 0.7f)
@@ -199,8 +200,9 @@ PresetManager::PresetManager (AudioProcessorValueTreeState& s) : apvts (s)
         Builder b; b.kick909 (2, 0.55f, 0.6f, 0.6f).set (ID::aRelease, 120.0f)
          .clip (1, CD::Overdrive, 22.0f, -8.0f).band (3, Bell, 380.0f, 5.0f, 1.0f).clip (2, CD::HardClip, 10.0f, -6.0f)
          .set (ID::cmp ("On"), 1.0f).set (ID::cmp ("Bands"), 3.0f).set (ID::cmp ("X1"), 150.0f).set (ID::cmp ("X2"), 2500.0f)
-         .set (ID::cmpBand (1, "Dir"), 1.0f).set (ID::cmpBand (1, "Thr"), -24.0f).set (ID::cmpBand (1, "Ratio"), 3.0f).set (ID::cmpBand (1, "Range"), 12.0f)
-         .set (ID::cmpBand (0, "Thr"), -12.0f).set (ID::cmpBand (0, "Ratio"), 2.5f);
+         .set (ID::cmpBand (1, "Dir"), 1.0f).set (ID::cmpBand (1, "Thr"), -24.0f).set (ID::cmpBand (1, "Ratio"), 3.0f).set (ID::cmpBand (1, "Range"), 6.0f)
+         .set (ID::cmpBand (0, "Thr"), -12.0f).set (ID::cmpBand (0, "Ratio"), 2.5f)
+         .set (ID::clipOn, 1.0f).set (ID::clipCeiling, -1.0f);   // the transient spikes above the compressed body
         add ("Upward Tail Crunch", b);
     }
     {   // drawn pitch and amp envelopes, post low-pass on the second distortion
@@ -219,16 +221,16 @@ PresetManager::PresetManager (AudioProcessorValueTreeState& s) : apvts (s)
         add ("Downsampled Hardcore", b);
     }
 
-    // Output levels matched to about -3 dBFS peak in the key of F (measured with tools/CodexRender),
-    // so switching presets does not jump in volume.
+    // Output levels matched for loudness (K-weighted short-term, see CODEX_LEVEL_MATCH in tools/Render.cpp) in the key
+    // of F, with peaks below -1 dBFS; presets with spiky transients use the output clipper instead of turning down.
     const std::map<String, float> outputLevels {
-        { "Oldskool Raw", 0.3f }, { "Euphoric Tail", -1.3f }, { "Early Hardstyle", 0.4f }, { "Punchy Tok", -1.8f },
-        { "Zaag Kick", 1.4f }, { "Rotterdam Gabber", -0.2f }, { "909 Clean", -3.7f }, { "909 Oldskool Hardstyle", 1.4f },
-        { "909 Euphoric", -0.9f }, { "909 Rawstyle", -0.8f }, { "909 Gabber Overdrive", 1.6f }, { "909 Tok", -3.3f },
-        { "909 Boom Tail", -0.2f }, { "909 Fuzz Box", 1.7f }, { "909 Bitcrushed", 1.9f }, { "909 Hard Attack Raw", -0.1f },
-        { "909 Wide Rawstyle", 3.0f }, { "Saturated Euphoric", -4.0f },
-        { "Screech Rawstyle", 0.6f }, { "X-Shaped Zaag", 0.7f }, { "Euphoric Wide Hall", -1.0f }, { "Upward Tail Crunch", -8.4f },
-        { "Drawn Modern Hardstyle", -0.6f }, { "Downsampled Hardcore", 2.3f } };
+        { "Oldskool Raw", -0.1f }, { "Euphoric Tail", -3.3f }, { "Early Hardstyle", -0.3f }, { "Punchy Tok", -1.8f },
+        { "Zaag Kick", -1.6f }, { "Rotterdam Gabber", -0.5f }, { "909 Clean", -1.7f }, { "909 Oldskool Hardstyle", 1.6f },
+        { "909 Euphoric", -1.2f }, { "909 Rawstyle", 5.1f }, { "909 Gabber Overdrive", 0.3f }, { "909 Tok", -0.3f },
+        { "909 Boom Tail", 0.4f }, { "909 Fuzz Box", 1.8f }, { "909 Bitcrushed", 1.2f }, { "909 Hard Attack Raw", 1.2f },
+        { "909 Wide Rawstyle", 3.0f }, { "Saturated Euphoric", -3.1f },
+        { "Screech Rawstyle", 2.5f }, { "X-Shaped Zaag", -0.4f }, { "Euphoric Wide Hall", -3.2f }, { "Upward Tail Crunch", -0.2f },
+        { "Drawn Modern Hardstyle", 0.4f }, { "Downsampled Hardcore", 1.7f } };
     for (auto& preset : factory)
         if (auto it = outputLevels.find (preset.name); it != outputLevels.end())
         {

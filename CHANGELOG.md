@@ -63,6 +63,8 @@ All notable changes to Codex. Versions follow [Semantic Versioning](https://semv
 - The host's tail length follows the reverb decay.
 
 ### Fixed
+- Factory presets are now loudness-matched (K-weighted short-term loudness) instead of peak-matched. Switching presets used to jump by up to 16 dB in perceived level (e.g. 909 Rawstyle was 9 dB quieter than 909 Euphoric at the same peak); 20 of 24 presets now sit within 0.1 dB of each other, and the rest within 3 dB, all peaking below -1 dBFS. 909 Rawstyle and Upward Tail Crunch use the output clipper to tame their spiky transients.
+- Envelope display could build a path from NaN coordinates on its first paint (found by the new sanitizer CI job).
 - Tuner read up to 22 cents sharp on heavily distorted kicks (bit-crushed, rawstyle): the pitch estimate is now refined on the windowed spectrum, and matches an FFT reference within 0.1 cent on every preset. The 909 presets were in tune all along.
 - 909 pitch sweep lands on the root sooner (floor level 0.06), so short kicks settle in key.
 - **No more clicks when parameters move during playback.** An automated audit jumps all 421 continuous parameters

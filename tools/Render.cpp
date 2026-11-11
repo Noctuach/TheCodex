@@ -135,8 +135,35 @@ int main (int argc, char** argv)
     std::cout << "Latency: " << proc.getLatencySamples() << " samples\n\n";
 
     // ---- All factory presets in the key of F (F1 = 43.65 Hz) ----
-    std::cout << juce::String ("Preset").paddedRight (' ', 26) << "  peak dBFS   tail pitch   cents\n";
+    std::cout << juce::String ("Preset").paddedRight (' ', 26) << "  peak dBFS   tail pitch   cents   loudness\n";
     const float targetHz = midiToFrequency (29.0f);
+    std::vector<std::pair<float, float>> presetLevels;   // (loudness, peak) for the level-match report
+    // Loudness of one hit: K-weighted (ITU BS.1770 pre-filter and RLB high-pass), loudest 100 ms window in the first
+    // 400 ms, both channels summed as in LUFS. Peak matching hid ~9 dB differences between presets.
+    auto hitLoudness = [] (const juce::AudioBuffer<float>& b)
+    {
+        const int n = std::min (b.getNumSamples(), (int) (0.4 * sr)), win = (int) (0.1 * sr), hop = win / 4;
+        std::vector<double> power ((size_t) n, 0.0);
+        for (int ch = 0; ch < 2; ++ch)
+        {
+            juce::dsp::IIR::Filter<float> shelf, rlb;
+            shelf.coefficients = juce::dsp::IIR::Coefficients<float>::makeHighShelf (sr, 1500.0, 0.7071, juce::Decibels::decibelsToGain (4.0f));
+            rlb.coefficients = juce::dsp::IIR::Coefficients<float>::makeHighPass (sr, 38.0, 0.5);
+            for (int s = 0; s < n; ++s)
+            {
+                const double v = rlb.processSample (shelf.processSample (b.getSample (ch, s)));
+                power[(size_t) s] += v * v;
+            }
+        }
+        double best = 0.0;
+        for (int s = 0; s + win <= n; s += hop)
+        {
+            double e = 0.0;
+            for (int k = 0; k < win; ++k) e += power[(size_t) (s + k)];
+            best = std::max (best, e / win);
+        }
+        return (float) (-0.691 + 10.0 * std::log10 (best + 1.0e-12));   // LUFS-style short-term value
+    };
     for (int i = 0; i < proc.presets.getNumFactory(); ++i)
     {
         proc.presets.loadPreset (i);
@@ -151,10 +178,44 @@ int main (int argc, char** argv)
                       << juce::String (1200.0f * std::log2 (fftFundamental (audio, 0.15, 0.17) / targetHz), 1) << " c)\n";
         const bool ok = finite && pk < 1.0f && pk > -30.0f && hz > 0 && std::abs (cents) < 25.0f;
         failures += ok ? 0 : 1;
+        const float loud = hitLoudness (audio);
+        presetLevels.push_back ({ loud, pk });
         std::cout << proc.presets.getFactoryNames()[i].paddedRight (' ', 26) << juce::String (pk, 1).paddedLeft (' ', 9)
                   << juce::String (hz, 2).paddedLeft (' ', 10) << " Hz" << juce::String (cents, 1).paddedLeft (' ', 8)
-                  << (ok ? "" : "   <-- CHECK") << "\n";
+                  << juce::String (loud, 1).paddedLeft (' ', 11) << (ok ? "" : "   <-- CHECK") << "\n";
         writeWav (audio, outDir.getChildFile (juce::File::createLegalFileName (proc.presets.getFactoryNames()[i]) + ".wav"));
+    }
+
+    // ---- Factory presets are loudness-matched (Init excluded): every preset within 3.5 dB of the median ----
+    {
+        std::vector<float> l;
+        for (size_t i = 1; i < presetLevels.size(); ++i) l.push_back (presetLevels[i].first);
+        std::sort (l.begin(), l.end());
+        const float median = l[l.size() / 2], spread = std::max (median - l.front(), l.back() - median);
+        const bool ok = spread < 3.5f;
+        std::cout << "\nPreset loudness: median " << juce::String (median, 1) << " LUFS (short-term), largest deviation "
+                  << juce::String (spread, 1) << " dB: " << (ok ? "OK" : "FAILED") << "\n";
+        failures += ok ? 0 : 1;
+    }
+
+    // ---- Level match report: suggested output levels for PresetManager.cpp (loudness-matched, peaks kept below -1 dBFS) ----
+    if (std::getenv ("CODEX_LEVEL_MATCH") != nullptr)
+    {
+        std::vector<float> l;
+        for (auto& p : presetLevels) l.push_back (p.first);
+        std::sort (l.begin(), l.end());
+        const float target = l[l.size() / 2];
+        std::cout << "\nLevel match (target " << target << " LUFS short-term):\n";
+        for (int i = 0; i < proc.presets.getNumFactory(); ++i)
+        {
+            proc.presets.loadPreset (i);
+            const float current = proc.apvts.getParameter (ID::outGain)->convertFrom0to1 (proc.apvts.getParameter (ID::outGain)->getValue());
+            // with the output clipper on, allow up to 3 dB of peaks into the clipper; otherwise keep 1 dB of headroom
+            const bool clipper = proc.apvts.getRawParameterValue (ID::clipOn)->load() > 0.5f;
+            const float delta = clipper ? target - presetLevels[(size_t) i].first
+                                        : std::min (target - presetLevels[(size_t) i].first, -1.0f - presetLevels[(size_t) i].second);
+            std::cout << "    { \"" << proc.presets.getFactoryNames()[i] << "\", " << juce::String (current + delta, 1) << "f },\n";
+        }
     }
 
     // ---- Preset switching restores everything (e.g. distortion re-enabled after "909 Clean") ----
@@ -588,7 +649,7 @@ int main (int argc, char** argv)
     // ---- Output clipper: the ceiling holds (also between samples), off = untouched ----
     {
         int bad = 0;
-        proc.presets.loadPreset (10);
+        proc.presets.loadPreset (8);   // 909 Oldskool Hardstyle (no output clipper)
         setParam (proc, ID::outGain, 12.0f);
         const auto hot = render (proc, 1);
         setParam (proc, ID::clipOn, 1.0f);
@@ -610,7 +671,7 @@ int main (int argc, char** argv)
         if (clipPk > -0.99f || hotPk < 3.0f || juce::Decibels::gainToDecibels (isp) > 0.0f) ++bad;
         std::cout << "Output clipper checks: " << (bad == 0 ? "OK" : "FAILED") << "\n";
         failures += bad;
-        proc.presets.loadPreset (10);
+        proc.presets.loadPreset (8);
         if (proc.apvts.getRawParameterValue (ID::clipOn)->load() > 0.5f) { ++failures; std::cout << "   preset did not reset the clipper\n"; }
     }
 
