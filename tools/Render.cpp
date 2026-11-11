@@ -787,6 +787,63 @@ int main (int argc, char** argv)
         proc.prepareToPlay (sr, block);
     }
 
+    // ---- Click audit: jump every continuous parameter during a sustained note ----
+    if (std::getenv ("CODEX_CLICK_AUDIT") != nullptr)
+    {
+        std::vector<juce::String> clicky;
+        auto setup = [&]
+        {
+            proc.presets.loadPreset (0);
+            setParam (proc, ID::pAmount, 0.0f); setParam (proc, ID::aSustain, 1.0f); setParam (proc, ID::clickLevel, 0.0f);
+            for (const auto& id : { ID::sat ("On"), ID::cmp ("On"), ID::spc ("On"), ID::clipOn, ID::subOn }) setParam (proc, id, 1.0f);
+            EQDisplay::addBand (proc.apvts, 0, eq::BandType::Bell, 300.0f, 3.0f, 1.0f);
+            EQDisplay::addBand (proc.apvts, 1, eq::BandType::Bell, 2000.0f, -3.0f, 1.0f);
+            setParam (proc, ID::clip (1, "FltPos"), 1.0f);
+        };
+        auto curvature = [] (const juce::AudioBuffer<float>& b, int from, int to)
+        {
+            float m = 0.0f;
+            for (int i = juce::jmax (2, from); i < to; ++i)
+                for (int ch = 0; ch < 2; ++ch)
+                    m = std::max (m, std::abs (b.getSample (ch, i) - 2.0f * b.getSample (ch, i - 1) + b.getSample (ch, i - 2)));
+            return m;
+        };
+        int tested = 0;
+        for (auto* prm : proc.getParameters())
+        {
+            auto* rp = dynamic_cast<juce::RangedAudioParameter*> (prm);
+            if (rp == nullptr || dynamic_cast<juce::AudioParameterFloat*> (rp) == nullptr) continue;   // switches and choices step by design
+            const auto id = rp->paramID;
+            if (id == ID::key || id.startsWith ("macro") || id.contains ("Used")) continue;
+            setup();
+            rp->setValueNotifyingHost (0.3f);
+            proc.prepareToPlay (sr, block);
+            const int total = (int) (1.2 * sr) / block * block, change = (int) (0.6 * sr) / block * block;   // whole blocks only
+            juce::AudioBuffer<float> out (2, total), buf (2, block);
+            for (int pos = 0; pos < total; pos += block)
+            {
+                juce::MidiBuffer midi;
+                if (pos == 0) midi.addEvent (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 127), 0);
+                if (pos == change) rp->setValueNotifyingHost (0.7f);
+                buf.clear();
+                proc.processBlock (buf, midi);
+                for (int ch = 0; ch < 2; ++ch) out.copyFrom (ch, pos, buf, ch, 0, block);
+            }
+            const float before = curvature (out, change - (int) (0.15 * sr), change);
+            const float after = curvature (out, change + (int) (0.25 * sr), change + (int) (0.45 * sr));
+            const float around = curvature (out, change, change + (int) (0.03 * sr));
+            const float ref = std::max (before, after);
+            ++tested;
+            if (around > 3.0f * ref + 1.0e-4f)
+            {
+                clicky.push_back (id);
+                std::cout << "   click: " << rp->getName (40).paddedRight (' ', 40) << " x" << juce::String (around / juce::jmax (1.0e-6f, ref), 1) << "\n";
+            }
+        }
+        std::cout << "\nClick audit: " << tested << " parameters jumped mid-note, " << (int) clicky.size() << " clicked\n";
+        proc.presets.loadPreset (0);
+    }
+
     // ---- Every key, both engines ----
     std::cout << "\nKey   target Hz   synth Hz   909 Hz\n";
     for (int k = 0; k < 12; ++k)
@@ -1096,6 +1153,26 @@ int main (int argc, char** argv)
             });
             if (c1 > 0.5f || c3 > 0.5f) ++bad;
             juce::ignoreUnused (c2);   // tone controls in parallel are an EQ effect: reported
+        }
+        // Auto Gain: Drive changes colour, not loudness; Raw: deliberately aliasing
+        {
+            auto kickRms = [&] (float drive, bool autoGain)
+            {
+                proc.presets.loadPreset (8);
+                setParam (proc, ID::clip (1, "Drive"), drive);
+                setParam (proc, ID::clip (1, "AutoGain"), autoGain ? 1.0f : 0.0f);
+                setParam (proc, ID::clip (2, "On"), 0.0f);
+                const auto out = render (proc, 4);   // several hits: the auto gain follows slowly
+                return juce::Decibels::gainToDecibels (out.getRMSLevel (0, (int) (1.2 * sr), (int) (0.35 * sr)));
+            };
+            const float lo = kickRms (6.0f, false), hi = kickRms (30.0f, false), loA = kickRms (6.0f, true), hiA = kickRms (30.0f, true);
+            std::cout << "  Auto Gain: Drive 6 -> 30 dB changes the level by " << juce::String (hi - lo, 1) << " dB without, "
+                      << juce::String (hiA - loA, 1) << " dB with Auto Gain\n";
+            if (std::abs (hiA - loA) > 1.5f || std::abs (hiA - loA) > std::abs (hi - lo) * 0.5f) ++bad;
+            const float rawAlias = aliasDb (ClipDistortion::rawOversampling), offAlias = aliasDb (0);
+            std::cout << "  Raw (no anti-aliasing): " << juce::String (rawAlias, 1) << " dB vs Off with ADAA " << juce::String (offAlias, 1) << " dB\n";
+            if (rawAlias < offAlias + 6.0f) ++bad;
+            proc.presets.loadPreset (0);
         }
         std::cout << "Distortion engine checks: " << (bad == 0 ? "OK" : "FAILED") << "\n";
         failures += bad;

@@ -147,7 +147,7 @@ private:
 
     struct BandParams { std::atomic<float>* on, * type, * freq, * gain, * q, * slope, * place; };
     struct ClipParams { std::atomic<float> *on, *mode, *drive, *boost, *chr, *bias, *loFilt, *hiFilt, *shelfF, *shelfG, *mix, *out, *dc, *os, *spatial,
-                               *fltPos, *fltType, *fltFreq, *fltRes, *tailDrv, *split;
+                               *fltPos, *fltType, *fltFreq, *fltRes, *tailDrv, *split, *autoGain;
                         std::array<std::atomic<float>*, ClipDistortion::numCurvePoints> xp {}, xn {}; };
     struct SatBandParams { std::atomic<float> *style, *drive, *mix, *fb, *fbFreq, *dyn, *bass, *midT, *treble, *pres, *drivePan, *levelPan, *level, *mute, *solo, *bypass; };
 

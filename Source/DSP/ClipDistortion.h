@@ -33,7 +33,10 @@ public:
                  "Diode 2", "Zero-Square", "Downsample", "X-Shaper", "X-Shaper (Asym)" };
     }
 
-    static juce::StringArray oversamplingNames() { return { "Off", "2x", "4x", "8x", "16x" }; }
+    /** "Raw" = no oversampling and no anti-aliasing at all: the deliberately gritty, aliasing sound of classic
+        digital drum machines (Microtonic's distortion aliases on purpose for the same reason). */
+    static juce::StringArray oversamplingNames() { return { "Off", "2x", "4x", "8x", "16x", "Raw" }; }
+    static constexpr int rawOversampling = 5;
 
     enum FilterType { LowPass12 = 0, LowPass24, BandPass, HighPass12, HighPass24, Notch };
     static juce::StringArray filterTypeNames() { return { "Low Pass 12", "Low Pass 24", "Band Pass", "High Pass 12", "High Pass 24", "Notch" }; }
@@ -72,6 +75,7 @@ public:
         float mix = 1.0f, outDb = 0.0f;
         float loFilterHz = 20000.0f, hiFilterHz = 20.0f, shelfHz = 6000.0f, shelfDb = 0.0f;
         bool  dcFilter = true;
+        bool  autoGain = false;   // keep the unit's output level matched to its input (Drive changes colour, not loudness)
         int   oversampling = 2; // index into oversamplingNames()
         float spatial = 0.0f;   // 0 = identical L/R, 1 = different distortion per channel (stereo)
         int   filterPos = 0, filterType = LowPass12;   // filterPos: 0 = off, 1 = pre, 2 = post
@@ -92,6 +96,10 @@ public:
     {
         baseRate = sr;
         tailMul.assign ((size_t) juce::jmax (1, maxBlockSize), 1.0f);
+        autoIn.assign ((size_t) juce::jmax (1, maxBlockSize), 0.0f);
+        autoCoef = (float) (1.0 - std::exp (-1.0 / (1.0 * sr)));
+        msIn = msOut = 0.0f;
+        autoGainNow = 1.0f;
         fixedTable (0);                                   // build the shared ADAA tables here, never on the audio thread
         curveTable.build ([] (float x) { return juce::jlimit (-1.0f, 1.0f, x); }, false);   // allocate the X-Shaper table up front
         for (int i = 0; i < 4; ++i)
@@ -122,7 +130,7 @@ public:
     /** Latency in base-rate samples for the current oversampling setting. */
     float getLatencyInSamples() const
     {
-        const int i = settings.oversampling - 1;
+        const int i = settings.oversampling == rawOversampling ? -1 : settings.oversampling - 1;
         return i >= 0 && oversamplers[(size_t) i] != nullptr ? oversamplers[(size_t) i]->getLatencyInSamples() : 0.0f;
     }
 
@@ -142,6 +150,8 @@ public:
                 tailMul[(size_t) i] = juce::Decibels::decibelsToGain (tailDriveAt (settings.tailDriveDb, settings.splitMs, hitMs[i]));
 
         float inPk = 0.0f;
+        if (settings.autoGain && numSamples <= (int) autoIn.size())
+            for (int i = 0; i < numSamples; ++i) autoIn[(size_t) i] = 0.5f * (left[i] + right[i]);   // the unit's input (before Boost)
         for (int i = 0; i < numSamples; ++i)
         {
             const float g = boost.getNextValue();
@@ -163,6 +173,26 @@ public:
             processSamples (left, right, numSamples);
         }
 
+        // Auto Gain: slow (about 1 s) mean-square trackers of the unit's input and output; the output is scaled so its
+        // long-term level matches the input (times the Output knob). Slow enough not to squash the punch within a hit.
+        if (settings.autoGain && settings.enabled)
+        {
+            const float target = juce::Decibels::decibelsToGain (settings.outDb);
+            for (int i = 0; i < numSamples; ++i)
+            {
+                const float inMs = 0.5f * (autoIn[(size_t) i] * autoIn[(size_t) i]);
+                const float outMs = 0.5f * (left[i] * left[i] + right[i] * right[i]) * 0.5f;
+                msIn += autoCoef * (inMs - msIn);
+                msOut += autoCoef * (outMs - msOut);
+                if (msIn > 1.0e-7f && msOut > 1.0e-9f)
+                {
+                    const float want = juce::jlimit (0.06f, 16.0f, std::sqrt (msIn / msOut) * target);
+                    autoGainNow += 0.0005f * (want - autoGainNow);
+                }
+                left[i] *= autoGainNow;
+                right[i] *= autoGainNow;
+            }
+        }
         float outPk = 0.0f;
         float* chans[] = { left, right };
         for (int ch = 0; ch < 2; ++ch)
@@ -326,7 +356,8 @@ public:
 private:
     void applySettings (bool force)
     {
-        const int os = settings.oversampling - 1; // -1 = off
+        const int os = settings.oversampling == rawOversampling ? -1 : settings.oversampling - 1; // -1 = off
+        rawMode = settings.oversampling == rawOversampling;
         const bool rateChanged = os != activeOs || force;
         activeOs = os;
         const double rate = baseRate * (os >= 0 ? (1 << (os + 1)) : 1);
@@ -480,7 +511,7 @@ private:
                 const float chDrive  = ch == 0 ? d * driveSpread : d / driveSpread;
                 const float chOffset = ch == 0 ? off + offsetSpread : off - offsetSpread;
                 auto& pm = phase[ch];
-                const bool adaa = mode != Downsample && mode != Bitcrush;
+                const bool adaa = mode != Downsample && mode != Bitcrush && ! rawMode;
                 // Dry path, phase-matched to the wet path so the Mix knob never comb-filters: the same all-pass phase as
                 // the Linkwitz-Riley Lo / Hi filters, plus the half-sample delay of the anti-aliasing. A bypassed unit stays untouched.
                 float dry = in;
@@ -502,7 +533,7 @@ private:
                     }
                     w = holdValue[(size_t) ch];
                 }
-                if (mode == Downsample || mode == Bitcrush)   // deliberately stepped: no anti-aliasing (and ADAA is ill-conditioned on steps)
+                if (! adaa)   // Downsample / Bitcrush (deliberately stepped) or Raw: the plain curve, aliasing and all
                     w = transfer (mode, w, chDrive, chOffset, chr, &curve);
                 else
                 {
@@ -530,7 +561,9 @@ private:
 
     double baseRate = 44100.0;
     std::array<std::unique_ptr<juce::dsp::Oversampling<float>>, 4> oversamplers;
-    std::vector<float> tailMul;
+    std::vector<float> tailMul, autoIn;
+    float autoCoef = 0.0f, msIn = 0.0f, msOut = 0.0f, autoGainNow = 1.0f;
+    bool rawMode = false;
     bool tailActive = false;
     int osFactor = 1;
     double curRate = 44100.0;

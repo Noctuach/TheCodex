@@ -395,6 +395,10 @@ public:
         auto& s = p.apvts;
         onAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (s, ID::clip (stage, "On"), power);
         dcAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (s, ID::clip (stage, "DC"), dcButton);
+        autoGainAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (s, ID::clip (stage, "AutoGain"), autoGainButton);
+        autoGainButton.setClickingTogglesState (true);
+        autoGainButton.setComponentID ("pill");
+        autoGainButton.setTooltip (Help::forParameter (ID::clip (stage, "AutoGain")));
         dcButton.setClickingTogglesState (true);
         dcButton.setComponentID ("pill");
         dcButton.setTooltip (Help::forParameter (ID::clip (stage, "DC")));
@@ -421,7 +425,7 @@ public:
         drive.label.setColour (juce::Label::textColourId, Colours_::accent);
 
         for (juce::Component* c : std::initializer_list<juce::Component*> {
-                 &power, &dcButton, &type, &oversampling, &filterPos, &filterType, &filterStrip, &transfer, &drive, &boost, &character, &offset, &spatial, &tailDrive, &split,
+                 &power, &dcButton, &autoGainButton, &type, &oversampling, &filterPos, &filterType, &filterStrip, &transfer, &drive, &boost, &character, &offset, &spatial, &tailDrive, &split,
                  &loFilter, &hiFilter, &shelfFreq, &shelfGain, &mix, &output, &inMeter, &outMeter })
             addAndMakeVisible (c);
 
@@ -447,7 +451,7 @@ public:
         drawSectionPanel (g, getLocalBounds(), title, bypassed ? Colours_::textFaint : Colours_::accent);
         if (bypassed)
         {
-            auto tag = getLocalBounds().withHeight (28).withTrimmedRight (86).removeFromRight (86).reduced (0, 6).toFloat();
+            auto tag = getLocalBounds().withHeight (28).withTrimmedRight (140).removeFromRight (86).reduced (0, 6).toFloat();
             g.setColour (Colours_::warn.withAlpha (0.18f));
             g.fillRoundedRectangle (tag, tag.getHeight() * 0.5f);
             g.setColour (Colours_::warn);
@@ -478,6 +482,7 @@ public:
 
         // DC filter as a compact pill in the header
         dcButton.setBounds (r.withHeight (28).withTrimmedRight (38).removeFromRight (40).reduced (0, 5));
+        autoGainButton.setBounds (dcButton.getBounds().translated (-52, 0).withWidth (48));
 
         // Top row: type, oversampling | filter position, filter type
         auto top = c.removeFromTop (48);
@@ -561,7 +566,7 @@ private:
     juce::String title;
 
     PowerButton power;
-    juce::TextButton dcButton { "DC" };
+    juce::TextButton dcButton { "DC" }, autoGainButton { "AUTO" };
     ChoiceBox type { "Type" }, oversampling { "Oversampling" }, filterType { "Filter Type" };
     TransferDisplay transfer;
     DistortionFilterStrip filterStrip;
@@ -571,7 +576,7 @@ private:
     Knob loFilter { "Lo Filter" }, hiFilter { "Hi Filter" }, shelfFreq { "Shelf Freq" }, shelfGain { "Shelf Gain" };
     Knob mix { "Mix" }, output { "Output" };
     LevelMeter inMeter, outMeter;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> onAttachment, dcAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> onAttachment, dcAttachment, autoGainAttachment;
     juce::Rectangle<int> shapeCaption, filterCaption, outputCaption;
     BypassNotice bypassNotice;
     std::atomic<float>* onParam = nullptr;

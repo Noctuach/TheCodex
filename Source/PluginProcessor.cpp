@@ -30,7 +30,7 @@ CodexProcessor::CodexProcessor()
         auto c = [&] (const char* sfx) { return p (ID::clip (s + 1, sfx)); };
         clipParams[s] = { c ("On"), c ("Mode"), c ("Drive"), c ("Boost"), c ("Char"), c ("Bias"), c ("LoFilt"), c ("HiFilt"),
                           c ("ShelfF"), c ("ShelfG"), c ("Mix"), c ("Out"), c ("DC"), c ("OS"), c ("Spatial"),
-                          c ("FltPos"), c ("FltType"), c ("FltFreq"), c ("FltRes"), c ("TailDrv"), c ("Split") };
+                          c ("FltPos"), c ("FltType"), c ("FltFreq"), c ("FltRes"), c ("TailDrv"), c ("Split"), c ("AutoGain") };
         for (int k = 0; k < ClipDistortion::numCurvePoints; ++k)
         {
             clipParams[s].xp[(size_t) k] = c (("XP" + juce::String (k + 1)).toRawUTF8());
@@ -226,6 +226,7 @@ void CodexProcessor::updateParameters()
         cs.filterRes    = c.fltRes->load();
         cs.tailDriveDb  = c.tailDrv->load();
         cs.splitMs      = c.split->load();
+        cs.autoGain     = c.autoGain->load() > 0.5f;
         for (int k = 0; k < ClipDistortion::numCurvePoints; ++k)
         {
             cs.curve.pos[(size_t) k] = c.xp[(size_t) k]->load();

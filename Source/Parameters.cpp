@@ -141,6 +141,7 @@ AudioProcessorValueTreeState::ParameterLayout Params::createLayout()
         addFloat (l, ID::clip (stage, "Mix"), n + "Mix", { 0.0f, 1.0f }, 1.0f, pctText);
         addFloat (l, ID::clip (stage, "Out"), n + "Output", { -24.0f, 12.0f, 0.01f }, -6.0f, dbText);
         addBool (l, ID::clip (stage, "DC"), n + "DC Filter", true);
+        addBool (l, ID::clip (stage, "AutoGain"), n + "Auto Gain", false);
         addChoice (l, ID::clip (stage, "OS"), n + "Oversampling", ClipDistortion::oversamplingNames(), 2);
         // Resonant filter before or after the curve
         addChoice (l, ID::clip (stage, "FltPos"), n + "Filter Position", ClipDistortion::filterPositionNames(), 0);

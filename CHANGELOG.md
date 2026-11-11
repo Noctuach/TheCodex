@@ -4,6 +4,10 @@ All notable changes to Codex. Versions follow [Semantic Versioning](https://semv
 
 ## [Unreleased]
 ### Added
+- Distortion **Auto Gain** (AUTO button in each unit's header): the output follows the input level, so Drive changes
+  the character instead of the loudness (Drive 6 -> 30 dB: -0.1 dB instead of +5.5 dB).
+- Distortion oversampling option **Raw**: no anti-aliasing at all, for the gritty digital sound of classic drum
+  machines (inspired by Sonic Charge Microtonic, whose distortion aliases on purpose).
 - Quick guide (menu), keyboard shortcuts, and a "*" marker on the preset name when the sound has been edited.
 - **Sub layer** (kick page): a clean sine on the oscillator's own phase (follows the sweep), faded in after the punch,
   low-passed and added after all effects, delayed by the chain latency so it stays aligned. **ALIGN** finds the best
