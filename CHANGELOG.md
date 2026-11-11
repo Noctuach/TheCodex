@@ -63,6 +63,9 @@ All notable changes to Codex. Versions follow [Semantic Versioning](https://semv
 - The host's tail length follows the reverb decay.
 
 ### Fixed
+- Closing the editor could touch freed memory (Compressor page: button attachments destroyed after their buttons),
+  a possible crash or hang when the plugin window closes. Found with AddressSanitizer; the full test suite now runs
+  clean under it.
 - **Mix knobs no longer notch.** The multiband saturation's Mix blended the dry signal with bands that had passed
   through the crossovers' phase shift: at 50 % it cut up to 26 dB at a crossover (400 Hz) and 4-6 dB elsewhere. The
   distortion units' Mix did the same around the Lo / Hi filters (4 dB at 30 Hz with the Hi Filter at 40 Hz). The dry

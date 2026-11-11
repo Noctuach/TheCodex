@@ -527,11 +527,13 @@ private:
     CompressorDisplay display;
     CompressorBandBar bandBar;
     PowerButton powerButton;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> power, autoGainAtt, muteAtt, soloAtt, bypassAtt;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> power;
     ChoiceBox style { "Style" }, lookahead { "Lookahead" };
     SegmentedChoice bandCount, t4Mode;
     Knob hold { "Hold" }, scHp { "SC High-Pass" }, mix { "Mix" }, output { "Output" };
     juce::TextButton autoGain { "AUTO GAIN" }, mute { "MUTE" }, solo { "SOLO" }, bypass { "BYPASS" };
+    // declared after the buttons: members are destroyed in reverse order, so the attachments go before their buttons
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> autoGainAtt, muteAtt, soloAtt, bypassAtt;
     Knob threshold { "Threshold" }, ratio { "Ratio" }, knee { "Knee" }, range { "Range" }, attack { "Attack" }, release { "Release" }, gain { "Gain" };
     std::unique_ptr<juce::TextButton[]> dirButtons;
     juce::Rectangle<int> direction;
