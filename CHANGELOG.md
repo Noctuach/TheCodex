@@ -11,7 +11,8 @@ All notable changes to Codex. Versions follow [Semantic Versioning](https://semv
 
 ### Changed
 - Space Mix keeps the dry kick at full level up to 50 % (it used to fall to -3 dB at 50 % and silence at 100 %, which made the kick fade when the reverb was turned up).
-### Added
+
+### Added (earlier)
 - Distortion **Auto Gain** (AUTO button in each unit's header): the output follows the input level, so Drive changes
   the character instead of the loudness (Drive 6 -> 30 dB: -0.1 dB instead of +5.5 dB).
 - Distortion oversampling option **Raw**: no anti-aliasing at all, for the gritty digital sound of classic drum
