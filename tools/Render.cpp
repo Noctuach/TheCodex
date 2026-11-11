@@ -931,6 +931,98 @@ int main (int argc, char** argv)
         proc.presets.loadPreset (0);
     }
 
+    // ---- Module order: encoding, Space keeps the kick, click-free reorder, old sessions keep the Classic order ----
+    {
+        int bad = 0;
+        for (int i = 0; i < chain::numOrders; ++i)
+        {
+            const auto o = chain::decode (i);
+            std::array<bool, chain::numModules> seen {};
+            for (int m : o) seen[(size_t) m] = true;
+            if (chain::encode (o) != i || std::find (seen.begin(), seen.end(), false) != seen.end()) ++bad;
+        }
+        if (chain::modernIndex() != 0 || chain::decode (chain::classicIndex()) != chain::classicOrder) ++bad;
+
+        // Space at 50 % mix must not turn the kick down (the dry stays at unity), in either position
+        auto earlyRms = [] (const juce::AudioBuffer<float>& b)
+        {
+            double e = 0.0;
+            const int n = (int) (0.06 * sr);
+            for (int i = 0; i < n; ++i) e += 0.5 * (b.getSample (0, i) * b.getSample (0, i) + b.getSample (1, i) * b.getSample (1, i));
+            return juce::Decibels::gainToDecibels ((float) std::sqrt (e / n));
+        };
+        float dips[2] {};
+        for (int pos = 0; pos < 2; ++pos)
+        {
+            proc.presets.loadPreset (0);
+            setParam (proc, ID::clickLevel, 0.0f);
+            setParam (proc, ID::chainOrder, (float) (pos == 0 ? chain::modernIndex() : chain::classicIndex()));
+            const float dry = earlyRms (render (proc, 1));
+            setParam (proc, ID::spc ("On"), 1.0f);
+            setParam (proc, ID::spc ("Mix"), 0.5f);
+            dips[pos] = earlyRms (render (proc, 1)) - dry;
+            if (dips[pos] < -1.0f) ++bad;
+        }
+
+        // Reorder mid-note with every module on: no click
+        proc.presets.loadPreset (0);
+        setParam (proc, ID::pAmount, 0.0f); setParam (proc, ID::aSustain, 1.0f); setParam (proc, ID::clickLevel, 0.0f);
+        for (const auto& id : { ID::sat ("On"), ID::cmp ("On"), ID::spc ("On") }) setParam (proc, id, 1.0f);
+        setParam (proc, ID::clip (1, "OS"), 2.0f);   // latency in the chain, so the hit clocks move with the order
+        proc.prepareToPlay (sr, block);
+        const int total = (int) (1.2 * sr) / block * block, change = (int) (0.6 * sr) / block * block;
+        juce::AudioBuffer<float> out (2, total), buf (2, block);
+        for (int pos = 0; pos < total; pos += block)
+        {
+            juce::MidiBuffer midi;
+            if (pos == 0) midi.addEvent (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 127), 0);
+            if (pos == change) setParam (proc, ID::chainOrder, (float) chain::classicIndex());
+            buf.clear();
+            proc.processBlock (buf, midi);
+            for (int ch = 0; ch < 2; ++ch) out.copyFrom (ch, pos, buf, ch, 0, block);
+        }
+        auto curvature = [&] (int from, int to)
+        {
+            float m = 0.0f;
+            for (int i = juce::jmax (2, from); i < to; ++i)
+                for (int ch = 0; ch < 2; ++ch)
+                    m = std::max (m, std::abs (out.getSample (ch, i) - 2.0f * out.getSample (ch, i - 1) + out.getSample (ch, i - 2)));
+            return m;
+        };
+        const float ref = std::max (curvature (change - (int) (0.15 * sr), change), curvature (change + (int) (0.25 * sr), change + (int) (0.45 * sr)));
+        const float around = curvature (change, change + (int) (0.03 * sr));
+        if (around > 3.0f * ref + 1.0e-4f) ++bad;
+
+        // A session saved before the order existed loads as Classic; a saved order is restored
+        juce::MemoryBlock state;
+        setParam (proc, ID::chainOrder, 1234.0f);
+        proc.getStateInformation (state);
+        auto xml = juce::AudioProcessor::getXmlFromBinary (state.getData(), (int) state.getSize());
+        setParam (proc, ID::chainOrder, 0.0f);
+        proc.setStateInformation (state.getData(), (int) state.getSize());
+        const int restored = (int) proc.apvts.getRawParameterValue (ID::chainOrder)->load();
+        int legacy = -1;
+        if (xml != nullptr)
+        {
+            for (auto* c : xml->getChildIterator())
+                if (c->getStringAttribute ("id") == ID::chainOrder) { xml->removeChildElement (c, true); break; }
+            juce::MemoryBlock old;
+            juce::AudioProcessor::copyXmlToBinary (*xml, old);
+            setParam (proc, ID::chainOrder, 0.0f);
+            proc.setStateInformation (old.getData(), (int) old.getSize());
+            legacy = (int) proc.apvts.getRawParameterValue (ID::chainOrder)->load();
+        }
+        if (restored != 1234 || legacy != chain::classicIndex()) ++bad;
+
+        std::cout << "\nModule order: " << chain::numOrders << " orders round-trip, Space at 50 % changes the kick by "
+                  << juce::String (dips[0], 2) << " dB (first) / " << juce::String (dips[1], 2) << " dB (last), reorder mid-note x"
+                  << juce::String (around / juce::jmax (1.0e-6f, ref), 2) << ", saved order " << restored << ", old session -> "
+                  << chain::describe (legacy) << "\n";
+        std::cout << "Module order checks: " << (bad == 0 ? "OK" : "FAILED") << "\n";
+        failures += bad;
+        proc.presets.loadPreset (0);
+    }
+
     // ---- Every key, both engines ----
     std::cout << "\nKey   target Hz   synth Hz   909 Hz\n";
     for (int k = 0; k < 12; ++k)

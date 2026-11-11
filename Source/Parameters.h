@@ -48,6 +48,8 @@ namespace ID
 
     // Output
     inline const juce::String outGain { "outGain" };
+    // Module order (index of the permutation, see DSP/Chain.h). Not automatable: reordering is an edit, not a sweep.
+    inline const juce::String chainOrder { "chainOrder" };
     // Clean sub layer and velocity
     inline const juce::String subOn { "subOn" }, subLevel { "subLevel" }, subLowPass { "subLP" }, subFade { "subFade" }, subPhase { "subPhase" };
     inline const juce::String velocity { "velAmount" };

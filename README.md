@@ -5,8 +5,13 @@
 There are no samples; every kick is generated in real time, in the key of your track.
 
 ```
-OSC / 909 -> DISTORTION 1 -> EQ 1 -> DISTORTION 2 -> SATURATION -> COMPRESSOR -> EQ 2 -> SPACE -> OUTPUT
+OSC / 909 -> SPACE -> DISTORTION 1 -> EQ 1 -> DISTORTION 2 -> SATURATION -> COMPRESSOR -> EQ 2 -> OUTPUT
 ```
+
+That is the default (Modern) order: the reverb comes first, as in today's hardstyle kick chains, so the distortions
+fuse the room into a wide, dense tail. The order is yours to change: drag the module chips in the tab bar (click a
+chip to open its page, right-click for the Modern and Classic presets). Classic puts Space last, as in Codex 1.0;
+sessions and user presets saved before the order existed load in Classic, so they sound the same.
 
 ![Codex: kick page with mid/side EQ](docs/screenshot.png)
 
@@ -142,7 +147,9 @@ Multiband compressor after the Saturation stage, modelled on the controls of Fab
 | Global | *Style*: Clean, Punch, Smooth, Bus, Mastering, Classic, Vari-Mu, Opto, **T4 Opto (LA-3A)** (fixed ~10 ms attack, two-stage program-dependent release; *Compress / Limit* switch), Pumping, TTM (upward + downward). *Bands* (1–4), *Lookahead* (Off – 10 ms, reported as latency), *Hold*, *SC High-Pass*, *Mix* (parallel), *Output*, *Auto Gain*. |
 
 ### Space page
-Stereo room reverb at the end of the chain, for width and ambience. The layout follows ValhallaRoom:
+Stereo room reverb, first in the chain by default (drag it anywhere in the tab bar). Before the distortions it
+becomes part of the tail; last, it places the finished kick in a room. Mix keeps the kick at full level up to 50 %
+and only fades it above that. The layout follows ValhallaRoom:
 
 | Group | Controls |
 |---|---|

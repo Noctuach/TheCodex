@@ -1,5 +1,6 @@
 #include "PresetManager.h"
 #include "Parameters.h"
+#include "DSP/Chain.h"
 #include "DSP/ClipDistortion.h"
 #include "DSP/ParametricEQ.h"
 
@@ -193,7 +194,8 @@ PresetManager::PresetManager (AudioProcessorValueTreeState& s) : apvts (s)
         Builder b; b.synth (2, 38.0f, 160.0f, 3.5f).amp (1600.0f, 0.85f, 320.0f).click (0.1f, 4.0f, 3500.0f)
          .clip (1, CD::SoftClip, 12.0f, -4.0f).band (3, Bell, 160.0f, 3.0f, 1.0f).clip (2, CD::Tube, 6.0f, -3.0f)
          .set (ID::spc ("On"), 1.0f).set (ID::spc ("Mode"), 3.0f).set (ID::spc ("Mix"), 0.16f).set (ID::spc ("Decay"), 2.2f)
-         .set (ID::spc ("Width"), 1.5f).set (ID::spc ("LowCut"), 280.0f).set (ID::spc ("PreDelay"), 18.0f);
+         .set (ID::spc ("Width"), 1.5f).set (ID::spc ("LowCut"), 280.0f).set (ID::spc ("PreDelay"), 18.0f)
+         .set (ID::chainOrder, (float) chain::classicIndex());   // a finished kick placed in a hall: reverb last
         add ("Euphoric Wide Hall", b);
     }
     {   // upward compression on the mids brings the grit of the tail forward
@@ -220,6 +222,15 @@ PresetManager::PresetManager (AudioProcessorValueTreeState& s) : apvts (s)
          .clip (2, CD::HardClip, 16.0f, -8.0f);
         add ("Downsampled Hardcore", b);
     }
+    {   // modern chain: a short room before the distortion, which fuses it into a wide, dense tail (low end kept dry)
+        Builder b; b.kick909 (2, 0.55f, 0.7f, 0.55f).set (ID::aRelease, 140.0f)
+         .set (ID::spc ("On"), 1.0f).set (ID::spc ("Mode"), 0.0f).set (ID::spc ("Mix"), 0.3f).set (ID::spc ("Decay"), 0.7f)
+         .set (ID::spc ("Width"), 1.6f).set (ID::spc ("LowCut"), 300.0f).set (ID::spc ("PreDelay"), 8.0f)
+         .clip (1, CD::HardClip, 24.0f, -9.0f).band (2, Bell, 50.0f, -3.0f, 1.5f).band (3, Bell, 383.0f, 5.0f, 1.0f)
+         .band (4, Bell, 1800.0f, -4.0f, 2.0f).clip (2, CD::Tube, 10.0f, -6.0f)
+         .set (ID::chainOrder, (float) chain::modernIndex());
+        add ("Reverb-First Rawstyle", b);
+    }
 
     // Output levels matched for loudness (K-weighted short-term, see CODEX_LEVEL_MATCH in tools/Render.cpp) in the key
     // of F, with peaks below -1 dBFS; presets with spiky transients use the output clipper instead of turning down.
@@ -230,7 +241,7 @@ PresetManager::PresetManager (AudioProcessorValueTreeState& s) : apvts (s)
         { "909 Boom Tail", 0.4f }, { "909 Fuzz Box", 1.8f }, { "909 Bitcrushed", 1.2f }, { "909 Hard Attack Raw", 1.2f },
         { "909 Wide Rawstyle", 3.0f }, { "Saturated Euphoric", -3.1f },
         { "Screech Rawstyle", 2.5f }, { "X-Shaped Zaag", -0.4f }, { "Euphoric Wide Hall", -3.2f }, { "Upward Tail Crunch", -0.2f },
-        { "Drawn Modern Hardstyle", 0.4f }, { "Downsampled Hardcore", 1.7f } };
+        { "Drawn Modern Hardstyle", 0.4f }, { "Downsampled Hardcore", 1.7f }, { "Reverb-First Rawstyle", 2.5f } };
     for (auto& preset : factory)
         if (auto it = outputLevels.find (preset.name); it != outputLevels.end())
         {
@@ -261,7 +272,7 @@ String PresetManager::getFactoryCategory (int index) const
         { "909 Bitcrushed", "FX" }, { "909 Hard Attack Raw", "Rawstyle" }, { "909 Wide Rawstyle", "Rawstyle" },
         { "Saturated Euphoric", "Euphoric" }, { "Screech Rawstyle", "Rawstyle" }, { "X-Shaped Zaag", "Hardstyle" },
         { "Euphoric Wide Hall", "Euphoric" }, { "Upward Tail Crunch", "Hardstyle" }, { "Drawn Modern Hardstyle", "Hardstyle" },
-        { "Downsampled Hardcore", "Hardcore" } };
+        { "Downsampled Hardcore", "Hardcore" }, { "Reverb-First Rawstyle", "Rawstyle" } };
     const auto& name = factory[(size_t) index].name;
     if (auto it = categories.find (name); it != categories.end()) return it->second;
     return "Hardstyle";
@@ -388,6 +399,8 @@ void PresetManager::loadUser (const String& name)
             const auto child = tree.getChildWithProperty ("id", rp->paramID);
             if (child.isValid())
                 setValue (rp->paramID, (float) child.getProperty ("value"));
+            else if (rp->paramID == ID::chainOrder)
+                setValue (ID::chainOrder, (float) chain::classicIndex());   // saved before the module order existed
         }
     setCurrentName (name);
     markClean();

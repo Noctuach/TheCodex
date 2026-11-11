@@ -16,7 +16,7 @@ namespace
 MainView::MainView (CodexProcessor& p, PropertiesFile* settingsFile)
     : proc (p), settings (settingsFile),
       presetBar (p.presets),
-      tunerAnalyser (p), tunerChip (tunerAnalyser),
+      tunerAnalyser (p), tunerChip (tunerAnalyser), chainStrip (p.apvts),
       engineSwitch (*p.apvts.getParameter (ID::engine), { "SYNTH", "909" }, Help::forParameter (ID::engine)),
       pitchEnvDisplay (p.apvts, ID::pAttack, ID::pDecay, ID::pSustain, ID::pRelease, ID::pCurve, Colours_::accent2),
       ampEnvDisplay (p.apvts, ID::aAttack, ID::aDecay, ID::aSustain, ID::aRelease, ID::aCurve, Colours_::accent),
@@ -162,12 +162,13 @@ MainView::MainView (CodexProcessor& p, PropertiesFile* settingsFile)
     aCurve.attach (s, ID::aCurve);
 
     // ---- EQ ----
+    chainStrip.onModuleClicked = [this] (int module) { showTab (ChainStrip::tabFor (module)); };
     eqDisplay.onBandSelected = [this] (int b) { bandControls.setBand (b); };
     bandControls.onBandSelected = [this] (int b) { eqDisplay.setSelectedBand (b); };
 
     for (Component* c : std::initializer_list<Component*> {
              &undoButton, &redoButton, &menuButton, &presetBar, &keyBox, &octaveBox, &keyModeBox,
-             &previewButton, &outGain, &meterL, &meterR, &tunerChip,
+             &previewButton, &outGain, &meterL, &meterR, &tunerChip, &chainStrip,
              &engineSwitch, &wave, &model, &tune, &phase, &clickLevel, &clickDecay, &clickTone, &tune909, &attack909, &decay909,
              &pitchEnvDisplay, &pAmount, &pAttack, &pDecay, &pSustain, &pRelease, &pCurve,
              &ampEnvDisplay, &aAttack, &aDecay, &aSustain, &aRelease, &aCurve,
@@ -364,6 +365,7 @@ std::vector<Component*> MainView::kickTabComponents()
 void MainView::showTab (int tab)
 {
     currentTab = tab;
+    chainStrip.setCurrentTab (tab);
     for (auto* c : kickTabComponents())
         c->setVisible (tab == 0);
     unit1.setVisible (tab == 1);
@@ -560,12 +562,15 @@ void MainView::resized()
             tabButtons[(size_t) i].setBounds (t.removeFromLeft (widths[i]));
             t.removeFromLeft (6);
         }
-        // the tabs follow the signal chain, so the breadcrumb is only drawn when there is room for it
-        breadcrumbArea = t.getWidth() > 640 ? t.removeFromRight (380) : juce::Rectangle<int> (t.getRight(), t.getY(), 0, t.getHeight());
+        // signal chain (drag to reorder) between the tabs and the tuner
+        breadcrumbArea = {};
         t.removeFromRight (16);
         previewButton.setBounds (t.removeFromRight (30).withSizeKeepingCentre (30, 26).translated (0, -2));
         t.removeFromRight (8);
         tunerChip.setBounds (t.removeFromRight (150).withSizeKeepingCentre (150, 26).translated (0, -2));
+        t.removeFromRight (14);
+        t.removeFromLeft (8);
+        chainStrip.setBounds (t.withTrimmedBottom (2));
     }
     r.removeFromTop (12);
 

@@ -9,6 +9,7 @@
 #include "DSP/Compressor.h"
 #include "DSP/EqEngine.h"
 #include "DSP/OutputClipper.h"
+#include "DSP/Chain.h"
 #include "PresetManager.h"
 
 /** Lock-free single-producer/single-consumer sample FIFO feeding the spectrum analyzer. */
@@ -138,6 +139,14 @@ private:
     std::atomic<float> *subOnParam = nullptr, *subLevelParam = nullptr, *subLpParam = nullptr, *subFadeParam = nullptr,
                        *subPhaseParam = nullptr, *velocityParam = nullptr;
     int chainLatency() const;
+    void processModule (int module, float* l, float* r, int n, float& latencySoFar);
+
+    // Module order: switched while the chain is faded out (a few ms), so reordering never clicks
+    std::atomic<float>* chainOrderParam = nullptr;
+    int activeOrderIndex = 0;
+    chain::Order activeOrder = chain::modernOrder;
+    float orderFade = 1.0f;
+    bool orderFadingOut = false;
     juce::SmoothedValue<float> outGain;
 
     std::atomic<bool> previewOn { false }, previewOff { false };

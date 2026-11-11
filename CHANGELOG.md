@@ -3,6 +3,14 @@
 All notable changes to Codex. Versions follow [Semantic Versioning](https://semver.org).
 
 ## [Unreleased]
+
+### Added
+- Module order: drag the chips in the tab bar to reorder Space, Distortion 1, EQ 1, Distortion 2, Saturation, Compressor and EQ 2 (click a chip to open it, right-click for Modern / Classic). Reordering fades for 6 ms so it never clicks, and the order is saved with sessions, presets, A/B and undo.
+- New default order (Modern): Space first, so the distortions build the reverb into the tail. Old sessions and user presets keep the Classic order (Space last) and sound unchanged.
+- Preset "Reverb-First Rawstyle".
+
+### Changed
+- Space Mix keeps the dry kick at full level up to 50 % (it used to fall to -3 dB at 50 % and silence at 100 %, which made the kick fade when the reverb was turned up).
 ### Added
 - Distortion **Auto Gain** (AUTO button in each unit's header): the output follows the input level, so Drive changes
   the character instead of the loudness (Drive 6 -> 30 dB: -0.1 dB instead of +5.5 dB).

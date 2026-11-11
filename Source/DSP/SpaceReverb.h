@@ -185,7 +185,9 @@ namespace space
             earlyGainT = std::cos (d);
             lateGainT  = std::sin (d);
             const float m = juce::jlimit (0.0f, 1.0f, s.mix) * juce::MathConstants<float>::halfPi;
-            dryGainT = std::cos (m);
+            // The kick must not fade when the room is added: the dry stays at unity up to 50 % and only then falls
+            // (to silence at 100 %); the wet follows the equal-power curve.
+            dryGainT = std::min (1.0f, std::cos (m) * juce::MathConstants<float>::sqrt2);
             wetGainT = std::sin (m);
             // a 100 % dry/wet-free reverb at 0 % mix: keep the dry exactly unity
             if (s.mix <= 0.0f) { dryGainT = 1.0f; wetGainT = 0.0f; }

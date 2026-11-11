@@ -15,6 +15,7 @@
 #include "ScopeView.h"
 #include "SaturationView.h"
 #include "Overlays.h"
+#include "ChainStrip.h"
 
 class CodexProcessor;
 
@@ -63,6 +64,7 @@ private:
                                                  juce::TextButton ("COMPRESSOR"), juce::TextButton ("EQ 2"), juce::TextButton ("SPACE"), juce::TextButton ("SCOPE") };
     TunerAnalyser tunerAnalyser;
     TunerChip tunerChip;
+    ChainStrip chainStrip;
 
     // Source
     SegmentedChoice engineSwitch;

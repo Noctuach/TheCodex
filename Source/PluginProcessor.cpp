@@ -20,6 +20,7 @@ CodexProcessor::CodexProcessor()
     aRelease = p (ID::aRelease); aCurve = p (ID::aCurve);
 
     outGainParam = p (ID::outGain);
+    chainOrderParam = p (ID::chainOrder);
     subOnParam = p (ID::subOn); subLevelParam = p (ID::subLevel); subLpParam = p (ID::subLowPass);
     subFadeParam = p (ID::subFade); subPhaseParam = p (ID::subPhase); velocityParam = p (ID::velocity);
     clipOnParam = p (ID::clipOn); clipCeilParam = p (ID::clipCeiling); clipSoftParam = p (ID::clipSoft);
@@ -124,6 +125,37 @@ void CodexProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     outGain.setCurrentAndTargetValue (juce::Decibels::decibelsToGain (outGainParam->load()));
 
     updateLatency();
+}
+
+void CodexProcessor::processModule (int module, float* l, float* r, int n, float& latencySoFar)
+{
+    auto shiftedClock = [&]
+    {
+        // a distortion hears the hit later by the latency of the modules before it
+        const float lagMs = (float) (latencySoFar * 1000.0 / getSampleRate());
+        for (int i = 0; i < n; ++i) hitTime2[(size_t) i] = hitTime[(size_t) i] >= lagMs ? hitTime[(size_t) i] - lagMs : 1.0e6f;
+        return hitTime2.data();
+    };
+    float* m = mid.data();
+    switch (module)
+    {
+        case chain::Space:      reverb.process (l, r, n); break;
+        case chain::Dist1:      clip1.process (l, r, n, shiftedClock()); latencySoFar += (float) clip1.getLatencyInSamples(); break;
+        case chain::Dist2:      clip2.process (l, r, n, shiftedClock()); latencySoFar += (float) clip2.getLatencyInSamples(); break;
+        case chain::Saturation: saturator.process (l, r, n); latencySoFar += (float) saturator.getLatencyInSamples(); break;
+        case chain::Compressor: compressor.process (l, r, n); latencySoFar += (float) compressor.getLatencyInSamples(); break;
+        case chain::Eq1:
+        case chain::Eq2:
+        {
+            const int e = module == chain::Eq1 ? 0 : 1;
+            for (int i = 0; i < n; ++i) m[i] = 0.5f * (l[i] + r[i]);
+            (e == 0 ? analyzerPre : analyzerPre2).push (m, n);   // spectrum at the EQ's input (for its display)
+            equalisers[(size_t) e].process (l, r, n);
+            latencySoFar += (float) equalisers[(size_t) e].getLatencyInSamples();
+            break;
+        }
+        default: break;
+    }
 }
 
 int CodexProcessor::chainLatency() const
@@ -423,23 +455,39 @@ void CodexProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiB
         }
         std::copy (l, l + n, r);
 
-        // Old-school chain: distort -> EQ -> distort again -> multiband saturation -> compressor -> EQ 2 -> space (stereo from here on)
-        clip1.process (l, r, n, hitTime.data());
-        for (int i = 0; i < n; ++i) m[i] = 0.5f * (l[i] + r[i]);
-        analyzerPre.push (m, n);           // spectrum before the EQ (for the EQ display)
-        equalisers[0].process (l, r, n);
+        // Effect modules in the user's order (Modern by default: Space -> Distortion 1 -> EQ 1 -> Distortion 2 ->
+        // Saturation -> Compressor -> EQ 2). Each distortion's hit clock is shifted by the latency of the modules before it.
         {
-            // Distortion 2 hears the hit later (Distortion 1 oversampling and EQ 1 latency): shift its clock
-            const float lagMs = (float) ((clip1.getLatencyInSamples() + equalisers[0].getLatencyInSamples()) * 1000.0 / getSampleRate());
-            for (int i = 0; i < n; ++i) hitTime2[(size_t) i] = hitTime[(size_t) i] >= lagMs ? hitTime[(size_t) i] - lagMs : 1.0e6f;
+            const int wanted = juce::jlimit (0, chain::numOrders - 1, (int) chainOrderParam->load());
+            if (wanted != activeOrderIndex && ! orderFadingOut)
+                orderFadingOut = true;
+
+            float latencySoFar = 0.0f;
+            for (int module : activeOrder)
+                processModule (module, l, r, n, latencySoFar);
+
+            // Reorder fade: 6 ms out, swap, 6 ms in, on a raised-cosine curve (no corners, so no click)
+            const float step = (float) (1.0 / (0.006 * getSampleRate()));
+            if (orderFadingOut || orderFade < 1.0f)
+            {
+                for (int i = 0; i < n; ++i)
+                {
+                    if (orderFadingOut)
+                        orderFade = std::max (0.0f, orderFade - step);
+                    else
+                        orderFade = std::min (1.0f, orderFade + step);
+                    const float g = 0.5f - 0.5f * std::cos (juce::MathConstants<float>::pi * orderFade);
+                    l[i] *= g;
+                    r[i] *= g;
+                }
+                if (orderFadingOut && orderFade <= 0.0f)
+                {
+                    activeOrderIndex = wanted;
+                    activeOrder = chain::decode (wanted);
+                    orderFadingOut = false;
+                }
+            }
         }
-        clip2.process (l, r, n, hitTime2.data());
-        saturator.process (l, r, n);
-        compressor.process (l, r, n);      // multiband up / down compression (off by default)
-        for (int i = 0; i < n; ++i) m[i] = 0.5f * (l[i] + r[i]);
-        analyzerPre2.push (m, n);          // spectrum before EQ 2
-        equalisers[1].process (l, r, n);   // EQ 2 (post), empty by default
-        reverb.process (l, r, n);          // Space: stereo room reverb (off by default)
 
         // Clean sub layer, low-passed and delayed by the chain latency, added in mono
         {
@@ -514,7 +562,16 @@ void CodexProcessor::setStateInformation (const void* data, int sizeInBytes)
     if (auto xml = getXmlFromBinary (data, sizeInBytes))
         if (xml->hasTagName (apvts.state.getType()))
         {
-            apvts.replaceState (juce::ValueTree::fromXml (*xml));
+            auto tree = juce::ValueTree::fromXml (*xml);
+            // Sessions saved before the module order existed ran the Classic order (reverb last): keep their sound
+            if (! tree.getChildWithProperty ("id", ID::chainOrder).isValid())
+            {
+                juce::ValueTree param ("PARAM");
+                param.setProperty ("id", ID::chainOrder, nullptr);
+                param.setProperty ("value", chain::classicIndex(), nullptr);
+                tree.appendChild (param, nullptr);
+            }
+            apvts.replaceState (tree);
             // replaceState() only updates a parameter when its stored (unnormalised) value differs from the cached one,
             // so a switch left at an in-between normalised value (hosts may send any 0..1) would not be reset.
             // Push every stored value explicitly so the restored state is exact.

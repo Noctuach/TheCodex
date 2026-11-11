@@ -7,6 +7,7 @@
 #include "DSP/Compressor.h"
 #include "DSP/EqEngine.h"
 #include "DSP/DrawEnvelope.h"
+#include "DSP/Chain.h"
 
 using namespace juce;
 
@@ -310,6 +311,9 @@ AudioProcessorValueTreeState::ParameterLayout Params::createLayout()
 
     // ---------------- Output ----------------
     addFloat (l, ID::outGain, "Output", { -24.0f, 12.0f, 0.01f }, -3.0f, dbText);
+    l.add (std::make_unique<AudioParameterInt> (ParameterID { ID::chainOrder, 1 }, "Chain Order", 0, chain::numOrders - 1, chain::modernIndex(),
+                                                AudioParameterIntAttributes().withAutomatable (false)
+                                                    .withStringFromValueFunction ([] (int v, int) { return chain::describe (v); })));
     addBool (l, ID::subOn, "Sub Layer On", false);
     addFloat (l, ID::subLevel, "Sub Layer Level", { -36.0f, 6.0f, 0.01f }, -6.0f, dbText);
     addFloat (l, ID::subLowPass, "Sub Layer Low-Pass", skewed (30.0f, 300.0f, 100.0f), 110.0f, hzText);
