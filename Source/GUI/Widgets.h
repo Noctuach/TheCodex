@@ -190,7 +190,7 @@ public:
 
         // clamped: the cache starts at -1 until the first parameter read (sqrt (-1) would give a NaN path)
         const float A = juce::jmax (0.0f, cached[0]), D = juce::jmax (0.0f, cached[1]), S = juce::jlimit (0.0f, 1.0f, cached[2]),
-                    R = juce::jmax (0.0f, cached[3]), C = cached[4];
+                    R = juce::jmax (0.0f, cached[3]), C = juce::jmax (0.05f, cached[4]);
         // sqrt time scaling keeps short and long stages readable at once
         const float wa = std::sqrt (A), wd = std::sqrt (D), wr = std::sqrt (R);
         const float ws = (wa + wd + wr) * 0.25f + 1.0f;
@@ -275,7 +275,7 @@ private:
     void updateNodes()
     {
         const auto area = inner();
-        const float A = juce::jmax (0.0f, cached[0]), D = juce::jmax (0.0f, cached[1]), S = juce::jlimit (0.0f, 1.0f, cached[2]), R = juce::jmax (0.0f, cached[3]), C = cached[4];
+        const float A = juce::jmax (0.0f, cached[0]), D = juce::jmax (0.0f, cached[1]), S = juce::jlimit (0.0f, 1.0f, cached[2]), R = juce::jmax (0.0f, cached[3]), C = juce::jmax (0.05f, cached[4]);
         const float wa = std::sqrt (A), wd = std::sqrt (D), wr = std::sqrt (R);
         const float ws = (wa + wd + wr) * 0.25f + 1.0f, total = wa + wd + ws + wr;
         auto X = [&] (float u) { return area.getX() + u / total * area.getWidth(); };
