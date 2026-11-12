@@ -412,6 +412,7 @@ void CodexProcessor::handleMidi (const juce::MidiMessage& m, int positionInChunk
         const float amount = velocityParam->load();
         voice.velocityGain = 1.0f - amount * (1.0f - m.getFloatVelocity());
         voice.hitVelocity = m.getFloatVelocity();
+        hitCounter.fetch_add (1, std::memory_order_relaxed);
         voice.noteOn (m.getNoteNumber(), (float) (followMidi ? m.getNoteNumber() : getKeyNote()));
     }
     else if (m.isNoteOff())
@@ -428,7 +429,7 @@ void CodexProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiB
 
     // GUI preview button always plays the selected key (uses an out-of-range note id so MIDI can't cut it)
     constexpr int previewId = 128;
-    if (previewOn.exchange (false))  { voice.hitVelocity = 1.0f; voice.noteOn (previewId, (float) getKeyNote()); captureArmAt = 0; }
+    if (previewOn.exchange (false))  { voice.hitVelocity = 1.0f; hitCounter.fetch_add (1, std::memory_order_relaxed); voice.noteOn (previewId, (float) getKeyNote()); captureArmAt = 0; }
     if (previewOff.exchange (false)) voice.noteOff (previewId);
 
     const int numSamples  = buffer.getNumSamples();

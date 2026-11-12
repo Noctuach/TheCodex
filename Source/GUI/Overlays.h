@@ -7,8 +7,23 @@ class Overlay : public juce::Component
 public:
     Overlay() { setWantsKeyboardFocus (true); setAlwaysOnTop (true); }
 
-    void open()  { setVisible (true); toFront (true); grabKeyboardFocus(); opened(); }
-    void close() { setVisible (false); }
+    /** Overlays fade in (160 ms) and out (110 ms). */
+    void open()
+    {
+        auto& animator = juce::Desktop::getInstance().getAnimator();
+        animator.cancelAnimation (this, false);
+        setAlpha (0.0f);
+        setVisible (true);
+        toFront (true);
+        grabKeyboardFocus();
+        opened();
+        animator.animateComponent (this, getBounds(), 1.0f, 160, false, 1.0, 1.0);
+    }
+    void close()
+    {
+        if (isVisible())
+            juce::Desktop::getInstance().getAnimator().fadeOut (this, 110);
+    }
 
     void paint (juce::Graphics& g) override
     {

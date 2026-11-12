@@ -229,6 +229,53 @@ inline juce::Image noiseTile()
 }
 
 //==============================================================================
+/**
+    Fades the hover highlight of sliders in and out (about 100 ms) instead of switching it. The current amount is kept
+    in the slider's properties ("hov"); sliders that are still moving are repainted at 60 fps until they settle.
+*/
+class HoverAnimator : private juce::Timer
+{
+public:
+    ~HoverAnimator() override { stopTimer(); }
+
+    /** Current hover amount (0..1) of the slider; starts the fade when it differs from the mouse state. */
+    float value (juce::Slider& s)
+    {
+        const bool hot = s.isMouseOverOrDragging() && s.isEnabled();
+        auto& props = s.getProperties();
+        if (! props.contains ("hov"))
+            props.set ("hov", hot ? 1.0f : 0.0f);   // first paint: no animation
+        const float cur = (float) props["hov"];
+        if (! juce::approximatelyEqual (cur, hot ? 1.0f : 0.0f))
+        {
+            bool known = false;
+            for (auto& p : moving) known |= p.getComponent() == &s;
+            if (! known) moving.add (&s);
+            if (! isTimerRunning()) startTimerHz (60);
+        }
+        return cur;
+    }
+
+private:
+    void timerCallback() override
+    {
+        for (int i = moving.size(); --i >= 0;)
+        {
+            auto* s = moving.getReference (i).getComponent();
+            if (s == nullptr) { moving.remove (i); continue; }
+            const float target = s->isMouseOverOrDragging() && s->isEnabled() ? 1.0f : 0.0f;
+            float cur = (float) s->getProperties()["hov"];
+            cur += (target - cur) * 0.35f;
+            if (std::abs (target - cur) < 0.02f) { cur = target; moving.remove (i); }
+            s->getProperties().set ("hov", cur);
+            s->repaint();
+        }
+        if (moving.isEmpty()) stopTimer();
+    }
+
+    juce::Array<juce::Component::SafePointer<juce::Slider>> moving;
+};
+
 class CodexLookAndFeel : public juce::LookAndFeel_V4
 {
 public:
@@ -289,12 +336,12 @@ public:
         const float lineW = juce::jlimit (2.0f, 3.5f, radius * 0.075f);
         const float arcR = radius - lineW;
         const float angle = startAngle + pos * (endAngle - startAngle);
-        const bool hot = s.isMouseOverOrDragging() && s.isEnabled();
+        const float hov = s.isEnabled() ? hoverAnimator.value (s) : 0.0f;   // eased hover amount
 
         const bool bipolar = (s.getMinimum() < 0.0 && s.getMaximum() > 0.0 && std::abs (s.getMinimum() + s.getMaximum()) < 1.0e-6)
                              || s.getProperties().contains ("bipolar");
         const float from = bipolar ? (startAngle + endAngle) * 0.5f : startAngle;
-        const auto arcColour = s.isEnabled() ? (hot ? accentHi : accent) : textFaint;
+        const auto arcColour = s.isEnabled() ? accent.interpolatedWith (accentHi, hov) : textFaint;
 
         // Track
         juce::Path track;
@@ -309,7 +356,7 @@ public:
             value.addCentredArc (centre.x, centre.y, arcR, arcR, 0.0f, juce::jmin (from, angle), juce::jmax (from, angle), true);
             if (s.isEnabled())
             {
-                g.setColour (arcColour.withAlpha (hot ? 0.22f : 0.13f));
+                g.setColour (arcColour.withAlpha (0.13f + 0.11f * hov));
                 g.strokePath (value, juce::PathStrokeType (lineW * 2.6f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
             }
             g.setColour (arcColour);
@@ -324,7 +371,7 @@ public:
         g.setGradientFill (juce::ColourGradient (juce::Colour (0xff343230), centre.x - bodyR * 0.35f, body.getY(),
                                                  juce::Colour (0xff121212), centre.x + bodyR * 0.3f, body.getBottom(), true));
         g.fillEllipse (body);
-        g.setGradientFill (juce::ColourGradient (juce::Colours::white.withAlpha (hot ? 0.22f : 0.14f), centre.x, body.getY(),
+        g.setGradientFill (juce::ColourGradient (juce::Colours::white.withAlpha (0.14f + 0.08f * hov), centre.x, body.getY(),
                                                  juce::Colours::black.withAlpha (0.4f), centre.x, body.getBottom(), false));
         g.drawEllipse (body.reduced (0.5f), 1.0f);
         {
@@ -339,7 +386,7 @@ public:
         juce::Path pointer;
         pointer.startNewSubPath (centre + dir * (bodyR * 0.35f));
         pointer.lineTo (centre + dir * (bodyR * 0.85f));
-        g.setColour (s.isEnabled() ? (hot ? juce::Colours::white : text) : textFaint);
+        g.setColour (s.isEnabled() ? text.interpolatedWith (juce::Colours::white, hov) : textFaint);
         g.strokePath (pointer, juce::PathStrokeType (juce::jmax (1.6f, bodyR * 0.08f), juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
     }
 
@@ -515,16 +562,7 @@ public:
 
         if (id == "tab")
         {
-            if (b.getToggleState())
-            {
-                const auto line = r.removeFromBottom (2.0f).reduced (6.0f, 0.0f);
-                // soft glow rising from the underline
-                g.setGradientFill (juce::ColourGradient (Colours_::accent.withAlpha (0.16f), line.getCentreX(), line.getY(),
-                                                         Colours_::accent.withAlpha (0.0f), line.getCentreX(), line.getY() - 14.0f, false));
-                g.fillRect (line.withY (line.getY() - 14.0f).withHeight (14.0f));
-                g.setColour (Colours_::accent);
-                g.fillRoundedRectangle (line, 1.0f);
-            }
+            // the selected tab's underline is drawn (and animated) by the main view
             return;
         }
 
@@ -652,4 +690,7 @@ private:
         tl.createLayoutWithBalancedLineLengths (s, 300.0f);
         return tl;
     }
+
+private:
+    HoverAnimator hoverAnimator;
 };

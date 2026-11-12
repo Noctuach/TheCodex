@@ -23,6 +23,13 @@ public:
         startTimerHz (15);
     }
 
+    /** A kick was played: light the chips one after another, in processing order, like the signal passing through. */
+    void flash()
+    {
+        flashStart = juce::Time::getMillisecondCounterHiRes();
+        startTimerHz (60);
+    }
+
     /** Tab shown by the editor, so the modules on it are highlighted. */
     void setCurrentTab (int tab) { currentTab = tab; repaint(); }
 
@@ -54,7 +61,7 @@ public:
             if (i > 0)
                 Icons::draw (g, Icons::chevronRight(), Rectangle<float> ((float) r.getX() - gap + 1.0f, r.getCentreY() - 4.0f, 7.0f, 8.0f),
                              Colours_::textFaint, 1.2f);
-            drawChip (g, r, module);
+            drawChip (g, r, module, false, flashAmount (i));
         }
         if (dragModule >= 0)
         {
@@ -117,8 +124,26 @@ public:
 private:
     static constexpr float gap = 9.0f;
 
+    static constexpr double flashStepMs = 28.0, flashDecayMs = 120.0;
+
+    float flashAmount (int slot) const
+    {
+        if (flashStart <= 0.0) return 0.0f;
+        const double dt = juce::Time::getMillisecondCounterHiRes() - flashStart - slot * flashStepMs;
+        return dt < 0.0 ? 0.0f : (float) std::exp (-dt / flashDecayMs);
+    }
+
     void timerCallback() override
     {
+        if (flashStart > 0.0)
+        {
+            repaint();
+            if (juce::Time::getMillisecondCounterHiRes() - flashStart > chain::numModules * flashStepMs + 5.0 * flashDecayMs)
+            {
+                flashStart = 0.0;
+                startTimerHz (15);
+            }
+        }
         if (dragModule >= 0) return;
         const int index = currentIndex();
         std::array<bool, chain::numModules> on {};
@@ -191,14 +216,23 @@ private:
         return -1;
     }
 
-    void drawChip (juce::Graphics& g, juce::Rectangle<float> r, int module, bool lifted = false)
+    void drawChip (juce::Graphics& g, juce::Rectangle<float> r, int module, bool lifted = false, float flashAmt = 0.0f)
     {
         using namespace juce;
         const bool on = shownOn[(size_t) module];
         const bool here = ChainStrip::tabFor (module) == currentTab;
+        const float lit = flashAmt * (on ? 1.0f : 0.3f);   // modules that are off barely light up
         g.setColour (lifted ? Colours_::panelTop.brighter (0.15f) : Colours_::display);
         g.fillRoundedRectangle (r, 4.0f);
-        g.setColour (lifted ? Colours_::accent : here ? Colours_::accent.withAlpha (0.7f) : Colours_::outline);
+        if (lit > 0.01f)
+        {
+            g.setColour (Colours_::accent.withAlpha (0.12f * lit));
+            g.fillRoundedRectangle (r.expanded (2.0f), 5.0f);
+            g.setColour (Colours_::accent.withAlpha (0.3f * lit));
+            g.fillRoundedRectangle (r, 4.0f);
+        }
+        const auto edge = lifted ? Colours_::accent : here ? Colours_::accent.withAlpha (0.7f) : Colours_::outline;
+        g.setColour (edge.interpolatedWith (Colours_::accentHi, lit));
         g.drawRoundedRectangle (r.reduced (0.5f), 4.0f, 1.0f);
         g.setColour (here ? Colours_::accent : on ? Colours_::text : Colours_::textFaint);
         g.drawText (chain::shortName (module), r, Justification::centred);
@@ -212,4 +246,5 @@ private:
     std::array<bool, chain::numModules> shownOn {};
     int shownIndex = -1, currentTab = 0, pressedSlot = -1, dragModule = -1, dragSlot = 0;
     float dragX = 0.0f, dragGrab = 0.0f;
+    double flashStart = 0.0;
 };

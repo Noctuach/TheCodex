@@ -108,6 +108,9 @@ public:
     /** MIDI note of the selected key (F1..E2, shifted by the octave setting). */
     int getKeyNote() const;
     /** Exact root the kick is tuned to, including the Tune parameter (fractional MIDI note). */
+    /** Counts note-ons (MIDI and preview), so the editor can animate each hit. */
+    std::atomic<unsigned int> hitCounter { 0 };
+
     float getTargetNote() const { return (float) getKeyNote() + tune->load(); }
 
 private:

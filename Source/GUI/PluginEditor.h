@@ -67,6 +67,19 @@ private:
     TunerChip tunerChip;
     ChainStrip chainStrip;
 
+    // Small animations: the tab underline slides, a page fades in when shown, each hit pulses the logo
+    struct Veil : public juce::Component
+    {
+        Veil() { setInterceptsMouseClicks (false, false); }
+        void paint (juce::Graphics& g) override { g.fillAll (Colours_::background.withAlpha (amount)); }
+        float amount = 0.0f;
+    } pageVeil;
+    juce::Rectangle<float> underline, underlineTarget;
+    float logoPulse = 0.0f;
+    unsigned int lastHits = 0;
+    void setUnderlineTarget (bool snap);
+    void animate();
+
     // Source
     SegmentedChoice engineSwitch;
     ChoiceBox wave { "Wave" }, model { "909 Model" };

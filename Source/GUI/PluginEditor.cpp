@@ -185,6 +185,7 @@ MainView::MainView (CodexProcessor& p, PropertiesFile* settingsFile)
              &eqDisplay, &bandControls, &unit1, &unit2, &scopePage, &saturationPage, &spacePage, &compressorPage, &eq2Page })
         addAndMakeVisible (c);
     addChildComponent (engineNotice);
+    addChildComponent (pageVeil);
 
     addChildComponent (saveOverlay);
     addChildComponent (browserOverlay);
@@ -208,8 +209,50 @@ void MainView::setTooltipsEnabled (bool enabled)
         settings->setValue (tooltipsKey, enabled);
 }
 
+void MainView::setUnderlineTarget (bool snap)
+{
+    const auto b = tabButtons[(size_t) currentTab].getBounds().toFloat();
+    underlineTarget = { b.getX() + 6.0f, b.getBottom() - 2.5f, b.getWidth() - 12.0f, 2.0f };
+    if (snap || underline.isEmpty()) underline = underlineTarget;
+    repaint (tabBar);
+}
+
+void MainView::animate()
+{
+    // tab underline: ease towards the selected tab
+    if (underline != underlineTarget)
+    {
+        const auto old = underline;
+        auto ease = [] (float a, float b) { return std::abs (b - a) < 0.3f ? b : a + (b - a) * 0.24f; };
+        underline = { ease (underline.getX(), underlineTarget.getX()), underlineTarget.getY(),
+                      ease (underline.getWidth(), underlineTarget.getWidth()), underlineTarget.getHeight() };
+        repaint (old.getUnion (underline).expanded (2.0f, 18.0f).getSmallestIntegerContainer());
+    }
+    // page fade-in
+    if (pageVeil.isVisible())
+    {
+        pageVeil.amount *= 0.72f;
+        if (pageVeil.amount < 0.01f) pageVeil.setVisible (false);
+        else pageVeil.repaint();
+    }
+    // a hit: the logo pulses and the chain lights up in processing order
+    const unsigned int hits = proc.hitCounter.load (std::memory_order_relaxed);
+    if (hits != lastHits)
+    {
+        lastHits = hits;
+        logoPulse = 1.0f;
+        chainStrip.flash();
+    }
+    if (logoPulse > 0.0f)
+    {
+        logoPulse = logoPulse < 0.02f ? 0.0f : logoPulse * 0.88f;
+        repaint (logoArea.withWidth (60).expanded (12));
+    }
+}
+
 void MainView::timerCallback()
 {
+    animate();
     meterL.setLevel (proc.getAndResetPeak (0));
     meterR.setLevel (proc.getAndResetPeak (1));
     undoButton.setEnabled (proc.undoManager.canUndo());
@@ -378,7 +421,15 @@ std::vector<Component*> MainView::kickTabComponents()
 
 void MainView::showTab (int tab)
 {
+    const bool changed = tab != currentTab;
     currentTab = tab;
+    setUnderlineTarget (false);
+    if (changed)
+    {
+        pageVeil.amount = 0.85f;   // the new page fades in from the background
+        pageVeil.setVisible (true);
+        pageVeil.toFront (false);
+    }
     chainStrip.setCurrentTab (tab);
     for (auto* c : kickTabComponents())
         c->setVisible (tab == 0);
@@ -426,7 +477,14 @@ void MainView::paint (Graphics& g)
     {
         auto r = logoArea.toFloat();
         auto mark = r.removeFromLeft (40.0f).withSizeKeepingCentre (38.0f, 38.0f);
-        Icons::draw (g, Icons::kickMark(), mark.reduced (2.0f), Colours_::accent, 1.8f);
+        if (logoPulse > 0.0f)
+        {
+            // a soft glow behind the mark on every hit
+            g.setGradientFill (ColourGradient (Colours_::accent.withAlpha (0.35f * logoPulse), mark.getCentreX(), mark.getCentreY(),
+                                               Colours_::accent.withAlpha (0.0f), mark.getCentreX() + 30.0f, mark.getCentreY(), true));
+            g.fillEllipse (mark.expanded (10.0f));
+        }
+        Icons::draw (g, Icons::kickMark(), mark.reduced (2.0f), Colours_::accent.interpolatedWith (Colours_::accentHi, logoPulse), 1.8f + 0.6f * logoPulse);
         r.removeFromLeft (10.0f);
         g.setColour (Colours_::text);
         g.setFont (Fonts::display (28.0f, 0.22f));
@@ -463,9 +521,17 @@ void MainView::paint (Graphics& g)
         g.drawText ("CPU " + String (roundToInt (cpuShown * 100.0f)) + " %", cpuArea, Justification::centredRight);
     }
 
-    // Tab bar
+    // Tab bar, with the sliding underline of the selected tab (glow rising from it)
     g.setColour (Colours_::outline);
     g.drawHorizontalLine (tabBar.getBottom() - 1, (float) tabBar.getX(), (float) tabBar.getRight());
+    if (! underline.isEmpty())
+    {
+        g.setGradientFill (ColourGradient (Colours_::accent.withAlpha (0.16f), underline.getCentreX(), underline.getY(),
+                                           Colours_::accent.withAlpha (0.0f), underline.getCentreX(), underline.getY() - 14.0f, false));
+        g.fillRect (underline.withY (underline.getY() - 14.0f).withHeight (14.0f));
+        g.setColour (Colours_::accent);
+        g.fillRoundedRectangle (underline, 1.0f);
+    }
     if (breadcrumbArea.getWidth() > 0)
     {
         // signal-flow breadcrumb, the stage of the current tab highlighted
@@ -599,6 +665,8 @@ void MainView::resized()
         t.removeFromRight (14);
         t.removeFromLeft (8);
         chainStrip.setBounds (t.withTrimmedBottom (2));
+        setUnderlineTarget (true);
+        pageVeil.setBounds (getLocalBounds().withTop (tabBar.getBottom()).withBottom (footer.getY()));
     }
     r.removeFromTop (12);
 

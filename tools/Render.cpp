@@ -226,6 +226,29 @@ int main (int argc, char** argv)
         writeWav (audio, outDir.getChildFile (juce::File::createLegalFileName (proc.presets.getFactoryNames()[i]) + ".wav"));
     }
 
+    // ---- Animation frames (CODEX_ANIM_FRAMES=1): a hit and a tab switch, captured mid-animation for review ----
+    if (std::getenv ("CODEX_ANIM_FRAMES") != nullptr)
+    {
+        proc.presets.loadPreset (8);
+        std::unique_ptr<juce::AudioProcessorEditor> editor (proc.createEditor());
+        auto* hk = dynamic_cast<CodexEditor*> (editor.get());
+        hk->setSize (MainView::baseWidth, MainView::baseHeight);
+        juce::MessageManager::getInstance()->runDispatchLoopUntil (200);
+        auto frame = [&] (const juce::String& name)
+        {
+            auto img = editor->createComponentSnapshot (editor->getLocalBounds(), true, 1.0f);
+            auto f = outDir.getChildFile (name + ".png");
+            f.deleteFile();
+            juce::FileOutputStream os (f);
+            juce::PNGImageFormat().writeImageToStream (img, os);
+        };
+        proc.hitCounter.fetch_add (1);
+        for (int i = 0; i < 4; ++i) { juce::MessageManager::getInstance()->runDispatchLoopUntil (45); frame ("anim_hit_" + juce::String (i)); }
+        hk->showTab (5);
+        for (int i = 0; i < 4; ++i) { juce::MessageManager::getInstance()->runDispatchLoopUntil (35); frame ("anim_tab_" + juce::String (i)); }
+        std::cout << "\nAnimation frames written\n";
+    }
+
     // ---- Factory presets are loudness-matched (Init excluded): every preset within 3.5 dB of the median ----
     {
         std::vector<float> l;
