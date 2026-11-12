@@ -135,12 +135,13 @@ static void writeWav (const juce::AudioBuffer<float>& b, const juce::File& f)
         }
 }
 
-static void snapshot (CodexProcessor& proc, const juce::AudioBuffer<float>& audio, const juce::File& png, int tab = 0, int overlay = 0)
+static void snapshot (CodexProcessor& proc, const juce::AudioBuffer<float>& audio, const juce::File& png, int tab = 0, int overlay = 0,
+                      float windowScale = 1.0f, float pixelScale = 2.0f)
 {
     std::unique_ptr<juce::AudioProcessorEditor> editor (proc.createEditor());
     if (auto* hk = dynamic_cast<CodexEditor*> (editor.get()))
     {
-        hk->setSize (MainView::baseWidth, MainView::baseHeight);
+        hk->setSize (juce::roundToInt (MainView::baseWidth * windowScale), juce::roundToInt (MainView::baseHeight * windowScale));
         hk->showTab (tab);
         if (overlay == 1) hk->getView().openAbout();
         if (overlay == 2) hk->getView().openSaveDialog();
@@ -156,7 +157,8 @@ static void snapshot (CodexProcessor& proc, const juce::AudioBuffer<float>& audi
         proc.scopeFeedR.push (audio.getReadPointer (1, (int) (0.05 * sr) + i * 2400), 2400);
         juce::MessageManager::getInstance()->runDispatchLoopUntil (60);
     }
-    auto img = editor->createComponentSnapshot (editor->getLocalBounds(), true, 2.0f);
+    auto img = editor->createComponentSnapshot (editor->getLocalBounds(), true, pixelScale);
+    if (windowScale != 1.0f) editor->setSize (MainView::baseWidth, MainView::baseHeight); // restore the saved UI scale
     png.deleteFile();
     juce::FileOutputStream os (png);
     juce::PNGImageFormat().writeImageToStream (img, os);
@@ -172,6 +174,28 @@ int main (int argc, char** argv)
 
     CodexProcessor proc;
     proc.setPlayConfigDetails (0, 2, sr, block);
+
+    if (std::getenv ("CODEX_UI_SCALES") != nullptr)
+    {
+        // Screenshot mode: every tab and overlay at several window scales (and 100 % at 2x pixels) into outDir/scales
+        const auto dir = outDir.getChildFile ("scales");
+        dir.createDirectory();
+        proc.presets.loadPreset (10); // 909 Rawstyle
+        setParam (proc, ID::cmp ("On"), 1.0f); setParam (proc, ID::sat ("On"), 1.0f); setParam (proc, ID::spc ("On"), 1.0f);
+        const auto audio = render (proc, 1);
+        const std::pair<float, float> scales[] = { { 0.6f, 1.0f }, { 0.75f, 1.0f }, { 1.0f, 1.0f }, { 1.5f, 1.0f }, { 2.0f, 1.0f }, { 1.0f, 2.0f } };
+        const char* overlays[] = { "about", "save", "browser", "guide" };
+        for (auto [s, px] : scales)
+        {
+            const auto suffix = "_s" + juce::String (juce::roundToInt (s * 100)).paddedLeft ('0', 3) + (px != 1.0f ? "_px2" : "") + ".png";
+            for (int tab = 0; tab <= 6; ++tab)
+                snapshot (proc, audio, dir.getChildFile ("tab" + juce::String (tab) + suffix), tab, 0, s, px);
+            for (int o = 0; o < 4; ++o)
+                snapshot (proc, audio, dir.getChildFile (overlays[o] + suffix), 0, o + 1, s, px);
+        }
+        std::cout << "UI scale screenshots written to " << dir.getFullPathName() << "\n";
+        return 0;
+    }
     std::cout << "Latency: " << proc.getLatencySamples() << " samples\n\n";
 
     // ---- All factory presets in the key of F (F1 = 43.65 Hz) ----
