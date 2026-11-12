@@ -97,6 +97,14 @@ if(HK_BUILD_TOOLS)
         PRIVATE CodexAssets juce::juce_audio_utils juce::juce_dsp
         PUBLIC juce::juce_recommended_config_flags juce::juce_recommended_warning_flags)
 
+    # CPU benchmark (real-time factor per scenario) and deterministic null-test renders (tools/Bench.cpp)
+    juce_add_console_app(CodexBench PRODUCT_NAME "CodexBench")
+    target_sources(CodexBench PRIVATE tools/Bench.cpp ${HK_SOURCES})
+    target_compile_definitions(CodexBench PRIVATE ${HK_DEFS} JUCE_STANDALONE_APPLICATION=1 JUCE_MODAL_LOOPS_PERMITTED=1 JucePlugin_VersionString="${PROJECT_VERSION}")
+    target_link_libraries(CodexBench
+        PRIVATE CodexAssets juce::juce_audio_utils juce::juce_dsp
+        PUBLIC juce::juce_recommended_config_flags juce::juce_recommended_warning_flags)
+
     # Loads the built VST3 through JUCE's plug-in hosting, like a DAW would
     juce_add_console_app(CodexHostTest PRODUCT_NAME "CodexHostTest")
     target_sources(CodexHostTest PRIVATE tools/HostTest.cpp)
@@ -115,5 +123,6 @@ if(HK_BUILD_TOOLS)
     if(MINGW)
         target_sources(CodexHostTest PRIVATE cmake/mingw-compat/codex_mingw_compat.cpp)
         target_sources(CodexRender PRIVATE cmake/mingw-compat/codex_mingw_compat.cpp)
+        target_sources(CodexBench PRIVATE cmake/mingw-compat/codex_mingw_compat.cpp)
     endif()
 endif()

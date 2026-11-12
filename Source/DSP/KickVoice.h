@@ -153,6 +153,9 @@ public:
         ampEnv.noteOff();
     }
 
+    /** Tests / benchmarks only: fixes the click-noise generator's seed (by default it is seeded randomly). */
+    void seedNoise (juce::int64 seed) noexcept { random.setSeed (seed); }
+
     bool isActive() const noexcept
     {
         if (settings.engine == Engine909)

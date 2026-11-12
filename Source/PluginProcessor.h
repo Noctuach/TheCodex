@@ -85,6 +85,9 @@ public:
     /** True when every filter is ready (linear-phase EQ filters built and installed); used before offline renders. */
     bool isSettled() const { return equalisers[0].isLinearUpToDate() && equalisers[1].isLinearUpToDate(); }
 
+    /** Tests / benchmarks only: makes renders reproducible by fixing the click-noise seed (not called by the plug-in). */
+    void seedNoiseForTesting (juce::int64 seed) { voice.seedNoise (seed); }
+
     /** Output peak since last read, per channel (0 = left, 1 = right). */
     float getAndResetPeak (int channel) { return peaks[(size_t) channel].exchange (0.0f); }
 
