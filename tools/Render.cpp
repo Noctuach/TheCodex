@@ -246,6 +246,15 @@ int main (int argc, char** argv)
         for (int i = 0; i < 4; ++i) { juce::MessageManager::getInstance()->runDispatchLoopUntil (45); frame ("anim_hit_" + juce::String (i)); }
         hk->showTab (5);
         for (int i = 0; i < 4; ++i) { juce::MessageManager::getInstance()->runDispatchLoopUntil (35); frame ("anim_tab_" + juce::String (i)); }
+        // easter egg: the dancer, one frame per kick
+        hk->getView().toggleDancer();
+        juce::MessageManager::getInstance()->runDispatchLoopUntil (300);
+        for (int i = 0; i < 6; ++i)
+        {
+            proc.hitCounter.fetch_add (1);
+            juce::MessageManager::getInstance()->runDispatchLoopUntil (180);
+            frame ("anim_dance_" + juce::String (i));
+        }
         std::cout << "\nAnimation frames written\n";
     }
 

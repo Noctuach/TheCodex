@@ -17,6 +17,7 @@
 #include "Overlays.h"
 #include "ChainStrip.h"
 #include "Sweep909Display.h"
+#include "Dancer.h"
 
 class CodexProcessor;
 
@@ -36,6 +37,8 @@ public:
     void openAbout() { aboutOverlay.open(); }
     void openBrowser() { browserOverlay.open(); }
     void openGuide() { guideOverlay.open(); }
+    void toggleDancer() { dancer.toggle(); }
+    void mouseUp (const juce::MouseEvent&) override;
     void openSaveDialog() { presetBar.onSaveRequested(); }
     std::function<void (float)> onScaleRequested;
 
@@ -74,6 +77,7 @@ private:
         void paint (juce::Graphics& g) override { g.fillAll (Colours_::background.withAlpha (amount)); }
         float amount = 0.0f;
     } pageVeil;
+    Dancer dancer { proc.hitCounter };   // easter egg: click the book
     juce::Rectangle<float> underline, underlineTarget;
     float logoPulse = 0.0f;
     unsigned int lastHits = 0;

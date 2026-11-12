@@ -186,6 +186,7 @@ MainView::MainView (CodexProcessor& p, PropertiesFile* settingsFile)
         addAndMakeVisible (c);
     addChildComponent (engineNotice);
     addChildComponent (pageVeil);
+    addChildComponent (dancer);
 
     addChildComponent (saveOverlay);
     addChildComponent (browserOverlay);
@@ -248,6 +249,13 @@ void MainView::animate()
         logoPulse = logoPulse < 0.02f ? 0.0f : logoPulse * 0.88f;
         repaint (logoArea.withWidth (60).expanded (12));
     }
+}
+
+void MainView::mouseUp (const MouseEvent& e)
+{
+    // the book in the logo has a secret
+    if (logoArea.withWidth (44).toFloat().contains (e.position))
+        dancer.toggle();
 }
 
 void MainView::timerCallback()
@@ -667,6 +675,7 @@ void MainView::resized()
         chainStrip.setBounds (t.withTrimmedBottom (2));
         setUnderlineTarget (true);
         pageVeil.setBounds (getLocalBounds().withTop (tabBar.getBottom()).withBottom (footer.getY()));
+        dancer.setBounds (Rectangle<int> (170, 230).withPosition (getWidth() - 12 - 180, footer.getY() - 236));
     }
     r.removeFromTop (12);
 

@@ -156,18 +156,34 @@ namespace Icons
         return p;
     }
     /** Logo mark: a decaying kick waveform inside a ring. */
+    /** The Codex mark: an open book (a codex), lines of text on the left page and a kick's decaying wave on the right. */
     inline juce::Path kickMark()
     {
         juce::Path p;
-        p.addEllipse (0.04f, 0.04f, 0.92f, 0.92f);
-        p.startNewSubPath (0.16f, 0.5f);
-        constexpr int steps = 60;
+        // covers / pages, curving down to the spine
+        p.startNewSubPath (0.5f, 0.27f);
+        p.cubicTo (0.37f, 0.17f, 0.18f, 0.16f, 0.05f, 0.22f);
+        p.lineTo (0.05f, 0.80f);
+        p.cubicTo (0.18f, 0.74f, 0.37f, 0.75f, 0.5f, 0.85f);
+        p.cubicTo (0.63f, 0.75f, 0.82f, 0.74f, 0.95f, 0.80f);
+        p.lineTo (0.95f, 0.22f);
+        p.cubicTo (0.82f, 0.16f, 0.63f, 0.17f, 0.5f, 0.27f);
+        p.lineTo (0.5f, 0.85f);
+        // left page: lines of text
+        for (int i = 0; i < 3; ++i)
+        {
+            const float y = 0.36f + 0.12f * (float) i;
+            p.startNewSubPath (0.14f, y);
+            p.quadraticTo (0.27f, y - 0.03f, 0.41f, y + 0.03f);
+        }
+        // right page: a kick, decaying
+        p.startNewSubPath (0.57f, 0.5f);
+        constexpr int steps = 40;
         for (int i = 1; i <= steps; ++i)
         {
             const float t = (float) i / steps;
-            const float phase = 2.4f * std::pow (t, 0.55f) * juce::MathConstants<float>::twoPi;
-            const float amp = 0.3f * std::exp (-2.2f * t);
-            p.lineTo (0.16f + 0.68f * t, 0.5f - amp * std::sin (phase));
+            const float phase = 2.0f * std::pow (t, 0.6f) * juce::MathConstants<float>::twoPi;
+            p.lineTo (0.57f + 0.31f * t, 0.5f - 0.17f * std::exp (-2.0f * t) * std::sin (phase));
         }
         return p;
     }

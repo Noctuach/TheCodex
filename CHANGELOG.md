@@ -5,6 +5,7 @@ All notable changes to Codex. Versions follow [Semantic Versioning](https://semv
 ## [Unreleased]
 
 ### Added
+- New logo: an open book (a codex), with a kick's wave on the right page. Some say it hides a secret.
 - Animation details: every hit lights the chain strip in processing order (the signal passing through) and pulses the logo; the tab underline slides to the selected tab and the page fades in; knob hover highlights fade in and out; overlays (preset browser, save, guide, about) fade in and out.
 - 909 engine, after a second round of hardware research: **Tune** now works like the original (speed of the pitch drop); the old Tune is **Depth** (the classic Fraser / Whittle Tune Depth mod). New **Accent** (velocity 100+ hits louder and harder), **Overload** (waveshaper drive towards a square, after the Tiptop BD909 / Fraser drive mod) and **Decay Hold** (the body holds while the note is held). They live in the pitch panel with the 909 engine, with a live drawing of the sweep. Defaults match the previous sound, so sessions and presets are unchanged.
 - Module order: drag the chips in the tab bar to reorder Space, Distortion 1, EQ 1, Distortion 2, Saturation, Compressor and EQ 2 (click a chip to open it, right-click for Modern / Classic). Reordering fades for 6 ms so it never clicks, and the order is saved with sessions, presets, A/B and undo.
