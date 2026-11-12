@@ -26,7 +26,7 @@ int main (int argc, char** argv)
         juce::Graphics g (img);
         g.fillAll (Colours_::panel);
         g.setColour (Colours_::outline);
-        for (int y = 20; y < 230; y += 46) g.drawHorizontalLine (juce::roundToInt (y * scale), 0.0f, 170.0f * scale);
+        for (int y = 20; y < 230; y += 46) g.drawHorizontalLine (juce::roundToInt ((float) y * scale), 0.0f, 170.0f * scale);
         g.addTransform (juce::AffineTransform::scale (scale));
         dancer.paintEntireComponent (g, true);
         return img;
