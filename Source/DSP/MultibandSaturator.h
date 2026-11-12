@@ -3,6 +3,8 @@
 #include "ParametricEQ.h"
 #include <array>
 #include <cmath>
+#include <cstdint>
+#include <cstring>
 #if defined (__SSE2__) || defined (_M_X64) || (defined (_M_IX86_FP) && _M_IX86_FP >= 2)
  #include <emmintrin.h>
  #define CODEX_SAT_SSE2 1
@@ -410,7 +412,25 @@ namespace sat
             std::array<eq::Biquad, 4> tone {};
             float lastOut = 0.0f, env = 0.0f, dynGain = 1.0f;
             int dynCounter = 0;
-            void reset() { style.reset(); feedbackFilter.reset(); for (auto& t : tone) t.reset(); lastOut = env = 0.0f; dynGain = 1.0f; dynCounter = 0; }
+            // memo of the dynamics std::pow: the last arguments (compared bit for bit) and result
+            std::uint32_t powBaseBits = 0, powExpBits = 0;
+            float powResult = 0.0f;
+            bool powValid = false;
+            void reset() { style.reset(); feedbackFilter.reset(); for (auto& t : tone) t.reset(); lastOut = env = 0.0f; dynGain = 1.0f; dynCounter = 0; powValid = false; }
+
+            /** std::pow (base, e), reusing the previous result when both arguments are bit-identical (pure function). */
+            float powMemo (float base, float e) noexcept
+            {
+                std::uint32_t bb, eb;
+                std::memcpy (&bb, &base, sizeof (bb));
+                std::memcpy (&eb, &e, sizeof (eb));
+                if (! powValid || bb != powBaseBits || eb != powExpBits)
+                {
+                    powResult = std::pow (base, e);
+                    powBaseBits = bb; powExpBits = eb; powValid = true;
+                }
+                return powResult;
+            }
         };
 
         struct Channel
@@ -595,6 +615,8 @@ namespace sat
             const float envRelease = (float) (1.0 - std::exp (-1.0 / (0.08 * rate)));
             const bool ms = settings.channelMode == 1;
             std::array<float, maxBands> peaks {};
+            // a drive smoother that is not ramping now stays constant for this whole call (targets change between calls)
+            for (int b = 0; b < nb; ++b) driveConstant[(size_t) b] = ! drive[(size_t) b].isSmoothing();
 
             for (int i0 = 0; i0 < n; i0 += subBlock)
             {
@@ -748,6 +770,19 @@ namespace sat
             const bool bypass = bs.bypass;
             float peak = 0.0f;
 
+            // The drive pan gain is a plain setting (constant over the call); while the band's drive is not smoothing,
+            // the level compensation 1 / sqrt (drive) is constant too. Same expressions as per sample, same values.
+            const float panDb = 6.0f * bs.drivePan;
+            const float panGain[2] = { juce::Decibels::decibelsToGain (-panDb), juce::Decibels::decibelsToGain (panDb) };
+            const bool driveConst = driveConstant[(size_t) b];
+            float invDrive[2] = { 1.0f, 1.0f };
+            if (driveConst)
+                for (int c = 0; c < 2; ++c)
+                {
+                    const float chDrive = drive[(size_t) b].getTargetValue() * panGain[c];
+                    invDrive[c] = 1.0f / std::sqrt (chDrive);
+                }
+
             auto one = [&] (int i, int c, BandState& st) noexcept
             {
                 const float dry = sig[2 * i + c];
@@ -764,20 +799,19 @@ namespace sat
                     {
                         st.dynCounter = 7;
                         const float dynTarget = std::abs (bs.dynamics) < 0.001f ? 1.0f
-                                   : juce::jlimit (0.03f, 4.0f, std::pow (juce::jmax (1.0e-4f, st.env / 0.25f), -0.85f * bs.dynamics));
+                                   : juce::jlimit (0.03f, 4.0f, st.powMemo (juce::jmax (1.0e-4f, st.env / 0.25f), -0.85f * bs.dynamics));
                         st.dynGain += dynSlew * (dynTarget - st.dynGain);   // slewed: a Dynamics change never steps
                     }
 
                     // Drive with pan: shifts the drive between the channels (L/R, or M/S in mid/side mode)
-                    const float panDb = 6.0f * bs.drivePan;
-                    const float chDrive = dr[i] * juce::Decibels::decibelsToGain (c == 0 ? -panDb : panDb);
+                    const float chDrive = dr[i] * panGain[c];
 
                     // Feedback is reduced automatically when the band goes quiet, so it cannot ring forever
                     const float fbAmount = bs.feedback * 0.95f * juce::jmin (1.0f, st.env * 50.0f);
                     const float fb = st.feedbackFilter.process (st.lastOut) * fbAmount;
                     float w = processStyle (Style, dry * chDrive + fb, st.style, constants);
                     st.lastOut = w;
-                    w *= 1.0f / std::sqrt (chDrive);   // automatic level compensation for drive
+                    w *= driveConst ? invDrive[c] : 1.0f / std::sqrt (chDrive);   // automatic level compensation for drive
                     w *= st.dynGain;
                     if (tone0) w = st.tone[0].process (w);
                     if (tone1) w = st.tone[1].process (w);
@@ -811,6 +845,7 @@ namespace sat
         using StereoBuffer = std::array<float, 2 * subBlock>;   // interleaved: [2 * i + channel]
         std::array<SubBuffer, maxBands> drBuf {}, mxBuf {}, lvBuf {}, lpBuf {};
         SubBuffer gmBuf {}, goBuf {}, giBuf {};
+        std::array<bool, maxBands> driveConstant {};
         alignas (16) std::array<StereoBuffer, maxBands> bandBuf {};
         alignas (16) StereoBuffer inBuf {}, restBuf {}, tmpBuf {}, tmpBuf2 {}, sumBuf {};
 
