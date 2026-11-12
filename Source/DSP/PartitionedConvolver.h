@@ -120,6 +120,9 @@ public:
     int getInstalledLength() const noexcept { return installedLength.load(); }
     int getInstalledTag() const noexcept { return installedTag.load(); }
     bool hasPending() const { const juce::SpinLock::ScopedLockType sl (slotLock); return pending != nullptr; }
+    /** Tests only: the tag of the set waiting to be installed (-1 = none), and whether a retired set still waits to be freed. */
+    int getPendingTagForTesting() const { const juce::SpinLock::ScopedLockType sl (slotLock); return pending != nullptr ? pending->tag : -1; }
+    bool hasRetiredForTesting() const { const juce::SpinLock::ScopedLockType sl (slotLock); return retired != nullptr; }
 
     /** Audio thread. In-place stereo processing; any block size. */
     void process (float* l, float* r, int n) noexcept

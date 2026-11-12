@@ -87,6 +87,8 @@ public:
 
     /** Tests / benchmarks only: makes renders reproducible by fixing the click-noise seed (not called by the plug-in). */
     void seedNoiseForTesting (juce::int64 seed) { voice.seedNoise (seed); }
+    /** Tests / benchmarks only: every linear-phase EQ is up to date or has its new filters built, ready to install. */
+    bool isEqBuildReadyForTesting() const { return equalisers[0].isLinearBuildReadyForTesting() && equalisers[1].isLinearBuildReadyForTesting(); }
 
     /** Output peak since last read, per channel (0 = left, 1 = right). */
     float getAndResetPeak (int channel) { return peaks[(size_t) channel].exchange (0.0f); }

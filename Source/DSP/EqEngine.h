@@ -90,6 +90,14 @@ namespace eq
 
         void resetHistory() noexcept { convolver.reset(); }
 
+        /** Tests only: the filters for the latest settings are installed, or built and installable at the next partition. */
+        bool isBuildReadyForTesting() const
+        {
+            int gen;
+            { const juce::SpinLock::ScopedLockType l (pending); gen = generation; }
+            return convolver.getInstalledTag() == gen || (convolver.getPendingTagForTesting() == gen && ! convolver.hasRetiredForTesting());
+        }
+
     private:
         void run() override
         {
@@ -251,6 +259,7 @@ namespace eq
         }
 
         bool isLinearUpToDate() const { return mode != 2 || linear.isUpToDate(); }
+        bool isLinearBuildReadyForTesting() const { return mode != 2 || linear.isBuildReadyForTesting(); }
         int getMode() const { return mode; }
 
     private:
