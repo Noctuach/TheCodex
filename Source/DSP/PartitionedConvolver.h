@@ -24,16 +24,23 @@ public:
     static constexpr int fftSize = 2 * B, bins = B + 1;
     using Cpx = std::complex<float>;
 
-    /** Bins per partition in the split (re / im) layout: 257 rounded up to a whole number of MAC lanes (the extra bins stay 0). */
-    static constexpr int lanes = 8, binsPad = (bins + lanes - 1) / lanes * lanes;
+    /** Spectra are stored in blocks of `lanes` bins (257 rounded up to 264; the extra bins stay 0), block-major:
+        [block][partition][lanes real parts, then lanes imaginary parts], so the MAC streams through memory linearly
+        (one 64-byte line per block and partition). */
+    static constexpr int lanes = 8, binsPad = (bins + lanes - 1) / lanes * lanes, numBlocks = binsPad / lanes, blockFloats = 2 * lanes;
+    /** Index of bin k's real part (the imaginary part follows `lanes` floats later) in a spectrum array of `slots` partitions. */
+    static constexpr size_t binIndex (int slot, int k, int slots) noexcept
+    {
+        return ((size_t) (k / lanes) * (size_t) slots + (size_t) slot) * blockFloats + (size_t) (k % lanes);
+    }
 
     /** Frequency-domain partitions of the four filters. Built (and freed) on a non-realtime thread. */
     struct FilterSet
     {
         int partitions = 0, irLength = 0, tag = -1;
         bool cross = false;
-        // LL, RL, LR, RR: partitions * binsPad each, real and imaginary parts in separate arrays
-        std::array<std::vector<float>, 4> re, im;
+        // LL, RL, LR, RR: partitions * binsPad * 2 floats each (layout: see binIndex)
+        std::array<std::vector<float>, 4> h;
 
         /** irs: four impulse responses of equal length (any length up to maxLength). */
         static std::unique_ptr<FilterSet> create (const std::array<const float*, 4>& irs, int length, bool hasCross)
@@ -52,10 +59,8 @@ public:
             const float scale = std::abs (work[0]) > 1.0e-9f ? 1.0f / work[0] : 1.0f;
             for (int e = 0; e < 4; ++e)
             {
-                auto& dr = set->re[(size_t) e];
-                auto& di = set->im[(size_t) e];
-                dr.assign ((size_t) set->partitions * binsPad, 0.0f);
-                di.assign ((size_t) set->partitions * binsPad, 0.0f);
+                auto& dst = set->h[(size_t) e];
+                dst.assign ((size_t) set->partitions * binsPad * 2, 0.0f);
                 if (irs[(size_t) e] == nullptr) continue;
                 for (int p = 0; p < set->partitions; ++p)
                 {
@@ -70,8 +75,9 @@ public:
                     {
                         // same value as std::complex<float> * float (each part scaled)
                         const Cpx c = Cpx { work[(size_t) (2 * k)], work[(size_t) (2 * k + 1)] } * scale;
-                        dr[(size_t) (p * binsPad + k)] = c.real();
-                        di[(size_t) (p * binsPad + k)] = c.imag();
+                        const size_t idx = binIndex (p, k, set->partitions);
+                        dst[idx] = c.real();
+                        dst[idx + lanes] = c.imag();
                     }
                 }
             }
@@ -82,8 +88,7 @@ public:
     void prepare (int maxIrLength)
     {
         maxPartitions = (maxIrLength + B - 1) / B;
-        for (auto& f : fdlRe) f.assign ((size_t) maxPartitions * binsPad, 0.0f);
-        for (auto& f : fdlIm) f.assign ((size_t) maxPartitions * binsPad, 0.0f);
+        for (auto& f : fdl) f.assign ((size_t) maxPartitions * binsPad * 2, 0.0f);
         for (auto& b : inBuf) b.assign ((size_t) fftSize, 0.0f);
         for (auto& b : outBuf) b.assign ((size_t) B, 0.0f);
         for (auto& b : fadeBuf) b.assign ((size_t) B, 0.0f);
@@ -102,8 +107,7 @@ public:
 
     void reset()
     {
-        for (auto& f : fdlRe) std::fill (f.begin(), f.end(), 0.0f);
-        for (auto& f : fdlIm) std::fill (f.begin(), f.end(), 0.0f);
+        for (auto& f : fdl) std::fill (f.begin(), f.end(), 0.0f);
         for (auto& b : inBuf) std::fill (b.begin(), b.end(), 0.0f);
         for (auto& b : outBuf) std::fill (b.begin(), b.end(), 0.0f);
         fill = 0;
@@ -166,9 +170,13 @@ private:
             std::copy (inBuf[(size_t) c].begin(), inBuf[(size_t) c].end(), work.begin());
             std::fill (work.begin() + fftSize, work.end(), 0.0f);
             fft.performRealOnlyForwardTransform (work.data(), true);
-            auto* dr = fdlRe[(size_t) c].data() + (size_t) fdlPos * binsPad;
-            auto* di = fdlIm[(size_t) c].data() + (size_t) fdlPos * binsPad;
-            for (int k = 0; k < bins; ++k) { dr[k] = work[(size_t) (2 * k)]; di[k] = work[(size_t) (2 * k + 1)]; }
+            auto* dst = fdl[(size_t) c].data();
+            for (int k = 0; k < bins; ++k)
+            {
+                const size_t idx = binIndex (fdlPos, k, maxPartitions);
+                dst[idx] = work[(size_t) (2 * k)];
+                dst[idx + lanes] = work[(size_t) (2 * k + 1)];
+            }
             std::copy (inBuf[(size_t) c].begin() + B, inBuf[(size_t) c].end(), inBuf[(size_t) c].begin());
         }
 
@@ -232,20 +240,21 @@ private:
         float* w0 = outWork[0].data();
         float* w1 = outWork[1].data();
 
-        for (int k0 = 0; k0 < binsPad; k0 += lanes)
+        for (int blk = 0; blk < numBlocks; ++blk)
         {
+            const int k0 = blk * lanes;
             float a0r[lanes] = {}, a0i[lanes] = {}, a1r[lanes] = {}, a1i[lanes] = {};
             for (int in = 0; in < 2; ++in)
             {
                 // out L <- in L: LL(0), in R: RL(1); out R <- in L: LR(2), in R: RR(3)
                 const int e0 = in == 0 ? 0 : 1, e1 = in == 0 ? 2 : 3;
                 const bool use0 = e0 != 1 || set.cross, use1 = e1 != 2 || set.cross;
-                const float* xR = fdlRe[(size_t) in].data() + k0;
-                const float* xI = fdlIm[(size_t) in].data() + k0;
-                const float* h0R = set.re[(size_t) e0].data() + k0;
-                const float* h0I = set.im[(size_t) e0].data() + k0;
-                const float* h1R = set.re[(size_t) e1].data() + k0;
-                const float* h1I = set.im[(size_t) e1].data() + k0;
+                const float* xR = fdl[(size_t) in].data() + (size_t) blk * (size_t) maxPartitions * blockFloats;
+                const float* xI = xR + lanes;
+                const float* h0R = set.h[(size_t) e0].data() + (size_t) blk * (size_t) set.partitions * blockFloats;
+                const float* h0I = h0R + lanes;
+                const float* h1R = set.h[(size_t) e1].data() + (size_t) blk * (size_t) set.partitions * blockFloats;
+                const float* h1I = h1R + lanes;
                 if (use0 && use1)
                 {
                     macRun<true, true> (xR, xI, h0R, h0I, h1R, h1I, a0r, a0i, a1r, a1i, fdlPos, 0, run1);
@@ -290,7 +299,7 @@ private:
     {
         for (int p = pBegin; p < pEnd; ++p)
         {
-            const size_t xo = (size_t) (p + slotOffset) * binsPad, ho = (size_t) p * binsPad;
+            const size_t xo = (size_t) (p + slotOffset) * blockFloats, ho = (size_t) p * blockFloats;
             for (int j = 0; j < lanes; ++j)
             {
                 const float xr = xR[xo + (size_t) j], xi = xI[xo + (size_t) j];
@@ -316,7 +325,7 @@ private:
 
     juce::dsp::FFT fft { fftOrder };
     int maxPartitions = 1, fdlPos = 0, fill = 0;
-    std::array<std::vector<float>, 2> fdlRe, fdlIm;   // frequency-domain delay line, maxPartitions * binsPad per input
+    std::array<std::vector<float>, 2> fdl;   // frequency-domain delay line per input, maxPartitions slots (layout: see binIndex)
     std::array<std::vector<float>, 2> inBuf, outBuf, fadeBuf;
     std::vector<float> work;
     std::array<std::vector<float>, 2> outWork;        // per output channel: accumulated spectrum, then inverse FFT
