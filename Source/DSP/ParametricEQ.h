@@ -3,6 +3,12 @@
 #include <cmath>
 #include <complex>
 #include <algorithm>
+#if defined (__SSE2__) || defined (_M_X64) || (defined (_M_IX86_FP) && _M_IX86_FP >= 2)
+ #include <emmintrin.h>
+ #define CODEX_EQ_SSE2 1
+#else
+ #define CODEX_EQ_SSE2 0
+#endif
 
 namespace eq
 {
@@ -279,8 +285,7 @@ namespace eq
                 switch (settings[(size_t) b].placement)
                 {
                     case Placement::Stereo:
-                        runStages (f[0], n, left, numSamples);
-                        runStages (f[1], n, right, numSamples);
+                        runStagesStereo (f[0], f[1], n, left, right, numSamples);
                         break;
                     case Placement::Left:  runStages (f[0], n, left, numSamples);  break;
                     case Placement::Right: runStages (f[1], n, right, numSamples); break;
@@ -305,6 +310,66 @@ namespace eq
         }
 
     private:
+       #if CODEX_EQ_SSE2
+        /** L and R in the two lanes of one SSE2 double register, all N stages per sample (independent stages and samples
+            overlap in the CPU). Each lane does exactly what Biquad::process does: same separate multiplies and adds in the
+            same order, the stage output rounded to float before the next stage: bit-identical to the scalar loops. */
+        template <int N>
+        static void runStereoN (std::array<Biquad, maxStages>& fl, std::array<Biquad, maxStages>& fr, float* left, float* right, int numSamples) noexcept
+        {
+            __m128d b0[N], b1[N], b2[N], a1[N], a2[N], s1[N], s2[N];
+            for (int k = 0; k < N; ++k)
+            {
+                const auto& c = fl[(size_t) k].c;
+                b0[k] = _mm_set1_pd (c.b0); b1[k] = _mm_set1_pd (c.b1); b2[k] = _mm_set1_pd (c.b2);
+                a1[k] = _mm_set1_pd (c.a1); a2[k] = _mm_set1_pd (c.a2);
+                s1[k] = _mm_set_pd (fr[(size_t) k].s1, fl[(size_t) k].s1);
+                s2[k] = _mm_set_pd (fr[(size_t) k].s2, fl[(size_t) k].s2);
+            }
+            for (int i = 0; i < numSamples; ++i)
+            {
+                __m128d x = _mm_set_pd ((double) right[i], (double) left[i]);
+                __m128 yf = _mm_setzero_ps();
+                for (int k = 0; k < N; ++k)
+                {
+                    const __m128d y = _mm_add_pd (_mm_mul_pd (b0[k], x), s1[k]);
+                    s1[k] = _mm_add_pd (_mm_sub_pd (_mm_mul_pd (b1[k], x), _mm_mul_pd (a1[k], y)), s2[k]);
+                    s2[k] = _mm_sub_pd (_mm_mul_pd (b2[k], x), _mm_mul_pd (a2[k], y));
+                    yf = _mm_cvtpd_ps (y);              // (float) y, per lane
+                    x = _mm_cvtps_pd (yf);
+                }
+                _mm_store_ss (left + i, yf);
+                _mm_store_ss (right + i, _mm_shuffle_ps (yf, yf, _MM_SHUFFLE (1, 1, 1, 1)));
+            }
+            for (int k = 0; k < N; ++k)
+            {
+                _mm_storel_pd (&fl[(size_t) k].s1, s1[k]); _mm_storeh_pd (&fr[(size_t) k].s1, s1[k]);
+                _mm_storel_pd (&fl[(size_t) k].s2, s2[k]); _mm_storeh_pd (&fr[(size_t) k].s2, s2[k]);
+            }
+        }
+       #endif
+
+        /** A Stereo-placed band: both channels share the coefficients (rebuild writes the same design to both). */
+        static void runStagesStereo (std::array<Biquad, maxStages>& fl, std::array<Biquad, maxStages>& fr, int n, float* left, float* right, int numSamples) noexcept
+        {
+           #if CODEX_EQ_SSE2
+            switch (n)
+            {
+                case 1: runStereoN<1> (fl, fr, left, right, numSamples); return;
+                case 2: runStereoN<2> (fl, fr, left, right, numSamples); return;
+                case 3: runStereoN<3> (fl, fr, left, right, numSamples); return;
+                case 4: runStereoN<4> (fl, fr, left, right, numSamples); return;
+                case 5: runStereoN<5> (fl, fr, left, right, numSamples); return;
+                case 6: runStereoN<6> (fl, fr, left, right, numSamples); return;
+                case 7: runStereoN<7> (fl, fr, left, right, numSamples); return;
+                case 8: runStereoN<8> (fl, fr, left, right, numSamples); return;
+                default: break;
+            }
+           #endif
+            runStages (fl, n, left, numSamples);
+            runStages (fr, n, right, numSamples);
+        }
+
         static void runStages (std::array<Biquad, maxStages>& stages, int n, float* data, int numSamples) noexcept
         {
             for (int st = 0; st < n; ++st)
