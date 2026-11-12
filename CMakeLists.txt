@@ -104,6 +104,14 @@ if(HK_BUILD_TOOLS)
     target_link_libraries(CodexHostTest
         PRIVATE juce::juce_audio_utils juce::juce_audio_processors
         PUBLIC juce::juce_recommended_config_flags)
+    # Renders the easter-egg dancer to a contact sheet (design review)
+    juce_add_console_app(CodexDancerPreview PRODUCT_NAME "CodexDancerPreview")
+    target_sources(CodexDancerPreview PRIVATE tools/DancerPreview.cpp)
+    target_compile_definitions(CodexDancerPreview PRIVATE ${HK_DEFS} JUCE_STANDALONE_APPLICATION=1 JUCE_MODAL_LOOPS_PERMITTED=1)
+    target_link_libraries(CodexDancerPreview
+        PRIVATE CodexAssets juce::juce_audio_utils juce::juce_dsp
+        PUBLIC juce::juce_recommended_config_flags)
+
     if(MINGW)
         target_sources(CodexHostTest PRIVATE cmake/mingw-compat/codex_mingw_compat.cpp)
         target_sources(CodexRender PRIVATE cmake/mingw-compat/codex_mingw_compat.cpp)
