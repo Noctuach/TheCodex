@@ -2,6 +2,8 @@
 #include <juce_dsp/juce_dsp.h>
 #include "ParametricEQ.h"
 #include <cmath>
+#include <cstdint>
+#include <cstring>
 
 /**
     Distortion stage.
@@ -358,6 +360,7 @@ public:
 private:
     void applySettings (bool force)
     {
+        ++shapeVersion;   // mode / curve may change below: every shapeFor memo misses once
         const int os = settings.oversampling == rawOversampling ? -1 : settings.oversampling - 1; // -1 = off
         rawMode = settings.oversampling == rawOversampling;
         const bool rateChanged = os != activeOs || force;
@@ -522,6 +525,9 @@ private:
     void processSamples (float* l, float* r, int n) noexcept
     {
         float* chans[] = { l, r };
+        // mode and curve only change in applySettings (between calls)
+        const AdaaTable* adaaTable = (mode == XShaper || mode == XShaperAsym) ? &curveTable : &fixedTable (mode);
+        const bool adaa = mode != Downsample && mode != Bitcrush && ! rawMode;
         if (filterPos != 0) updateFilterCoefficients (filterCutoff.getCurrentValue());
         for (int i = 0; i < n; ++i)
         {
@@ -540,7 +546,6 @@ private:
                 const float chDrive  = ch == 0 ? d * driveSpread : d / driveSpread;
                 const float chOffset = ch == 0 ? off + offsetSpread : off - offsetSpread;
                 auto& pm = phase[ch];
-                const bool adaa = mode != Downsample && mode != Bitcrush && ! rawMode;
                 // Dry path, phase-matched to the wet path so the Mix knob never comb-filters: the same all-pass phase as
                 // the Linkwitz-Riley Lo / Hi filters, plus the half-sample delay of the anti-aliasing. A bypassed unit stays untouched.
                 float dry = in;
@@ -567,7 +572,7 @@ private:
                 else
                 {
                     // ADAA: average of the curve between the previous and the current input (via its integral)
-                    const AdaaTable& tbl = (mode == XShaper || mode == XShaperAsym) ? curveTable : fixedTable (mode);
+                    const AdaaTable& tbl = *adaaTable;
                     const double v = (double) w * chDrive + chOffset;
                     const double dv = v - adaaPrev[(size_t) ch];
                     const double Fv = tbl.eval (v);
@@ -575,10 +580,10 @@ private:
                     if (std::abs (dv) > 1.0e-4)
                         y = (float) ((Fv - adaaPrevF[(size_t) ch]) / dv);
                     else
-                        y = shapeFor (mode, (float) (0.5 * (v + adaaPrev[(size_t) ch])), &curve);
+                        y = midShape[(size_t) ch].get (mode, (float) (0.5 * (v + adaaPrev[(size_t) ch])), &curve, shapeVersion);
                     adaaPrev[(size_t) ch] = v;
                     adaaPrevF[(size_t) ch] = Fv;
-                    w = harden (y - shapeFor (mode, chOffset, &curve), chr);
+                    w = harden (y - offShape[(size_t) ch].get (mode, chOffset, &curve, shapeVersion), chr);
                 }
                 if (filterPos == 2) w = runFilter (ch, w);
                 if (hiActive)    w = pm.highPassLR2 (w);
@@ -607,6 +612,28 @@ private:
     AdaaTable curveTable;
     bool curveTableBuilt = false, tableChanged = false;
     std::array<double, 2> adaaPrev { 0.0, 0.0 }, adaaPrevF { 0.0, 0.0 };
+
+    /** shapeFor (mode, x, curve) is a pure function: reuse the last result while the argument (bit for bit), the mode and
+        the curve are unchanged (the offset term is constant unless Offset / Spatial move; in silence both ADAA calls are). */
+    struct ShapeMemo
+    {
+        std::uint32_t xBits = 0, version = 0;   // version 0 never matches (shapeVersion starts at 1)
+        float value = 0.0f;
+        inline float get (int m, float x, const Curve* c, std::uint32_t ver) noexcept
+        {
+            std::uint32_t bits;
+            std::memcpy (&bits, &x, sizeof (bits));
+            if (bits != xBits || ver != version)
+            {
+                value = shapeFor (m, x, c);
+                xBits = bits;
+                version = ver;
+            }
+            return value;
+        }
+    };
+    std::array<ShapeMemo, 2> offShape {}, midShape {};
+    std::uint32_t shapeVersion = 1;
     float downsampleHold = 1.0f;
     std::array<int, 2> holdCount { 0, 0 };
     std::array<float, 2> holdValue { 0.0f, 0.0f };
