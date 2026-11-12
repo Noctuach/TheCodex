@@ -1,6 +1,6 @@
 # Contributing to Codex
 
-Thanks for helping make Codex better. Codex is a free hardstyle kick synthesizer; the goal is a tool that genuinely
+Thanks for helping make Codex better. Codex is a free hardstyle kick synthesizer by Nocturnal Audio; the goal is a tool that genuinely
 helps producers.
 
 ## Ground rules

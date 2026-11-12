@@ -1,6 +1,6 @@
 # Codex
 
-**A free hardstyle kick synthesizer.** Codex builds kicks the way they were made before sample packs: a swept oscillator
+**Codex by Nocturnal Audio: a free hardstyle kick synthesizer.** Codex builds kicks the way they were made before sample packs: a swept oscillator
 (or a synthesized 909), distortion, EQ, distortion again, multiband saturation, a multiband compressor and a room reverb.
 There are no samples; every kick is generated in real time, in the key of your track.
 

@@ -6,7 +6,7 @@ Things to settle before publishing Codex.
 - [ ] **Check the name.** "Codex" is a common name, including OpenAI's Codex. Search the plugin stores (KVR,
       Plugin Boutique) and your country's trademark register for existing audio products called Codex.
 - [ ] **Set your developer name.** It's in `CMakeLists.txt` (or pass it with `-D...`):
-  - `CODEX_COMPANY`: shown in DAWs, e.g. "Codex Audio".
+  - `CODEX_COMPANY`: shown in DAWs, e.g. "Nocturnal Audio".
   - `CODEX_BUNDLE_ID`: reverse-DNS, no spaces, e.g. `com.yourname.codex`.
   - `CODEX_MANUFACTURER_CODE`: 4 characters, first letter upper case, unique to you.
   - Do not change these or `PLUGIN_CODE` after release, or DAWs will treat it as a different plugin.
