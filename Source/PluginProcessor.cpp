@@ -8,6 +8,7 @@ CodexProcessor::CodexProcessor()
     startTimerHz (20);   // applies latency changes to the host from the message thread
     engine = p (ID::engine); model909 = p (ID::model909); tune909 = p (ID::tune909);
     attack909 = p (ID::attack909); decay909 = p (ID::decay909);
+    tuneTime909 = p (ID::tuneTime909); accent909 = p (ID::accent909); overload909 = p (ID::overload909); hold909 = p (ID::hold909);
     key = p (ID::key); octave = p (ID::octave); keyMode = p (ID::keyMode);
 
     wave = p (ID::wave); tune = p (ID::tune); phase = p (ID::phase);
@@ -197,6 +198,10 @@ void CodexProcessor::updateParameters()
     s.tune909          = tune909->load();
     s.attack909        = attack909->load();
     s.decay909         = decay909->load();
+    s.tuneTime909      = tuneTime909->load();
+    s.accent909        = accent909->load();
+    s.overload909      = overload909->load();
+    s.hold909          = hold909->load() > 0.5f;
     s.wave             = (int) wave->load();
     s.tuneSemis        = tune->load();
     s.startPhaseDeg    = phase->load();
@@ -207,6 +212,7 @@ void CodexProcessor::updateParameters()
     const float tailMul     = std::exp2 (mTail * 2.0f);           // decay / release x0.5 .. x2
     s.decay909         = juce::jlimit (0.0f, 1.0f, s.decay909 + mTail * 0.5f);
     s.attack909        = juce::jlimit (0.0f, 1.0f, attack909->load() + mPunch * 0.6f);
+    s.tuneTime909      = juce::jlimit (0.0f, 1.0f, s.tuneTime909 - mPunch * 0.4f);   // more punch: faster 909 sweep
     s.pitchAmountSemis = juce::jlimit (0.0f, 96.0f, pAmount->load() * punchAmount);
     s.clickLevel       = juce::jlimit (0.0f, 1.0f, clickLevel->load() * (1.0f + mPunch * 2.0f));
     s.clickDecayMs     = clickDecay->load();
@@ -405,6 +411,7 @@ void CodexProcessor::handleMidi (const juce::MidiMessage& m, int positionInChunk
         // velocity scales the voice from this exact sample (before the effects, like a harder or softer hit)
         const float amount = velocityParam->load();
         voice.velocityGain = 1.0f - amount * (1.0f - m.getFloatVelocity());
+        voice.hitVelocity = m.getFloatVelocity();
         voice.noteOn (m.getNoteNumber(), (float) (followMidi ? m.getNoteNumber() : getKeyNote()));
     }
     else if (m.isNoteOff())
@@ -421,7 +428,7 @@ void CodexProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiB
 
     // GUI preview button always plays the selected key (uses an out-of-range note id so MIDI can't cut it)
     constexpr int previewId = 128;
-    if (previewOn.exchange (false))  { voice.noteOn (previewId, (float) getKeyNote()); captureArmAt = 0; }
+    if (previewOn.exchange (false))  { voice.hitVelocity = 1.0f; voice.noteOn (previewId, (float) getKeyNote()); captureArmAt = 0; }
     if (previewOff.exchange (false)) voice.noteOff (previewId);
 
     const int numSamples  = buffer.getNumSamples();

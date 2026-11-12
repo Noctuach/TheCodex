@@ -32,6 +32,11 @@ public:
 
         int   model909 = 0;
         float tune909 = 0.5f, attack909 = 0.5f, decay909 = 0.5f;
+        // Hardware details of the original and its classic mods (see docs/RESEARCH.md):
+        float tuneTime909 = 0.5f;   // the original Tune knob: speed of the pitch envelope (0.5 = stock)
+        float accent909 = 0.0f;     // accent amount for hits with velocity >= 100
+        float overload909 = 0.0f;   // overload of the triangle-to-sine waveshaper
+        bool  hold909 = false;      // decay hold: no body decay while the note is held
 
         // Clean sub layer: a sine on the oscillator's own phase (so it follows the sweep and stays aligned),
         // faded in after the punch. Mixed in after the effects chain by the processor.
@@ -44,6 +49,8 @@ public:
     float* hitTimeOut = nullptr;
     /** Level of the current note from its velocity (set before noteOn). */
     float velocityGain = 1.0f;
+    /** Raw velocity (0..1) of the current note, set before noteOn: 909 accent. */
+    float hitVelocity = 1.0f;
 
     CurveEnvelope pitchEnv, ampEnv;
     DrawEnvelope pitchDraw, ampDraw;
@@ -84,8 +91,13 @@ public:
             const float decayScale = std::exp2 ((s.decay909 - 0.5f) * 4.0f);       // 0.25x .. 4x
             const float t60Samples = m.decayMs * decayScale * 0.001f * sr;
             ampMul909   = std::exp (-6.9078f / std::max (1.0f, t60Samples));
-            fastMul909  = mulFor (m.fastMs);
-            slowMul909  = mulFor (m.slowMs);
+            // The original Tune knob sets how fast the pitch falls (the depth is fixed on a stock 909)
+            const float timeScale = std::exp2 ((s.tuneTime909 - 0.5f) * 2.5f);    // 0.42x .. 2.4x
+            fastMul909  = mulFor (m.fastMs * std::sqrt (timeScale));
+            slowMul909  = mulFor (m.slowMs * timeScale);
+            // Overload pushes the waveshaper towards a square (odd harmonics), up to 12x the model's drive
+            drive909    = m.drive * std::exp (s.overload909 * 2.4849f);
+            hold909     = s.hold909;
             sweepScale  = std::exp2 ((s.tune909 - 0.5f) * 2.0f);                   // 0.5x .. 2x
             const float attackScale = s.attack909 * 2.0f;                          // 0 .. 2x
             pulseLevel  = m.click * attackScale;
@@ -117,6 +129,10 @@ public:
         clickEnv = 1.0f;
         pulseEnv = 1.0f;
         env909 = fast909 = slow909 = 1.0f;
+        noteHeld = true;
+        // Accent (velocity >= 100): the envelope is hit harder, so the body is louder (and drives the waveshaper
+        // harder) and the attack is stronger, as on the original
+        accentGain = 1.0f + (hitVelocity >= 100.0f / 127.0f ? 0.8f * settings.accent909 : 0.0f);
         subTime = 0.0f;
         hitClock = 0.0f;
     }
@@ -125,12 +141,14 @@ public:
     {
         if (midiNote != currentNote)
             return;
+        noteHeld = false;
         pitchEnv.noteOff();
         ampEnv.noteOff();
     }
 
     void allNotesOff()
     {
+        noteHeld = false;
         pitchEnv.noteOff();
         ampEnv.noteOff();
     }
@@ -203,7 +221,8 @@ private:
 
     void render909 (float* out, int numSamples) noexcept
     {
-        const float driveNorm = model.drive > 1.0f ? 1.0f / std::tanh (model.drive) : 1.0f;
+        const float driveNorm = drive909 > 1.0f ? 1.0f / std::tanh (drive909) : 1.0f;
+        const float attackAccent = 1.0f + 1.25f * (accentGain - 1.0f);
 
         for (int i = 0; i < numSamples; ++i)
         {
@@ -227,16 +246,17 @@ private:
             fast909 *= fastMul909;
             slow909 *= slowMul909;
 
-            body *= env909;
-            env909 *= ampMul909;
+            body *= env909 * accentGain;
+            if (! (hold909 && noteHeld))
+                env909 *= ampMul909;
 
-            if (model.drive > 1.0f)
-                body = std::tanh (body * model.drive) * driveNorm;
+            if (drive909 > 1.0f)
+                body = std::tanh (body * drive909) * driveNorm;
 
             float attack = 0.0f;
             if (clickEnv > 1.0e-5f)
             {
-                attack = pulseEnv * pulseLevel + nextNoise() * clickEnv * noiseLevel;
+                attack = (pulseEnv * pulseLevel + nextNoise() * clickEnv * noiseLevel) * attackAccent;
                 pulseEnv *= pulseMul;
                 clickEnv *= clickMul;
             }
@@ -288,7 +308,8 @@ private:
 
     float clickEnv = 0.0f, clickMul = 0.99f, noiseLevel = 0.0f;
     float pulseEnv = 0.0f, pulseMul = 0.9f, pulseLevel = 0.0f;
-    float env909 = 0.0f, ampMul909 = 0.999f;
+    float env909 = 0.0f, ampMul909 = 0.999f, drive909 = 1.0f, accentGain = 1.0f;
+    bool hold909 = false, noteHeld = false;
     float fast909 = 0.0f, fastMul909 = 0.99f, slow909 = 0.0f, slowMul909 = 0.99f, sweepScale = 1.0f;
     float hpCoeff = 0.5f, hpState = 0.0f, hpPrevIn = 0.0f;
     juce::Random random;

@@ -16,7 +16,7 @@ namespace
 MainView::MainView (CodexProcessor& p, PropertiesFile* settingsFile)
     : proc (p), settings (settingsFile),
       presetBar (p.presets),
-      tunerAnalyser (p), tunerChip (tunerAnalyser), chainStrip (p.apvts),
+      tunerAnalyser (p), tunerChip (tunerAnalyser), chainStrip (p.apvts), sweep909 (p.apvts),
       engineSwitch (*p.apvts.getParameter (ID::engine), { "SYNTH", "909" }, Help::forParameter (ID::engine)),
       pitchEnvDisplay (p.apvts, ID::pAttack, ID::pDecay, ID::pSustain, ID::pRelease, ID::pCurve, Colours_::accent2),
       ampEnvDisplay (p.apvts, ID::aAttack, ID::aDecay, ID::aSustain, ID::aRelease, ID::aCurve, Colours_::accent),
@@ -80,7 +80,16 @@ MainView::MainView (CodexProcessor& p, PropertiesFile* settingsFile)
     clickLevel.attach (s, ID::clickLevel);
     clickDecay.attach (s, ID::clickDecay);
     clickTone.attach (s, ID::clickTone);
-    tune909.attach (s, ID::tune909);
+    tune909.attach (s, ID::tuneTime909);   // the original Tune knob: speed of the pitch drop
+    depth909.attach (s, ID::tune909);      // Tune Depth (mod): how far it drops
+    accent909.attach (s, ID::accent909);
+    overload909.attach (s, ID::overload909);
+    hold909.setComponentID ("pill");
+    hold909.setClickingTogglesState (true);
+    hold909.setTooltip (Help::forParameter (ID::hold909));
+    hold909Attachment = std::make_unique<AudioProcessorValueTreeState::ButtonAttachment> (s, ID::hold909, hold909);
+    for (Component* c : std::initializer_list<Component*> { &depth909, &accent909, &overload909, &hold909, &sweep909 })
+        addChildComponent (c);
     attack909.attach (s, ID::attack909);
     decay909.attach (s, ID::decay909);
     engineSwitch.onChange = [this] (int) { updateEngineView(); };
@@ -310,8 +319,13 @@ void MainView::updateEngineView()
 
     for (Component* c : std::initializer_list<Component*> { &wave, &clickLevel, &clickDecay, &clickTone })
         c->setVisible (kickTab && ! is909);
-    for (Component* c : std::initializer_list<Component*> { &model, &tune909, &attack909, &decay909 })
+    for (Component* c : std::initializer_list<Component*> { &model, &tune909, &attack909, &decay909,
+                                                             &depth909, &accent909, &overload909, &hold909, &sweep909 })
         c->setVisible (kickTab && is909);
+    // with the 909 engine the pitch panel holds the 909's own sweep and circuit controls
+    for (Component* c : std::initializer_list<Component*> { &pitchEnvDisplay, &pitchDrawEditor, &pAmount, &pAttack, &pDecay,
+                                                             &pSustain, &pRelease, &pCurve })
+        if (is909) c->setVisible (false);
 
     // Grid:  [combo] [a] [b] / [c] [d] [e]
     auto& cell = sourceCells;
@@ -331,8 +345,8 @@ void MainView::updateEngineView()
 
     // Envelope modes: ADSR or Draw (breakpoints). In Draw mode only Amount (pitch) and Release (amp) still apply.
     const bool pitchDraw = pitchModeSwitch.getIndex() == 1, ampDraw = ampModeSwitch.getIndex() == 1 && ! is909;
-    pitchEnvDisplay.setVisible (kickTab && ! pitchDraw);
-    pitchDrawEditor.setVisible (kickTab && pitchDraw);
+    pitchEnvDisplay.setVisible (kickTab && ! pitchDraw && ! is909);
+    pitchDrawEditor.setVisible (kickTab && pitchDraw && ! is909);
     ampEnvDisplay.setVisible (kickTab && ! ampDraw);
     ampDrawEditor.setVisible (kickTab && ampDraw);
     pitchModeSwitch.setVisible (kickTab && ! is909);
@@ -348,7 +362,7 @@ void MainView::updateEngineView()
         enable (*c, ! is909 && ! ampDraw, 0.3f);
     enable (aAttack, ! ampDraw, 0.3f);
     // aCurve shapes the release in both modes
-    engineNotice.setVisible (is909 && kickTab);
+    engineNotice.setVisible (false);   // replaced by the 909 sweep display and circuit controls
     repaint();
 }
 
@@ -480,7 +494,7 @@ void MainView::paint (Graphics& g)
     if (currentTab == 0)
     {
         drawSectionPanel (g, sourceArea, "SOURCE", Colours_::accent);
-        drawSectionPanel (g, pitchArea, "PITCH ENVELOPE", Colours_::accent2);
+        drawSectionPanel (g, pitchArea, engineSwitch.getIndex() == 1 ? "909 PITCH SWEEP  /  CIRCUIT" : "PITCH ENVELOPE", Colours_::accent2);
         drawSectionPanel (g, ampArea, engineSwitch.getIndex() == 1 ? "AMP GATE" : "AMP ENVELOPE", Colours_::accent);
         drawSectionPanel (g, eqArea, "EQUALIZER", Colours_::accent);
         const bool subOn = proc.apvts.getRawParameterValue (ID::subOn)->load() > 0.5f;
@@ -651,6 +665,16 @@ void MainView::resized()
     engineNotice.setBounds (pitchArea.withTrimmedTop (29).reduced (1));
     layoutEnv (pitchArea, pitchEnvDisplay, { &pAmount, &pAttack, &pDecay, &pSustain, &pRelease, &pCurve });
     layoutEnv (ampArea, ampEnvDisplay, { &aAttack, &aDecay, &aSustain, &aRelease, &aCurve });
+    {
+        // 909 circuit controls in the pitch panel: the sweep display over the envelope display, four cells below
+        sweep909.setBounds (pitchEnvDisplay.getBounds());
+        auto row = pAmount.getBounds().getUnion (pCurve.getBounds());
+        const int w = row.getWidth() / 4;
+        depth909.setBounds (row.removeFromLeft (w));
+        accent909.setBounds (row.removeFromLeft (w));
+        overload909.setBounds (row.removeFromLeft (w));
+        hold909.setBounds (row.withSizeKeepingCentre (jmin (row.getWidth() - 12, 118), 30));
+    }
     pitchDrawEditor.setBounds (pitchEnvDisplay.getBounds());
     ampDrawEditor.setBounds (ampEnvDisplay.getBounds());
     pitchModeSwitch.setBounds (pitchArea.withHeight (28).removeFromRight (116).reduced (5, 4));

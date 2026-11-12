@@ -69,7 +69,11 @@ AudioProcessorValueTreeState::ParameterLayout Params::createLayout()
     StringArray models;
     for (const auto& m : kick909Models()) models.add (m.name);
     addChoice (l, ID::model909, "909 Model", models, 0);
-    addFloat (l, ID::tune909, "909 Tune", { 0.0f, 1.0f }, 0.5f, pctText);
+    addFloat (l, ID::tune909, "909 Tune Depth", { 0.0f, 1.0f }, 0.5f, pctText);
+    addFloat (l, ID::tuneTime909, "909 Tune", { 0.0f, 1.0f }, 0.5f, pctText);
+    addFloat (l, ID::accent909, "909 Accent", { 0.0f, 1.0f }, 0.0f, pctText);
+    addFloat (l, ID::overload909, "909 Overload", { 0.0f, 1.0f }, 0.0f, pctText);
+    addBool (l, ID::hold909, "909 Decay Hold", false);
     addFloat (l, ID::attack909, "909 Attack", { 0.0f, 1.0f }, 0.5f, pctText);
     addFloat (l, ID::decay909, "909 Decay", { 0.0f, 1.0f }, 0.5f, pctText);
 

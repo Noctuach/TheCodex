@@ -8,6 +8,21 @@ Background for the design of Codex's 909 engine, distortion chain and key handli
 - Part of the 909's punch comes from a slightly **longer pitch-envelope decay** than an 808 ([MusicRadar](https://musicradar.com/how-to/how-to-recreate-classic-analogue-drum-sounds-in-your-daw-and-with-hardware)).
 - Typical recreations sweep from about **150–200 Hz down to 45–55 Hz** over 30–60 ms, with a 300–450 ms amp decay and a short 1–5 ms click ([MusicRadar](https://musicradar.com/how-to/how-to-recreate-classic-analogue-drum-sounds-in-your-daw-and-with-hardware), [DEV Community](https://dev.to/sendotltd/sample-free-drum-synthesis-in-web-audio-building-kick-snare-and-hi-hat-from-oscillators-in-60-2c0k)).
 
+### Second pass: the controls of the original and its classic mods
+- **Tune sets the speed of the pitch drop, not its depth.** On a stock 909, Tune "controls the decay time of a short falling pitch envelope"; the amount of sweep is fixed. Colin Fraser's mod adds a *Tune Depth* control, where halfway gives the stock amount, and a separate *Pitch* for the oscillator ([Colin Fraser, TR-909 sound mods](http://colinfraser.com/tr909/909mods/909mods.htm); Robin Whittle's [TR-909 sound mods](https://www.firstpr.com.au/rwi/tr-909/TR-909-Sound-Mods.pdf), building on Fraser's work). The 9090 clone exposes the same three: Pitch, Tune Decay (the old Tune) and Tune Depth ([9090](https://nuxx.net/wiki_archive/A/9090)). Tiptop's BD909 calls the original knob *Tune Decay* and adds *Tune Attack* ([BD909 manual](https://www.manualsdir.com/manuals/742689/tiptop-bd909-bass-drum.html?page=2)).
+- **Accent** hits the envelope circuit harder: the drum is louder and has "slightly more attack". The original has one global accent amount ([Tiptop BD909](https://www.kraftmusic.com/tiptop-audio-bd909-analog-bass-drum-module.html)).
+- **The waveshaper can be overloaded.** The triangle is shaped into a sine; the BD909's *Overload* drives that shaper for "more odd harmonics… more punch… up to total destruction", and Fraser's *Drive* mod moves the waveform towards a square ([BD909 manual](https://manualmachine.com/tiptop/bd909/1807497-user-manual), [MATRIXSYNTH](https://www.matrixsynth.com/2010/06/roland-tr-909-w-modded-bass-drum.html)). Even after the shaper the original keeps a lot of harmonics ([Reaktor user library](https://www.native-instruments.com/reaktor-community/reaktor-user-library/entry/show/9877/)).
+- **Decay extension and hold.** Fraser extends Decay towards 808-like booms; modded units add a decay-hold switch ([Reverb modded 909 pack](https://reverb.com/en-br/news/modded-roland-tr-909-rhythm-composer-sample-pack-reverb-software-launch)). Gabber producers started from a long-decay 909 and pushed it into clipping ([Renoise forum](https://forum.renoise.com/t/old-school-gabber-kicks-production-method/43338)).
+- The attack is a short impulse plus noise with its own envelope, separate from the body ([Gearspace](https://gearspace.com/threads/synthesizing-a-tr-909-kick-drum.1099922/)); the noise generator is shared with the snare, clap and toms ([electro-music forum](https://electro-music.com/forum/post-437476.html)).
+- Not found: a published measurement of the stock sweep in Hz, or the exact accent curve. The models stay my own starting points.
+
+**In Codex (909 engine):**
+- **Tune** now behaves like the original: it sets the speed of the pitch drop (0.42x to 2.4x the model's time). The old knob, which set the depth, is **Depth** (the Fraser / Whittle mod; centre = stock). Saved sessions are unchanged.
+- **Accent**: hits with velocity 100 or more are accented by up to about +5 dB, with a stronger click and more drive into the waveshaper.
+- **Overload**: drives the waveshaper up to 12x towards a square.
+- **Decay Hold**: the body does not decay while the note is held.
+- These sit in the pitch panel (unused by the 909 engine before), under a live drawing of the sweep that shows when it lands on the root.
+
 **In Codex:** the 909 engine is a shaped triangle (shape 1.0 = sine) with a two-stage exponential pitch drop, a pulse + high-passed noise attack, and an exponential decay. Its front panel copies the original's **Tune / Attack / Decay**. One deliberate change from the hardware: the sweep **lands exactly on the root** within about 4 time constants, so the tail is in key (the tuner confirms ±3 cents).
 
 ### 909 models

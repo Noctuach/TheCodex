@@ -6,7 +6,11 @@ namespace ID
     // Source / engine
     inline const juce::String engine     { "engine" };
     inline const juce::String model909   { "model909" };
-    inline const juce::String tune909    { "tune909" };
+    inline const juce::String tune909    { "tune909" };     // sweep depth ("Tune Depth" mod); the original Tune is tuneTime909
+    inline const juce::String tuneTime909 { "t909Time" };   // pitch-envelope speed: the original 909 Tune knob
+    inline const juce::String accent909   { "accent909" };  // accent amount (hits with velocity >= 100 are accented)
+    inline const juce::String overload909 { "ovl909" };     // waveshaper overload (Tiptop BD909 / Colin Fraser drive mod)
+    inline const juce::String hold909     { "hold909" };    // decay hold: the body does not decay while the note is held
     inline const juce::String attack909  { "attack909" };
     inline const juce::String decay909   { "decay909" };
 

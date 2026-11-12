@@ -16,6 +16,7 @@
 #include "SaturationView.h"
 #include "Overlays.h"
 #include "ChainStrip.h"
+#include "Sweep909Display.h"
 
 class CodexProcessor;
 
@@ -71,6 +72,11 @@ private:
     ChoiceBox wave { "Wave" }, model { "909 Model" };
     Knob tune { "Fine Tune" }, phase { "Phase" }, clickLevel { "Click" }, clickDecay { "Click Decay" }, clickTone { "Click Tone" };
     Knob tune909 { "Tune" }, attack909 { "Attack" }, decay909 { "Decay" };
+    // 909 circuit (shown in the pitch panel with the 909 engine): Tune Depth, Accent, Overload, Decay Hold
+    Knob depth909 { "Depth" }, accent909 { "Accent" }, overload909 { "Overload" };
+    juce::TextButton hold909 { "DECAY HOLD" };
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> hold909Attachment;
+    Sweep909Display sweep909;
 
     // Envelopes
     EnvelopeDisplay pitchEnvDisplay, ampEnvDisplay;

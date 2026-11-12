@@ -46,6 +46,46 @@ static juce::AudioBuffer<float> render (CodexProcessor& proc, int hits, int midi
     return out;
 }
 
+/** One note with a given velocity and length (seconds), rendered for totalSec. */
+static juce::AudioBuffer<float> renderNote (CodexProcessor& proc, int velocity, double holdSec, double totalSec)
+{
+    proc.setRateAndBufferSizeDetails (sr, block);
+    proc.prepareToPlay (sr, block);
+    const int total = (int) (totalSec * sr) / block * block, off = (int) (holdSec * sr);
+    juce::AudioBuffer<float> out (2, total), buf (2, block);
+    for (int pos = 0; pos < total; pos += block)
+    {
+        juce::MidiBuffer midi;
+        if (pos == 0) midi.addEvent (juce::MidiMessage::noteOn (1, 60, (juce::uint8) velocity), 0);
+        if (off >= pos && off < pos + block) midi.addEvent (juce::MidiMessage::noteOff (1, 60), off - pos);
+        proc.processBlock (buf, midi);
+        for (int ch = 0; ch < 2; ++ch) out.copyFrom (ch, pos, buf, ch, 0, block);
+    }
+    return out;
+}
+
+/** Average frequency from rising zero crossings of the left channel between t0 and t0 + len (seconds). */
+static float zeroCrossHz (const juce::AudioBuffer<float>& b, double t0, double len)
+{
+    const int s0 = (int) (t0 * sr), s1 = std::min (b.getNumSamples(), (int) ((t0 + len) * sr));
+    int first = -1, last = -1, count = 0;
+    for (int i = s0 + 1; i < s1; ++i)
+        if (b.getSample (0, i - 1) < 0.0f && b.getSample (0, i) >= 0.0f)
+        {
+            if (first < 0) first = i; else ++count;
+            last = i;
+        }
+    return count > 0 ? (float) (count * sr / (last - first)) : 0.0f;
+}
+
+static float rmsDb (const juce::AudioBuffer<float>& b, double t0, double len)
+{
+    const int s0 = (int) (t0 * sr), n = std::min ((int) (len * sr), b.getNumSamples() - s0);
+    double e = 0.0;
+    for (int i = 0; i < n; ++i) e += b.getSample (0, s0 + i) * b.getSample (0, s0 + i);
+    return juce::Decibels::gainToDecibels ((float) std::sqrt (e / std::max (1, n)), -120.0f);
+}
+
 // Same approach as the GUI tuner: decimate to ~6 kHz and run the detector on the tail.
 /** Fundamental by a high-resolution FFT (Hann, zero-padded, parabolic peak) between 30 and 120 Hz: an independent
     reference for the time-domain pitch detector. */
@@ -1019,6 +1059,70 @@ int main (int argc, char** argv)
                   << juce::String (around / juce::jmax (1.0e-6f, ref), 2) << ", saved order " << restored << ", old session -> "
                   << chain::describe (legacy) << "\n";
         std::cout << "Module order checks: " << (bad == 0 ? "OK" : "FAILED") << "\n";
+        failures += bad;
+        proc.presets.loadPreset (0);
+    }
+
+    // ---- 909 hardware behaviour: Tune = sweep speed, Depth, Accent, Overload, Decay Hold ----
+    {
+        int bad = 0;
+        auto clean909 = [&]
+        {
+            proc.presets.loadPreset (7);   // 909 Clean: no distortion
+            setParam (proc, ID::velocity, 0.0f);   // velocity does not scale the level, so accent is isolated
+        };
+        // Tune: slower settings keep the pitch higher for longer
+        float early[3] {};
+        for (int t = 0; t < 3; ++t)
+        {
+            clean909();
+            setParam (proc, ID::tuneTime909, 0.5f * (float) t);
+            setParam (proc, ID::attack909, 0.0f);
+            early[t] = zeroCrossHz (renderNote (proc, 127, 0.4, 0.5), 0.015, 0.05);
+        }
+        if (! (early[0] < early[1] && early[1] < early[2])) ++bad;
+        // Depth: no change to the speed, more depth = higher start
+        clean909(); setParam (proc, ID::tune909, 0.0f); setParam (proc, ID::attack909, 0.0f);   // no click in the window
+        const float shallow = zeroCrossHz (renderNote (proc, 127, 0.4, 0.5), 0.002, 0.05);
+        clean909(); setParam (proc, ID::tune909, 1.0f); setParam (proc, ID::attack909, 0.0f);
+        const float deep = zeroCrossHz (renderNote (proc, 127, 0.4, 0.5), 0.002, 0.05);
+        if (shallow <= 0.0f || deep < shallow * 1.3f) ++bad;
+        // Accent: velocity >= 100 is louder with accent up; below 100, or with accent at 0, nothing changes
+        clean909(); setParam (proc, ID::accent909, 1.0f);
+        const float accented = rmsDb (renderNote (proc, 127, 0.4, 0.5), 0.0, 0.1);
+        const float plain = rmsDb (renderNote (proc, 90, 0.4, 0.5), 0.0, 0.1);
+        clean909();
+        const float off = rmsDb (renderNote (proc, 127, 0.4, 0.5), 0.0, 0.1);
+        if (accented - plain < 3.0f || std::abs (off - plain) > 0.1f) ++bad;
+        // Overload: squarer body (lower crest factor) in the tail
+        auto crest = [] (const juce::AudioBuffer<float>& b)
+        {
+            const int s0 = (int) (0.12 * sr), n = (int) (0.1 * sr);
+            return juce::Decibels::gainToDecibels (b.getMagnitude (0, s0, n)) - rmsDb (b, 0.12, 0.1);
+        };
+        clean909();
+        const float crestClean = crest (renderNote (proc, 127, 0.4, 0.5));
+        clean909(); setParam (proc, ID::overload909, 1.0f);
+        const auto loud = renderNote (proc, 127, 0.4, 0.5);
+        const float crestOver = crest (loud);
+        bool finite = true;
+        for (int i = 0; i < loud.getNumSamples(); ++i) finite &= std::isfinite (loud.getSample (0, i)) && std::abs (loud.getSample (0, i)) < 4.0f;
+        if (crestOver > crestClean - 1.0f || ! finite) ++bad;
+        // Decay Hold: the body stays up while the note is held
+        clean909();
+        const auto normal = renderNote (proc, 127, 1.0, 1.2);
+        clean909(); setParam (proc, ID::hold909, 1.0f);
+        const auto held = renderNote (proc, 127, 1.0, 1.2);
+        const float dropNormal = rmsDb (normal, 0.15, 0.05) - rmsDb (normal, 0.85, 0.05);
+        const float dropHeld = rmsDb (held, 0.15, 0.05) - rmsDb (held, 0.85, 0.05);
+        if (dropHeld > 3.0f || dropNormal < 15.0f) ++bad;
+
+        std::cout << "\n909 hardware: Tune (speed) 15-65 ms " << juce::String (early[0], 1) << " / " << juce::String (early[1], 1) << " / "
+                  << juce::String (early[2], 1) << " Hz, Depth start " << juce::roundToInt (shallow) << " -> " << juce::roundToInt (deep)
+                  << " Hz, Accent " << juce::String (accented - plain, 1) << " dB, Overload crest " << juce::String (crestClean, 1) << " -> "
+                  << juce::String (crestOver, 1) << " dB, Decay Hold 0.15 -> 0.85 s " << juce::String (dropNormal, 1) << " -> "
+                  << juce::String (dropHeld, 1) << " dB\n";
+        std::cout << "909 hardware checks: " << (bad == 0 ? "OK" : "FAILED") << "\n";
         failures += bad;
         proc.presets.loadPreset (0);
     }

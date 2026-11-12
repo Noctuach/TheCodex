@@ -10,7 +10,11 @@ namespace Help
         static const std::map<juce::String, juce::String> tips {
             { ID::engine,     "Engine: SYNTH builds the kick from an oscillator and two ADSR envelopes. 909 is a synthesized 909-style bass drum with its own pitch sweep." },
             { ID::model909,   "909 Model: Starting character for the 909 engine, from a stock 909 to gabber and early-hardstyle variations." },
-            { ID::tune909,    "909 Tune: How far the pitch sweeps down at the start of the hit, like the Tune knob on the original machine. Does not change the root key." },
+            { ID::tuneTime909, "909 Tune: How fast the pitch falls from the hit to the root, like the Tune knob on the original machine (it sets the pitch envelope's decay time). Does not change the root key." },
+            { ID::tune909,    "909 Tune Depth: How far the pitch sweeps down (the classic Colin Fraser / Robin Whittle mod; centre = the stock amount). Does not change the root key." },
+            { ID::accent909,  "909 Accent: Hits with velocity 100 or more are accented: louder, with more attack, and driving the waveshaper harder, as on the original (one global accent amount)." },
+            { ID::overload909, "909 Overload: Overdrives the triangle-to-sine waveshaper towards a square wave (odd harmonics): punchier in small amounts, destroyed at the top (Tiptop BD909 Overload / Fraser drive mod)." },
+            { ID::hold909,    "909 Decay Hold: The body does not decay while the note is held, then decays at the 909's rate after note-off (modded-909 decay hold). Note length becomes tail length." },
             { ID::attack909,  "909 Attack: Level of the click at the start of the hit (pulse + noise burst)." },
             { ID::decay909,   "909 Decay: Length of the 909's own volume decay." },
             { ID::key,        "Key: Root note of the kick, F to E (F1 = 43.65 Hz up to E2 = 82.41 Hz). Set it to the key of your track." },

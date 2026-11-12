@@ -163,6 +163,7 @@ private:
     std::atomic<float>* p (const juce::String& id) { return apvts.getRawParameterValue (id); }
 
     std::atomic<float> *engine, *model909, *tune909, *attack909, *decay909, *key, *octave, *keyMode;
+    std::atomic<float> *tuneTime909, *accent909, *overload909, *hold909;
     std::atomic<float> *wave, *tune, *phase, *clickLevel, *clickDecay, *clickTone;
     std::atomic<float> *pAmount, *pAttack, *pDecay, *pSustain, *pRelease, *pCurve;
     std::atomic<float> *aAttack, *aDecay, *aSustain, *aRelease, *aCurve;
