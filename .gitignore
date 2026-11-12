@@ -8,3 +8,5 @@ dist/
 build-win/
 build-win2/
 build-asan/
+.claude/
+build-dancer/
