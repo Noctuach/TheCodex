@@ -17,6 +17,17 @@ All notable changes to Codex. Versions follow [Semantic Versioning](https://semv
 - Premium finish: machined knobs (lit body, drop shadow, glowing value arc), panels with a soft shadow, lit top edge and an accent marker, a fading sun-orange line under the header, glowing tab underline and selected buttons.
 - Space Mix keeps the dry kick at full level up to 50 % (it used to fall to -3 dB at 50 % and silence at 100 %, which made the kick fade when the reverb was turned up).
 
+### Changed (readability)
+- Readability and scaling pass:
+  - Text: a minimum text size (11.5 px at 100 %), and a new muted tone so small text that carries information reaches about 4.5:1 contrast. Disabled controls are dimmed once instead of twice, so they read as off but stay legible.
+  - Sharper lines: thin lines and borders snap to whole screen pixels at every UI size, so they stay sharp at 75 % and 150 %.
+  - Menus and tooltips: popup menus and tooltips no longer shrink with small UI sizes.
+  - Window size: the smallest size is now 75 % (60 % only when the screen is too small for 75 %). The window never opens larger than the screen, and Windows DPI scaling is taken into account. The Size menu ticks the current size after a drag-resize and has a new Fit to Screen entry.
+  - Compressor: the gain-change pane no longer shows a solid red line at 0 dB, and the threshold readout no longer crosses the dB scale.
+  - Quick Guide and About: larger body text.
+  - Larger click targets for the power buttons, the M/S/B badges and add-band.
+  - Several open plug-in instances share one settings file.
+
 ### Fixed
 - Linux: a rare crash of hosts built on JUCE (pluginval among them) when the last Codex instance was removed. The cause is a use-after-free in JUCE's Linux VST3 host run loop, reproduced under AddressSanitizer. Codex no longer runs an always-on 20 Hz timer, which made it about twice as likely; latency changes are now sent to the host only when they happen. CI retries pluginval once on Linux if, and only if, the validator segfaults.
 

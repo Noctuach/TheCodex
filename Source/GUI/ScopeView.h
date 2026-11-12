@@ -74,7 +74,7 @@ class ScopePanel : public juce::Component, public juce::SettableTooltipClient
 {
 public:
     explicit ScopePanel (const juce::String& t) : title (t) {}
-    void paint (juce::Graphics& g) override { drawSectionPanel (g, getLocalBounds(), title, Colours_::accent); paintContent (g, content()); }
+    void paint (juce::Graphics& g) override { drawSectionPanel (g, *this, getLocalBounds(), title, Colours_::accent); paintContent (g, content()); }
 
 protected:
     virtual void paintContent (juce::Graphics&, juce::Rectangle<int>) {}
@@ -83,12 +83,12 @@ protected:
     {
         return getLocalBounds().withHeight (28).withTrimmedRight (fromRight).removeFromRight (width).reduced (0, 4);
     }
-    static void plotBackground (juce::Graphics& g, juce::Rectangle<float> r)
+    void plotBackground (juce::Graphics& g, juce::Rectangle<float> r) const
     {
         g.setColour (Colours_::display);
         g.fillRoundedRectangle (r, 6.0f);
         g.setColour (Colours_::outline);
-        g.drawRoundedRectangle (r.reduced (0.5f), 6.0f, 1.0f);
+        Px::Snap (g, *this).border (r, 6.0f);
     }
     juce::String title;
 };
@@ -148,26 +148,23 @@ private:
         const float ms = seconds * 1000.0f;
         const float step = ms <= 120 ? 10.0f : ms <= 300 ? 25.0f : ms <= 600 ? 50.0f : ms <= 1100 ? 100.0f : 200.0f;
 
-        g.setFont (Fonts::label (10.5f, 0.1f));
+        const Px::Snap px (g, *this);
         for (float t = step; t < ms; t += step)
         {
             const float x = plot.getX() + plot.getWidth() * (hit ? t / ms : 1.0f - t / ms);
             const bool major = std::fmod (t, step * 2.0f) < 0.01f;
             g.setColour (major ? Colours_::grid.brighter (0.4f) : Colours_::grid);
-            g.drawVerticalLine ((int) x, plot.getY(), plot.getBottom());
+            px.vline (x, plot.getY(), plot.getBottom());
             if (major)
-            {
-                g.setColour (Colours_::textFaint);
-                g.drawText ((hit ? "" : "-") + String ((int) t) + " ms", Rectangle<float> (x - 30.0f, plot.getBottom() + 1.0f, 60.0f, 12.0f), Justification::centred);
-            }
+                drawAxisText (g, (hit ? "" : "-") + String ((int) t) + " ms", Rectangle<float> (x - 30.0f, plot.getBottom() + 1.0f, 60.0f, 14.0f), Justification::centred);
         }
         for (float lv : { -0.5f, 0.5f })
         {
             g.setColour (Colours_::grid);
-            g.drawHorizontalLine ((int) (plot.getCentreY() - lv * plot.getHeight() * 0.5f), plot.getX(), plot.getRight());
+            px.hline (plot.getCentreY() - lv * plot.getHeight() * 0.5f, plot.getX(), plot.getRight());
         }
         g.setColour (Colours_::grid.brighter (0.6f));
-        g.drawHorizontalLine ((int) plot.getCentreY(), plot.getX(), plot.getRight());
+        px.hline (plot.getCentreY(), plot.getX(), plot.getRight());
 
         // Which traces to draw: {scope channel, colour}
         std::vector<std::pair<int, Colour>> traces;
@@ -255,15 +252,13 @@ private:
 
         if (! any)
         {
-            g.setColour (Colours_::textFaint);
-            g.setFont (Fonts::regular (13.0f));
+            g.setColour (Colours_::textMuted);
+            g.setFont (Fonts::regular (Fonts::Size::body));
             g.drawText (hit ? "Play a note to capture the kick" : "No signal", plot, Justification::centred);
         }
 
-        // 0 dBFS reference labels
-        g.setColour (Colours_::textFaint);
-        g.setFont (Fonts::label (10.0f, 0.1f));
-        g.drawText ("0 dB", plot.withHeight (12.0f).translated (4.0f, 0.0f), Justification::centredLeft);
+        // 0 dBFS reference label
+        drawAxisText (g, "0 dB", plot.withHeight (14.0f).translated (4.0f, 0.0f), Justification::centredLeft, true);
     }
 
     CodexProcessor& proc;
@@ -335,19 +330,18 @@ private:
         g.drawLine (c.x - d, c.y - d, c.x + d, c.y + d, 1.0f);
         g.drawLine (c.x - d, c.y + d, c.x + d, c.y - d, 1.0f);
 
-        g.setFont (Fonts::label (10.5f, 0.15f));
-        g.setColour (Colours_::textFaint);
+        auto axis = [&] (const char* t, Rectangle<float> box) { drawAxisText (g, t, box, Justification::centred); };
         if (ms)
         {
-            g.drawText ("M", Rectangle<float> (c.x - 10.0f, plot.getY() - 2.0f, 20.0f, 12.0f), Justification::centred);
-            g.drawText ("L", Rectangle<float> (c.x - d - 14.0f, c.y - d - 14.0f, 12.0f, 12.0f), Justification::centred);
-            g.drawText ("R", Rectangle<float> (c.x + d + 2.0f, c.y - d - 14.0f, 12.0f, 12.0f), Justification::centred);
-            g.drawText ("+S", Rectangle<float> (plot.getRight() - 18.0f, c.y + 2.0f, 18.0f, 12.0f), Justification::centred);
+            axis ("M", Rectangle<float> (c.x + 3.0f, plot.getY() + 3.0f, 14.0f, 14.0f));   // inside the circle, beside the axis
+            axis ("L", Rectangle<float> (c.x - d - 15.0f, c.y - d - 15.0f, 14.0f, 14.0f));
+            axis ("R", Rectangle<float> (c.x + d + 1.0f, c.y - d - 15.0f, 14.0f, 14.0f));
+            axis ("+S", Rectangle<float> (plot.getRight() - 20.0f, c.y + 2.0f, 20.0f, 14.0f));
         }
         else
         {
-            g.drawText ("L", Rectangle<float> (c.x - 10.0f, plot.getY() - 2.0f, 20.0f, 12.0f), Justification::centred);
-            g.drawText ("R", Rectangle<float> (plot.getRight() - 14.0f, c.y + 2.0f, 12.0f, 12.0f), Justification::centred);
+            axis ("L", Rectangle<float> (c.x + 3.0f, plot.getY() + 3.0f, 14.0f, 14.0f));   // inside the circle, beside the axis
+            axis ("R", Rectangle<float> (plot.getRight() - 15.0f, c.y + 2.0f, 14.0f, 14.0f));
         }
 
         // points: the newest ~40 ms, older points fainter
@@ -370,9 +364,9 @@ private:
         auto widthRow = meterArea.withTrimmedTop (2.0f).removeFromTop (16.0f);
         auto bar = [&] (Rectangle<float> row, const String& label, float value, float minV, float maxV, const String& text, Colour col)
         {
-            g.setFont (Fonts::label (10.5f, 0.14f));
+            g.setFont (Fonts::label (Fonts::Size::micro, 0.1f));
             g.setColour (Colours_::textDim);
-            g.drawText (label, row.removeFromLeft (78.0f), Justification::centredLeft);
+            g.drawText (label, row.removeFromLeft (80.0f), Justification::centredLeft);
             g.setColour (Colours_::text);
             g.setFont (Fonts::medium (12.0f));
             g.drawText (text, row.removeFromRight (44.0f), Justification::centredRight);
@@ -384,7 +378,7 @@ private:
             g.setColour (col);
             g.fillRoundedRectangle (Rectangle<float> (jmin (zero, pos), row.getY(), std::abs (pos - zero) + 1.0f, row.getHeight()), 2.0f);
             g.setColour (Colours_::textFaint);
-            g.drawVerticalLine ((int) zero, row.getY() - 2.0f, row.getBottom() + 2.0f);
+            Px::Snap (g, *this).vline (zero, row.getY() - 2.0f, row.getBottom() + 2.0f);
         };
         bar (corrRow, "CORRELATION", active ? correlation : 0.0f, -1.0f, 1.0f, active ? String (correlation, 2) : String ("--"),
              correlation < 0.0f ? Colours_::warn : Colours_::good);
@@ -458,20 +452,20 @@ private:
         auto fx = [&] (float f) { return plot.getX() + plot.getWidth() * std::log (f / 20.0f) / std::log (1000.0f); };
         auto dy = [&] (float db) { return jmap (db, -96.0f, 0.0f, plot.getBottom(), plot.getY()); };
 
-        g.setFont (Fonts::label (10.5f, 0.1f));
+        const Px::Snap px (g, *this);
         for (float f : { 50.0f, 100.0f, 200.0f, 500.0f, 1000.0f, 2000.0f, 5000.0f, 10000.0f })
         {
             g.setColour (Colours_::grid.brighter (0.3f));
-            g.drawVerticalLine ((int) fx (f), plot.getY(), plot.getBottom());
-            g.setColour (Colours_::textFaint);
-            g.drawText (f >= 1000 ? String ((int) (f / 1000)) + "k" : String ((int) f), Rectangle<float> (fx (f) - 15, plot.getBottom() + 1, 30, 12), Justification::centred);
+            px.vline (fx (f), plot.getY(), plot.getBottom());
+            const bool decade = juce::approximatelyEqual (f, 100.0f) || juce::approximatelyEqual (f, 1000.0f) || juce::approximatelyEqual (f, 10000.0f);
+            drawAxisText (g, f >= 1000 ? String ((int) (f / 1000)) + "k" : String ((int) f), Rectangle<float> (fx (f) - 15, plot.getBottom() + 1, 30, 14),
+                          Justification::centred, decade);
         }
         for (float db = -84.0f; db <= -12.0f; db += 12.0f)
         {
             g.setColour (Colours_::grid);
-            g.drawHorizontalLine ((int) dy (db), plot.getX(), plot.getRight());
-            g.setColour (Colours_::textFaint);
-            g.drawText (String ((int) db), Rectangle<float> (plot.getRight() + 2, dy (db) - 6, 26, 12), Justification::centredLeft);
+            px.hline (dy (db), plot.getX(), plot.getRight());
+            drawAxisText (g, String ((int) db), Rectangle<float> (plot.getRight() + 3, dy (db) - 7, 26, 14), Justification::centredLeft);
         }
 
         const double sr = proc.getSampleRate() > 0 ? proc.getSampleRate() : 48000.0;
@@ -572,16 +566,13 @@ private:
         const float barW = (r.getWidth() - 12.0f) / 2.0f;
         auto toY = [&] (float db) { return jmap (db, -60.0f, 6.0f, r.getBottom(), r.getY()); };
 
-        g.setFont (Fonts::label (10.0f, 0.1f));
+        const Px::Snap px (g, *this);
         for (float db = -54.0f; db <= 0.0f; db += 6.0f)
         {
             g.setColour (Colours_::grid.brighter (0.3f));
-            g.drawHorizontalLine ((int) toY (db), r.getX(), r.getRight());
+            px.hline (toY (db), r.getX(), r.getRight());
             if ((int) db % 12 == 0)
-            {
-                g.setColour (Colours_::textFaint);
-                g.drawText (String ((int) db), Rectangle<float> (scaleArea.getX() + 3, toY (db) - 6, 24, 12), Justification::centredLeft);
-            }
+                drawAxisText (g, String ((int) db), Rectangle<float> (scaleArea.getX() + 3, toY (db) - 7, 26, 14), Justification::centredLeft, db > -0.5f);
         }
 
         for (int c = 0; c < 2; ++c)
@@ -601,7 +592,7 @@ private:
             }
 
             auto txt = readouts.withX (bar.getX() - 6.0f).withWidth (barW + 12.0f);
-            g.setFont (Fonts::label (10.5f, 0.15f));
+            g.setFont (Fonts::label (Fonts::Size::micro, 0.12f));
             g.setColour (Colours_::textDim);
             g.drawText (c == 0 ? "L" : "R", txt.removeFromTop (14.0f), Justification::centred);
             g.setFont (Fonts::medium (12.5f));
@@ -635,7 +626,7 @@ public:
 
     void paint (juce::Graphics& g) override
     {
-        drawSectionPanel (g, tunerArea, "TUNER", Colours_::good);
+        drawSectionPanel (g, *this, tunerArea, "TUNER", Colours_::good);
     }
 
     void resized() override

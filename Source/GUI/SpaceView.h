@@ -15,34 +15,33 @@ public:
 
     void paint (juce::Graphics& g) override
     {
+        const Px::Snap px (g, *this);
         auto b = getLocalBounds().toFloat();
         g.setColour (Colours_::display);
         g.fillRoundedRectangle (b, 5.0f);
         g.setColour (Colours_::outline);
-        g.drawRoundedRectangle (b.reduced (0.5f), 5.0f, 1.0f);
-        plot = b.reduced (12.0f, 10.0f).withTrimmedBottom (14.0f).withTrimmedLeft (26.0f);
+        px.border (b, 5.0f);
+        plot = b.reduced (12.0f, 10.0f).withTrimmedBottom (14.0f).withTrimmedLeft (28.0f);
 
         const bool on = v ("On") > 0.5f;
         const float maxT = maxTime();
 
         // grid
-        g.setFont (Fonts::regular (10.5f));
         for (float f : { 50.0f, 100.0f, 200.0f, 500.0f, 1000.0f, 2000.0f, 5000.0f, 10000.0f })
         {
             const float x = fx (f);
             g.setColour (Colours_::grid);
-            g.drawVerticalLine (juce::roundToInt (x), plot.getY(), plot.getBottom());
-            g.setColour (Colours_::textFaint);
-            g.drawText (f >= 1000 ? juce::String ((int) (f / 1000)) + "k" : juce::String ((int) f),
-                        juce::Rectangle<float> (x - 20, plot.getBottom() + 1, 40, 12), juce::Justification::centred);
+            px.vline (x, plot.getY(), plot.getBottom());
+            const bool decade = juce::approximatelyEqual (f, 100.0f) || juce::approximatelyEqual (f, 1000.0f) || juce::approximatelyEqual (f, 10000.0f);
+            drawAxisText (g, f >= 1000 ? juce::String ((int) (f / 1000)) + "k" : juce::String ((int) f),
+                          juce::Rectangle<float> (x - 20, plot.getBottom() + 1, 40, 14), juce::Justification::centred, decade);
         }
         for (int i = 1; i <= 4; ++i)
         {
             const float t = maxT * (float) i / 4.0f, y = ty (t);
             g.setColour (Colours_::grid);
-            g.drawHorizontalLine (juce::roundToInt (y), plot.getX(), plot.getRight());
-            g.setColour (Colours_::textFaint);
-            g.drawText (juce::String (t, t < 10 ? 1 : 0) + "s", juce::Rectangle<float> (plot.getX() - 28, y - 6, 25, 12), juce::Justification::centredRight);
+            px.hline (y, plot.getX(), plot.getRight());
+            drawAxisText (g, juce::String (t, t < 10 ? 1 : 0) + "s", juce::Rectangle<float> (plot.getX() - 31, y - 7, 28, 14), juce::Justification::centredRight);
         }
 
         // filtered-out regions (Low Cut / High Cut)
@@ -77,8 +76,8 @@ public:
             g.setColour (col);
             g.fillEllipse (juce::Rectangle<float> (10, 10).withCentre (p));
             g.setColour (Colours_::textDim);
-            g.setFont (Fonts::label (10.5f, 0.12f));
-            g.drawText (h == 0 ? "BASS" : "HIGH", juce::Rectangle<float> (60, 12).withCentre (p.translated (0, -16)), juce::Justification::centred);
+            g.setFont (Fonts::label (Fonts::Size::micro, 0.1f));
+            g.drawText (h == 0 ? "BASS" : "HIGH", juce::Rectangle<float> (60, 14).withCentre (p.translated (0, -17)), juce::Justification::centred);
         }
 
         // readout
@@ -226,10 +225,10 @@ public:
     void paint (juce::Graphics& g) override
     {
         const auto acc = off ? Colours_::textFaint : Colours_::accent;
-        drawSectionPanel (g, mainArea, juce::String::fromUTF8 ("SPACE  \xc2\xb7  ROOM REVERB"), acc);
-        drawSectionPanel (g, earlyArea, "EARLY", acc);
-        drawSectionPanel (g, lateArea, "LATE", acc);
-        drawSectionPanel (g, eqArea, "DECAY EQ", acc);
+        drawSectionPanel (g, *this, mainArea, juce::String::fromUTF8 ("SPACE  \xc2\xb7  ROOM REVERB"), acc);
+        drawSectionPanel (g, *this, earlyArea, "EARLY", acc);
+        drawSectionPanel (g, *this, lateArea, "LATE", acc);
+        drawSectionPanel (g, *this, eqArea, "DECAY EQ", acc);
     }
 
     void resized() override
@@ -244,7 +243,7 @@ public:
         r.removeFromLeft (12);
         eqArea = r;
 
-        powerButton.setBounds (mainArea.withHeight (28).removeFromRight (32).reduced (4));
+        powerButton.setBounds (mainArea.withHeight (28).removeFromRight (32).reduced (2));
         {
             auto c = mainArea.reduced (14).withTrimmedTop (30);
             auto knobs = c.removeFromRight (juce::jmin (470, c.getWidth() / 2));

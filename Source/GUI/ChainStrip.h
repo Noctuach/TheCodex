@@ -51,7 +51,7 @@ public:
     {
         using namespace juce;
         layoutChips();
-        g.setFont (Fonts::label (10.5f, 0.1f));
+        g.setFont (chipFont());
         for (int i = 0; i < chain::numModules; ++i)
         {
             const int module = shownOrder[(size_t) i];
@@ -186,9 +186,12 @@ private:
         });
     }
 
+    /** One font for drawing and measuring the chips, so their widths always match the text. */
+    static juce::Font chipFont() { return juce::Font (Fonts::label (12.0f, 0.06f)); }
+
     void layoutChips()
     {
-        const auto font = juce::Font (Fonts::label (10.5f, 0.1f));
+        const auto font = chipFont();
         std::array<float, chain::numModules> w {};
         float total = 0.0f;
         for (int i = 0; i < chain::numModules; ++i)
@@ -231,10 +234,11 @@ private:
             g.setColour (Colours_::accent.withAlpha (0.3f * lit));
             g.fillRoundedRectangle (r, 4.0f);
         }
-        const auto edge = lifted ? Colours_::accent : here ? Colours_::accent.withAlpha (0.7f) : Colours_::outline;
+        // off modules: dimmed text (still readable) and a fainter outline, so colour is not the only cue
+        const auto edge = lifted ? Colours_::accent : here ? Colours_::accent.withAlpha (0.7f) : on ? Colours_::outline : Colours_::outline.withAlpha (0.5f);
         g.setColour (edge.interpolatedWith (Colours_::accentHi, lit));
-        g.drawRoundedRectangle (r.reduced (0.5f), 4.0f, 1.0f);
-        g.setColour (here ? Colours_::accent : on ? Colours_::text : Colours_::textFaint);
+        Px::Snap (g, *this).border (r, 4.0f);
+        g.setColour (here ? Colours_::accent : on ? Colours_::text : Colours_::textDim);
         g.drawText (chain::shortName (module), r, Justification::centred);
     }
 

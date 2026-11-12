@@ -42,11 +42,12 @@ public:
     void paint (juce::Graphics& g) override
     {
         using namespace juce;
+        const Px::Snap px (g, *this);
         auto r = getLocalBounds().toFloat();
         g.setColour (Colours_::display);
         g.fillRoundedRectangle (r, 5.0f);
         g.setColour (Colours_::outline);
-        g.drawRoundedRectangle (r.reduced (0.5f), 5.0f, 1.0f);
+        px.border (r, 5.0f);
 
         plot = r.reduced (12.0f);
         const float size = jmin (plot.getWidth(), plot.getHeight());
@@ -57,12 +58,12 @@ public:
         for (int i = 1; i < 8; ++i)
         {
             const float t = (float) i / 8.0f;
-            g.drawVerticalLine ((int) (plot.getX() + t * size), plot.getY(), plot.getBottom());
-            g.drawHorizontalLine ((int) (plot.getY() + t * size), plot.getX(), plot.getRight());
+            px.vline (plot.getX() + t * size, plot.getY(), plot.getBottom());
+            px.hline (plot.getY() + t * size, plot.getX(), plot.getRight());
         }
         g.setColour (Colours_::grid.brighter (0.6f));
-        g.drawVerticalLine ((int) plot.getCentreX(), plot.getY(), plot.getBottom());
-        g.drawHorizontalLine ((int) plot.getCentreY(), plot.getX(), plot.getRight());
+        px.vline (plot.getCentreX(), plot.getY(), plot.getBottom());
+        px.hline (plot.getCentreY(), plot.getX(), plot.getRight());
 
         // unity reference
         Path diag;
@@ -105,8 +106,8 @@ public:
             PathStrokeType (1.4f).createDashedStroke (tail, tail, dash, 2);
             g.setColour (Colours_::accent2.withAlpha (0.85f));
             g.fillPath (tail);
-            g.setFont (Fonts::label (10.5f, 0.08f));
-            g.drawText ("TAIL", Rectangle<float> (plot.getRight() - 44.0f, plot.getY() + 16.0f, 40.0f, 12.0f), Justification::centredRight);
+            g.setFont (Fonts::label (Fonts::Size::micro, 0.08f));
+            g.drawText ("TAIL", Rectangle<float> (plot.getRight() - 44.0f, plot.getY() + 15.0f, 40.0f, 14.0f), Justification::centredRight);
         }
         Colours_::strokeGlow (g, curvePath, col, 2.0f);
 
@@ -123,8 +124,8 @@ public:
                 g.setColour (Colours_::display);
                 g.drawEllipse (Rectangle<float> (8.0f, 8.0f).withCentre (pt), 1.2f);
             }
-            g.setFont (Fonts::label (10.5f, 0.08f));
-            g.setColour (Colours_::textFaint);
+            g.setFont (Fonts::label (Fonts::Size::micro, 0.06f));
+            g.setColour (Colours_::textMuted);
             // upper-left quadrant: the one area a drawn curve never reaches
             g.drawText (isAsym() ? "DRAW BOTH HALVES" : "DRAW CURVE  (MIRRORED)",
                         Rectangle<float> (plot.getX() + 4.0f, plot.getY() + 16.0f, plot.getWidth() * 0.45f, 14.0f), Justification::centredLeft);
@@ -146,11 +147,11 @@ public:
             }
         }
 
-        g.setFont (Fonts::label (11.0f, 0.1f));
+        g.setFont (Fonts::label (Fonts::Size::micro, 0.1f));
         g.setColour (Colours_::textDim);
         auto pl = plot;
-        g.drawText ("IN", pl.removeFromBottom (12.0f).removeFromRight (20.0f), Justification::centredRight);
-        g.drawText ("OUT", Rectangle<float> (plot.getX() + 4.0f, plot.getY(), 30.0f, 12.0f), Justification::centredLeft);
+        g.drawText ("IN", pl.removeFromBottom (14.0f).removeFromRight (22.0f), Justification::centredRight);
+        g.drawText ("OUT", Rectangle<float> (plot.getX() + 4.0f, plot.getY(), 32.0f, 14.0f), Justification::centredLeft);
     }
 
     // ---- X-Shaper editing ----
@@ -296,7 +297,7 @@ public:
         g.setColour (Colours_::display);
         g.fillRoundedRectangle (r, 5.0f);
         g.setColour (Colours_::outline);
-        g.drawRoundedRectangle (r.reduced (0.5f), 5.0f, 1.0f);
+        Px::Snap (g, *this).border (r, 5.0f);
         plot = r.reduced (8.0f, 6.0f);
 
         const bool active = pos->load() > 0.5f;
@@ -338,8 +339,8 @@ public:
         g.setColour (col);
         g.fillEllipse (juce::Rectangle<float> (9.0f, 9.0f).withCentre ({ hx, juce::jmap (rv, plot.getBottom() - 4.0f, plot.getY() + 4.0f) }));
 
-        g.setFont (Fonts::label (10.5f, 0.08f));
-        g.setColour (active ? Colours_::textDim : Colours_::textFaint);
+        g.setFont (Fonts::label (Fonts::Size::micro, 0.06f));
+        g.setColour (active ? Colours_::textDim : Colours_::textMuted);
         const juce::String where = active ? (pos->load() > 1.5f ? "POST" : "PRE") : "OFF";
         g.drawText ("FILTER " + where + "   " + freq->getCurrentValueAsText() + "   RES " + res->getCurrentValueAsText(),
                     plot.reduced (4.0f, 0.0f), juce::Justification::topLeft);
@@ -448,7 +449,7 @@ public:
 
     void paint (juce::Graphics& g) override
     {
-        drawSectionPanel (g, getLocalBounds(), title, bypassed ? Colours_::textFaint : Colours_::accent);
+        drawSectionPanel (g, *this, getLocalBounds(), title, bypassed ? Colours_::textFaint : Colours_::accent);
         if (bypassed)
         {
             auto tag = getLocalBounds().withHeight (28).withTrimmedRight (140).removeFromRight (86).reduced (0, 6).toFloat();
@@ -456,19 +457,19 @@ public:
             g.fillRoundedRectangle (tag, tag.getHeight() * 0.5f);
             g.setColour (Colours_::warn);
             g.drawRoundedRectangle (tag, tag.getHeight() * 0.5f, 1.0f);
-            g.setFont (Fonts::label (11.0f, 0.15f));
+            g.setFont (Fonts::label (Fonts::Size::micro, 0.12f));
             g.drawText ("BYPASSED", tag, juce::Justification::centred);
         }
-        drawGroupCaption (g, shapeCaption, "SHAPE");
+        drawGroupCaption (g, *this, shapeCaption, "SHAPE");
         g.setColour (Colours_::textDim);
-        g.setFont (Fonts::label (11.5f, 0.09f));
+        g.setFont (Fonts::label (Fonts::Size::caption, 0.08f));
         g.drawText ("FILTER", filterPos.getBounds().translated (0, -18).withHeight (16), juce::Justification::centredLeft);
-        drawGroupCaption (g, filterCaption, "WET FILTERS  /  TONE");
-        drawGroupCaption (g, outputCaption, "OUTPUT");
+        drawGroupCaption (g, *this, filterCaption, "WET FILTERS  /  TONE");
+        drawGroupCaption (g, *this, outputCaption, "OUTPUT");
 
         g.setColour (Colours_::textDim);
-        g.setFont (Fonts::label (11.0f, 0.15f));
-        auto labelUnder = [] (juce::Rectangle<int> m) { return m.withSizeKeepingCentre (40, m.getHeight()).translated (0, m.getHeight() + 3).withHeight (12); };
+        g.setFont (Fonts::label (Fonts::Size::micro, 0.12f));
+        auto labelUnder = [] (juce::Rectangle<int> m) { return m.withSizeKeepingCentre (40, m.getHeight()).translated (0, m.getHeight() + 2).withHeight (14); };
         g.drawText ("IN", labelUnder (inMeter.getBounds()), juce::Justification::centred);
         g.drawText ("OUT", labelUnder (outMeter.getBounds()), juce::Justification::centred);
     }
@@ -476,7 +477,7 @@ public:
     void resized() override
     {
         auto r = getLocalBounds();
-        power.setBounds (r.withHeight (28).removeFromRight (32).reduced (4));
+        power.setBounds (r.withHeight (28).removeFromRight (32).reduced (2));
 
         auto c = r.reduced (14).withTrimmedTop (28);
 

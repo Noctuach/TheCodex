@@ -19,7 +19,7 @@ public:
 
     void paint (juce::Graphics& g) override
     {
-        drawSectionPanel (g, getLocalBounds(), juce::String::fromUTF8 ("EQ 2  \xc2\xb7  POST"), off ? Colours_::textFaint : Colours_::accent);
+        drawSectionPanel (g, *this, getLocalBounds(), juce::String::fromUTF8 ("EQ 2  \xc2\xb7  POST"), off ? Colours_::textFaint : Colours_::accent);
         if (EQDisplay::numPresent (apvts, 1) == 0)
         {
             g.setColour (Colours_::textDim);
@@ -31,7 +31,7 @@ public:
 
     void resized() override
     {
-        powerButton.setBounds (getLocalBounds().withHeight (28).removeFromRight (32).reduced (4));
+        powerButton.setBounds (getLocalBounds().withHeight (28).removeFromRight (32).reduced (2));
         auto c = getLocalBounds().reduced (14).withTrimmedTop (28);
         controls.setBounds (c.removeFromBottom (84));
         c.removeFromBottom (10);

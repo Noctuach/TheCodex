@@ -4,6 +4,24 @@
 #include "Help.h"
 #include "../DSP/CurveEnvelope.h"
 
+/** Graph axis label (scale ticks, units): one face, size and colour scheme for every plot. Major ticks (0 dB, ROOT,
+    labelled decades) are textDim; the rest textMuted. */
+inline void drawAxisText (juce::Graphics& g, const juce::String& text, juce::Rectangle<float> r,
+                          juce::Justification just, bool major = false)
+{
+    g.setColour (major ? Colours_::textDim : Colours_::textMuted);
+    g.setFont (Fonts::axis());
+    g.drawText (text, r, just, false);
+}
+
+/** Width of a single line of text in the given font. */
+inline float textWidth (const juce::Font& f, const juce::String& text)
+{
+    juce::GlyphArrangement ga;
+    ga.addLineOfText (f, text, 0, 0);
+    return ga.getBoundingBox (0, -1, true).getWidth();
+}
+
 /** Common behaviour for every parameter slider: tooltip, double-click to reset, Shift-drag for fine control. */
 inline void configureParameterSlider (juce::Slider& slider, juce::AudioProcessorValueTreeState& s, const juce::String& id)
 {
@@ -169,22 +187,23 @@ public:
 
     void paint (juce::Graphics& g) override
     {
+        const Px::Snap px (g, *this);
         auto area = getLocalBounds().toFloat();
         g.setColour (Colours_::display);
         g.fillRoundedRectangle (area, 6.0f);
 
         g.setColour (Colours_::grid);
         for (int i = 1; i < 8; ++i)
-            g.drawVerticalLine ((int) (area.getX() + area.getWidth() * (float) i / 8.0f), area.getY() + 1, area.getBottom() - 1);
+            px.vline (area.getX() + area.getWidth() * (float) i / 8.0f, area.getY() + 1, area.getBottom() - 1);
         for (int i = 1; i < 4; ++i)
-            g.drawHorizontalLine ((int) (area.getY() + area.getHeight() * (float) i / 4.0f), area.getX() + 1, area.getRight() - 1);
+            px.hline (area.getY() + area.getHeight() * (float) i / 4.0f, area.getX() + 1, area.getRight() - 1);
 
         // inner shadow at the top for depth
         g.setGradientFill (juce::ColourGradient (juce::Colours::black.withAlpha (0.35f), 0, area.getY(),
                                                  juce::Colours::transparentBlack, 0, area.getY() + 10.0f, false));
         g.fillRoundedRectangle (area.withHeight (10.0f), 6.0f);
         g.setColour (Colours_::outline);
-        g.drawRoundedRectangle (area.reduced (0.5f), 6.0f, 1.0f);
+        px.border (area, 6.0f);
 
         area = inner();
 
@@ -223,12 +242,24 @@ public:
         g.fillPath (fill);
         Colours_::strokeGlow (g, p, colour, 1.8f);
 
-        // Note-off marker
+        // Note-off marker; the caption sits at the top, or at the foot of the marker when the sustain line runs along the
+        // top, and flips to the left of the marker near the right edge
         const float noteOffX = X (wa + wd + ws);
         g.setColour (Colours_::textFaint);
-        g.drawVerticalLine ((int) noteOffX, area.getY(), area.getBottom());
-        g.setFont (Fonts::label (10.0f, 0.15f));
-        g.drawText ("NOTE OFF", juce::Rectangle<float> (noteOffX + 4.0f, area.getY() - 3.0f, 60.0f, 12.0f), juce::Justification::centredLeft);
+        px.vline (noteOffX, area.getY(), area.getBottom());
+        {
+            const juce::Font f (Fonts::label (Fonts::Size::micro, 0.1f));
+            const juce::String caption ("NOTE OFF");
+            const float tw = textWidth (f, caption) + 2.0f, th = 14.0f;
+            const float ty = Y (S) - area.getY() < th + 2.0f ? area.getBottom() - th : area.getY() - 4.0f;
+            const float tx = noteOffX + 5.0f + tw > area.getRight() ? noteOffX - 5.0f - tw : noteOffX + 5.0f;
+            const juce::Rectangle<float> box (tx, ty, tw, th);
+            g.setColour (Colours_::display.withAlpha (0.8f));
+            g.fillRoundedRectangle (box.expanded (2.0f, 0.0f), 3.0f);
+            g.setColour (Colours_::textMuted);
+            g.setFont (f);
+            g.drawText (caption, box, juce::Justification::centred, false);
+        }
 
         // draggable points
         for (int n = 0; n < 4; ++n)
@@ -248,7 +279,7 @@ public:
             const juce::String names[] = { "Attack", "Decay / Sustain", "Release", "Curve" };
             juce::String txt = names[n] + "  ";
             for (int i : nodeParams (n)) txt << rangedParams[(size_t) i]->getCurrentValueAsText() << "  ";
-            g.setFont (Fonts::medium (11.5f));
+            g.setFont (Fonts::medium (Fonts::Size::micro));
             auto box = juce::Rectangle<float> (180.0f, 18.0f).withCentre (nodes[(size_t) n].translated (0, -18.0f)).constrainedWithin (area);
             g.setColour (Colours_::panelTop.withAlpha (0.92f));
             g.fillRoundedRectangle (box, 4.0f);
@@ -322,18 +353,19 @@ public:
 
     void paint (juce::Graphics& g) override
     {
+        const Px::Snap px (g, *this);
         auto r = getLocalBounds().toFloat();
         g.setColour (Colours_::display);
         g.fillRoundedRectangle (r, 3.0f);
         g.setColour (Colours_::outline);
-        g.drawRoundedRectangle (r.reduced (0.5f), 3.0f, 1.0f);
+        px.border (r, 3.0f);
         r = r.reduced (2.5f);
         auto toY = [&] (float db) { return juce::jmap (db, -60.0f, 6.0f, r.getBottom(), r.getY()); };
 
         // tick marks every 12 dB
         g.setColour (Colours_::grid.brighter (0.3f));
         for (float db = -48.0f; db <= 0.0f; db += 12.0f)
-            g.drawHorizontalLine ((int) toY (db), r.getX(), r.getRight());
+            px.hline (toY (db), r.getX(), r.getRight());
 
         const float y = toY (juce::jmin (level, 6.0f));
         g.setGradientFill (juce::ColourGradient (Colours_::accentHi, 0, toY (0.0f), Colours_::accent.darker (0.5f), 0, r.getBottom(), false));
@@ -346,7 +378,7 @@ public:
         g.setColour (hold > 0.0f ? Colours_::warn : Colours_::text);
         g.fillRect (r.getX(), toY (juce::jmin (hold, 6.0f)) - 1.0f, r.getWidth(), 2.0f);
         g.setColour (Colours_::textDim.withAlpha (0.7f));
-        g.drawHorizontalLine ((int) toY (0.0f), r.getX() - 2.0f, r.getRight() + 2.0f);
+        px.hline (toY (0.0f), r.getX() - 2.0f, r.getRight() + 2.0f);
     }
 
 private:
@@ -392,9 +424,10 @@ public:
 };
 
 /** Rounded section panel with a header strip and soft drop shadow (shared by all views). */
-inline void drawSectionPanel (juce::Graphics& g, juce::Rectangle<int> r, const juce::String& title, juce::Colour dot)
+inline void drawSectionPanel (juce::Graphics& g, const juce::Component& owner, juce::Rectangle<int> r, const juce::String& title, juce::Colour dot)
 {
     using namespace juce;
+    const Px::Snap px (g, owner);
     // Card: soft shadow, a barely-lit gradient, a machined top edge and a header band with an accent marker
     const auto rf = r.toFloat();
     g.setColour (Colours::black.withAlpha (0.45f));
@@ -410,13 +443,13 @@ inline void drawSectionPanel (juce::Graphics& g, juce::Rectangle<int> r, const j
         g.fillPath (head);
     }
     g.setColour (Colours_::outline);
-    g.drawRoundedRectangle (rf.reduced (0.5f), 6.0f, 1.0f);
+    px.border (rf, 6.0f);
     g.setColour (Colours::white.withAlpha (0.06f));   // top edge catches the light
-    g.drawHorizontalLine ((int) rf.getY() + 1, rf.getX() + 6.0f, rf.getRight() - 6.0f);
+    px.hline (rf.getY() + 1.0f, rf.getX() + 6.0f, rf.getRight() - 6.0f);
     g.setColour (Colours::black.withAlpha (0.5f));
-    g.drawHorizontalLine ((int) strip.getBottom(), strip.getX() + 1.0f, strip.getRight() - 1.0f);
+    px.hline (strip.getBottom(), strip.getX() + 1.0f, strip.getRight() - 1.0f);
     g.setColour (Colours_::outline.withAlpha (0.6f));
-    g.drawHorizontalLine ((int) strip.getBottom() + 1, strip.getX() + 1.0f, strip.getRight() - 1.0f);
+    px.hline (px.y (strip.getBottom()) + px.hairline(), strip.getX() + 1.0f, strip.getRight() - 1.0f);
 
     // accent marker: a short glowing bar
     const auto marker = Rectangle<float> (3.0f, 12.0f).withCentre ({ rf.getX() + 13.0f, strip.getCentreY() });
@@ -430,18 +463,16 @@ inline void drawSectionPanel (juce::Graphics& g, juce::Rectangle<int> r, const j
 }
 
 /** Small caption with a rule, drawn above a group of controls. */
-inline void drawGroupCaption (juce::Graphics& g, juce::Rectangle<int> r, const juce::String& text)
+inline void drawGroupCaption (juce::Graphics& g, const juce::Component& owner, juce::Rectangle<int> r, const juce::String& text)
 {
     using namespace juce;
     g.setColour (Colours_::textDim);
-    const auto font = Font (Fonts::label (11.5f, 0.1f));
+    const auto font = Font (Fonts::label (Fonts::Size::caption, 0.1f));
     g.setFont (font);
     g.drawText (text, r, Justification::centredLeft);
-    GlyphArrangement ga;
-    ga.addLineOfText (font, text, 0, 0);
-    const float x = (float) r.getX() + ga.getBoundingBox (0, -1, true).getWidth() + 10.0f;
+    const float x = (float) r.getX() + textWidth (font, text) + 10.0f;
     g.setColour (Colours_::outline);
-    g.drawHorizontalLine (r.getCentreY(), x, (float) r.getRight());
+    Px::Snap (g, owner).hline ((float) r.getCentreY(), x, (float) r.getRight());
 }
 
 /** Icon button that reports press and release (used for the preview / play button). */
@@ -482,7 +513,7 @@ public:
     {
         auto r = getLocalBounds().toFloat().withTrimmedLeft ((float) getHeight() + 4.0f);
         g.setColour (Colours_::textDim);
-        g.setFont (Fonts::label (11.5f, 0.14f));
+        g.setFont (Fonts::label (Fonts::Size::caption, 0.12f));
         g.drawText (title, r.removeFromTop (r.getHeight() * 0.5f), juce::Justification::bottomLeft);
         g.setColour (Colours_::text);
         g.setFont (Fonts::medium (13.5f));
@@ -513,7 +544,7 @@ struct BypassNotice : public juce::Component
         g.setColour (Colours_::display.withAlpha (0.95f));
         g.fillRoundedRectangle (c, 8.0f);
         g.setColour (Colours_::outlineHi);
-        g.drawRoundedRectangle (c, 8.0f, 1.0f);
+        Px::Snap (g, *this).border (c, 8.0f);
         g.setColour (Colours_::text);
         g.setFont (Fonts::label (14.0f, 0.18f));
         g.drawText (title, c.removeFromTop (38.0f), juce::Justification::centredBottom);

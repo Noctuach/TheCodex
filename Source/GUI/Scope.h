@@ -16,35 +16,30 @@ public:
         g.setColour (Colours_::display);
         g.fillRoundedRectangle (r, 6.0f);
         g.setColour (Colours_::outline);
-        g.drawRoundedRectangle (r.reduced (0.5f), 6.0f, 1.0f);
+        const Px::Snap px (g, *this);
+        px.border (r, 6.0f);
 
-        auto plot = r.reduced (8.0f, 6.0f).withTrimmedBottom (12.0f).withTrimmedTop (12.0f);
+        auto plot = r.reduced (8.0f, 6.0f).withTrimmedBottom (14.0f).withTrimmedTop (14.0f);
 
         // time grid: every 50 ms, labelled every 100 ms
         const float ms = (float) (CodexProcessor::scopeSeconds * 1000.0);
-        g.setFont (Fonts::label (10.0f, 0.1f));
         for (int t = 50; t < (int) ms; t += 50)
         {
             const float x = plot.getX() + plot.getWidth() * (float) t / ms;
             g.setColour (t % 100 == 0 ? Colours_::grid.brighter (0.35f) : Colours_::grid);
-            g.drawVerticalLine ((int) x, plot.getY(), plot.getBottom());
+            px.vline (x, plot.getY(), plot.getBottom());
             if (t % 100 == 0)
-            {
-                g.setColour (Colours_::textFaint);
-                g.drawText (String (t), Rectangle<float> (x - 15.0f, plot.getBottom() + 1.0f, 30.0f, 11.0f), Justification::centred);
-            }
+                drawAxisText (g, String (t), Rectangle<float> (x - 15.0f, plot.getBottom() + 1.0f, 30.0f, 14.0f), Justification::centred);
         }
         g.setColour (Colours_::grid.brighter (0.5f));
-        g.drawHorizontalLine ((int) plot.getCentreY(), plot.getX(), plot.getRight());
+        px.hline (plot.getCentreY(), plot.getX(), plot.getRight());
 
-        g.setColour (Colours_::textDim);
-        g.drawText ("SCOPE", r.reduced (9.0f, 4.0f).removeFromTop (11.0f), Justification::centredLeft);
-        g.setColour (Colours_::textFaint);
-        g.drawText ("MS", r.reduced (9.0f, 4.0f).removeFromBottom (11.0f), Justification::centredRight);
+        drawAxisText (g, "SCOPE", r.reduced (9.0f, 4.0f).removeFromTop (14.0f), Justification::centredLeft, true);
+        drawAxisText (g, "MS", r.reduced (9.0f, 4.0f).removeFromBottom (14.0f), Justification::centredRight);
 
         if (count < 2)
         {
-            g.setColour (Colours_::textFaint);
+            g.setColour (Colours_::textMuted);
             g.setFont (Fonts::regular (12.5f));
             g.drawText ("Play a note or press KICK", plot, Justification::centred);
             return;
