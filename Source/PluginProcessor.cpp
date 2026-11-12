@@ -5,7 +5,6 @@ CodexProcessor::CodexProcessor()
     : AudioProcessor (BusesProperties().withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
       apvts (*this, &undoManager, "CodexState", Params::createLayout())
 {
-    startTimerHz (20);   // applies latency changes to the host from the message thread
     engine = p (ID::engine); model909 = p (ID::model909); tune909 = p (ID::tune909);
     attack909 = p (ID::attack909); decay909 = p (ID::decay909);
     tuneTime909 = p (ID::tuneTime909); accent909 = p (ID::accent909); overload909 = p (ID::overload909); hold909 = p (ID::hold909);
@@ -173,12 +172,17 @@ void CodexProcessor::updateLatency()
                                           + clipper.getLatencyInSamples());
     // The host is told on the message thread (setLatencySamples notifies listeners and can lock);
     // when this already runs on the message thread (offline renders, tests) it is applied at once.
-    latencyTarget.store (latency);
-    if (juce::MessageManager::existsAndIsCurrentThread() && latency != getLatencySamples())
+    // Only posts a message when the latency really changes: an always-on timer kept the plug-in's message queue
+    // busy, which made a use-after-free in JUCE's Linux VST3 host run loop (at module unload) much more likely.
+    if (latencyTarget.exchange (latency) == latency && latency == getLatencySamples())
+        return;
+    if (juce::MessageManager::existsAndIsCurrentThread())
         setLatencySamples (latency);
+    else
+        triggerAsyncUpdate();
 }
 
-void CodexProcessor::timerCallback()
+void CodexProcessor::handleAsyncUpdate()
 {
     const int latency = latencyTarget.load();
     if (latency != getLatencySamples())

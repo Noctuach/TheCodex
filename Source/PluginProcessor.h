@@ -41,11 +41,11 @@ private:
     std::array<float, size> buffer {};
 };
 
-class CodexProcessor : public juce::AudioProcessor, private juce::Timer
+class CodexProcessor : public juce::AudioProcessor, private juce::AsyncUpdater
 {
 public:
     CodexProcessor();
-    ~CodexProcessor() override = default;
+    ~CodexProcessor() override { cancelPendingUpdate(); }
 
     void prepareToPlay (double sampleRate, int samplesPerBlock) override;
     void releaseResources() override {}
@@ -119,7 +119,7 @@ private:
     void startScope();
     void feedScope (float left, float right) noexcept;
     void updateLatency();
-    void timerCallback() override;
+    void handleAsyncUpdate() override;
     std::atomic<int> latencyTarget { 0 };
 
     static constexpr int chunkSize = 256;

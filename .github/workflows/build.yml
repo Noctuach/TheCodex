@@ -77,8 +77,15 @@ jobs:
           curl -sSfL -o pluginval.zip https://github.com/Tracktion/pluginval/releases/latest/download/${{ matrix.pluginval }}
           unzip -q pluginval.zip
           if [ "$RUNNER_OS" == "Linux" ]; then
-            xvfb-run -a ${{ matrix.pluginval_bin }} --strictness-level 7 --validate-in-process --skip-gui-tests \
-              --validate build/Codex_artefacts/Release/VST3/Codex.vst3
+            # JUCE's Linux VST3 host run loop (which pluginval uses) has a rare use-after-free when the plug-in module
+            # is unloaded: an fd callback can run on a RunLoop that the same poll pass just deleted. It segfaults the
+            # validator in a few % of runs, after the tests have finished (reproduced under ASan, see CHANGELOG).
+            # So a segfault (and only a segfault) gets one retry; any test failure still fails at once.
+            run_pv() { xvfb-run -a ${{ matrix.pluginval_bin }} --strictness-level 7 --validate-in-process --skip-gui-tests \
+              --validate build/Codex_artefacts/Release/VST3/Codex.vst3; }
+            set +e; run_pv; code=$?; set -e
+            if [ $code -eq 139 ]; then echo "::warning::pluginval segfaulted (known JUCE Linux host issue); retrying once"; run_pv; code=$?; fi
+            exit $code
           else
             ${{ matrix.pluginval_bin }} --strictness-level 7 --validate-in-process --skip-gui-tests \
               --validate build/Codex_artefacts/Release/VST3/Codex.vst3

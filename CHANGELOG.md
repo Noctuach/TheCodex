@@ -17,6 +17,9 @@ All notable changes to Codex. Versions follow [Semantic Versioning](https://semv
 - Premium finish: machined knobs (lit body, drop shadow, glowing value arc), panels with a soft shadow, lit top edge and an accent marker, a fading sun-orange line under the header, glowing tab underline and selected buttons.
 - Space Mix keeps the dry kick at full level up to 50 % (it used to fall to -3 dB at 50 % and silence at 100 %, which made the kick fade when the reverb was turned up).
 
+### Fixed
+- Linux: a rare crash of hosts built on JUCE (pluginval among them) when the last Codex instance was removed. The cause is a use-after-free in JUCE's Linux VST3 host run loop, reproduced under AddressSanitizer. Codex no longer runs an always-on 20 Hz timer, which made it about twice as likely; latency changes are now sent to the host only when they happen. CI retries pluginval once on Linux if, and only if, the validator segfaults.
+
 ### Added (earlier)
 - Distortion **Auto Gain** (AUTO button in each unit's header): the output follows the input level, so Drive changes
   the character instead of the loudness (Drive 6 -> 30 dB: -0.1 dB instead of +5.5 dB).
