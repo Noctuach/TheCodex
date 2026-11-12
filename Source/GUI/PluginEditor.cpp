@@ -433,7 +433,7 @@ void MainView::paint (Graphics& g)
         g.drawText ("CODEX", r.removeFromTop (r.getHeight() * 0.64f), Justification::bottomLeft);
         g.setColour (Colours_::textDim);
         g.setFont (Fonts::label (10.5f, 0.2f));
-        g.drawText ("HARDSTYLE KICK SYNTH", r.translated (1.0f, 0.0f), Justification::topLeft);
+        g.drawText ("NOCTURNAL AUDIO", r.translated (1.0f, 0.0f), Justification::topLeft);
     }
 
     g.setColour (Colours_::textDim);

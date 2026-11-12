@@ -142,7 +142,7 @@ private:
         g.drawText ("CODEX", head.removeFromTop (34.0f), Justification::bottomLeft);
         g.setColour (Colours_::accent);
         g.setFont (Fonts::label (12.5f, 0.2f));
-        g.drawText ("HARDSTYLE KICK SYNTHESIZER  " + String (CharPointer_UTF8 ("\xc2\xb7")) + "  VERSION " + version, head, Justification::topLeft);
+        g.drawText ("NOCTURNAL AUDIO  " + String (CharPointer_UTF8 ("\xc2\xb7")) + "  VERSION " + version, head, Justification::topLeft);
 
         r.removeFromTop (18.0f);
         auto para = [&] (const String& title, const String& body, float h)
