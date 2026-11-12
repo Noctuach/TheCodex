@@ -99,7 +99,7 @@ public:
         g.setColour (Colours_::display);
         g.fillRoundedRectangle (r, 5.0f);
         g.setColour (Colours_::outline);
-        g.drawRoundedRectangle (r.reduced (0.5f), 5.0f, 1.0f);
+        Px::Snap (g, *this).border (r, 5.0f);
         r = r.reduced (8.0f, 5.0f);
 
         const float target = analyser.getTargetNote();
@@ -113,7 +113,7 @@ public:
 
         // Bottom line: target
         auto bottom = r.removeFromBottom (14.0f);
-        g.setFont (Fonts::label (11.5f, 0.08f));
+        g.setFont (Fonts::label (Fonts::Size::micro, 0.08f));
         g.setColour (Colours_::textDim);
         const int tn = roundToInt (target);
         g.drawText ("TARGET  " + String (noteNameFor (tn)) + String (octaveFor (tn)) + "  "
@@ -177,7 +177,8 @@ public:
     void paint (juce::Graphics& g) override
     {
         using namespace juce;
-        auto r = getLocalBounds().toFloat().reduced (0.5f);
+        const Px::Snap px (g, *this);
+        auto r = px.rect (getLocalBounds().toFloat()).reduced (px.hairline() * 0.5f);
         g.setColour (Colours_::display);
         g.fillRoundedRectangle (r, r.getHeight() * 0.5f);
         const bool has = analyser.hasReading();
@@ -189,17 +190,17 @@ public:
         const bool onTarget = has && std::abs (note - target) < 0.1f;
         const auto col = ! has ? Colours_::textDim : (onTarget ? Colours_::accent : Colours_::text);
         g.setColour (has ? col.withAlpha (0.6f) : Colours_::outline);
-        g.drawRoundedRectangle (r, r.getHeight() * 0.5f, 1.0f);
+        g.drawRoundedRectangle (r, r.getHeight() * 0.5f, px.hairline());
 
         auto t = r.reduced (12.0f, 0.0f);
-        g.setFont (Fonts::label (11.0f, 0.16f));
+        g.setFont (Fonts::label (Fonts::Size::micro, 0.12f));
         g.setColour (Colours_::textDim);
         g.drawText ("ROOT", t.removeFromLeft (34.0f), Justification::centredLeft);
         g.setColour (col);
         g.setFont (Fonts::semibold (15.0f));
         g.drawText (String (noteNameFor (nearest)) + String (octaveFor (nearest)), t.removeFromLeft (34.0f), Justification::centredLeft);
         g.setFont (Fonts::regular (12.5f));
-        g.setColour (has ? Colours_::text : Colours_::textFaint);
+        g.setColour (has ? Colours_::text : Colours_::textMuted);
         g.drawText (has ? (cents >= 0 ? "+" : "") + String (cents, 1) + " c" : String ("--"), t, Justification::centredLeft);
     }
 

@@ -1,6 +1,20 @@
 #pragma once
 #include "Widgets.h"
 
+/** Wrapped body text for the overlay cards: laid out once, so the height reserved is exactly the height drawn
+    (no row cut off with an ellipsis when it wraps to an extra line). */
+inline juce::TextLayout cardText (const juce::String& text, const juce::FontOptions& font, float lineHeight, float width, juce::Colour colour)
+{
+    juce::AttributedString a;
+    a.setJustification (juce::Justification::topLeft);
+    a.setWordWrap (juce::AttributedString::byWord);
+    a.setLineSpacing (juce::jmax (0.0f, lineHeight - font.getHeight()));
+    a.append (text, juce::Font (font), colour);
+    juce::TextLayout tl;
+    tl.createLayout (a, width);
+    return tl;
+}
+
 /** Full-window modal card that dims the UI behind it. Click outside or press Escape to close. */
 class Overlay : public juce::Component
 {
@@ -37,7 +51,7 @@ public:
         g.setGradientFill (juce::ColourGradient (Colours_::panelTop, 0, c.getY(), Colours_::panel, 0, c.getBottom(), false));
         g.fillRoundedRectangle (c, 10.0f);
         g.setColour (Colours_::outlineHi);
-        g.drawRoundedRectangle (c.reduced (0.5f), 10.0f, 1.0f);
+        Px::Snap (g, *this).border (c, 10.0f);
         paintCard (g, card);
     }
 
@@ -138,16 +152,44 @@ class AboutOverlay : public Overlay
 public:
     explicit AboutOverlay (const juce::String& versionString) : version (versionString)
     {
-        cardSize = { 540, 336 };
+        cardSize = { cardWidth, juce::roundToInt (contentHeight()) };
         closeButton.onClick = [this] { close(); };
         addAndMakeVisible (closeButton);
     }
 
 private:
+    static constexpr int cardWidth = 560, padX = 28, padY = 24;
+    static constexpr float titleH = 18.0f, gap = 10.0f, bodySize = 15.0f, bodyLine = 19.5f;
+
+    static std::vector<std::pair<juce::String, juce::String>> paragraphs()
+    {
+        using namespace juce;
+        return {
+            { "ABOUT", "A free kick synthesizer for hardstyle, built the old-fashioned way: a swept oscillator or a synthesized 909, "
+                       "two distortion stages around a parametric EQ. No samples." },
+            { "TIPS", String (CharPointer_UTF8 ("Hover any control for help  \xc2\xb7  Double-click a knob to reset  \xc2\xb7  Shift-drag for fine control  \xc2\xb7  "
+                                                "Double-click the EQ to add a band  \xc2\xb7  Set KEY to the key of your track; the tuner confirms the root.")) },
+            { "CREDITS", "Built with JUCE. Fonts: Barlow by The Barlow Project Authors, SIL Open Font License 1.1. "
+                         "VST is a registered trademark of Steinberg Media Technologies GmbH." },
+        };
+    }
+    static juce::TextLayout body (const juce::String& text)
+    {
+        return cardText (text, Fonts::regular (bodySize), bodyLine, (float) (cardWidth - 2 * padX), Colours_::text);
+    }
+    /** Card height from the wrapped paragraphs. */
+    static float contentHeight()
+    {
+        float h = 2.0f * padY + 54.0f + 18.0f;
+        for (const auto& [title, text] : paragraphs())
+            h += titleH + body (text).getHeight() + gap;
+        return std::ceil (h);
+    }
+
     void paintCard (juce::Graphics& g, juce::Rectangle<int> c) override
     {
         using namespace juce;
-        auto r = c.reduced (28, 24).toFloat();
+        auto r = c.reduced (padX, padY).toFloat();
 
         auto head = r.removeFromTop (54.0f);
         Icons::draw (g, Icons::kickMark(), head.removeFromLeft (54.0f), Colours_::accent, 2.4f);
@@ -160,22 +202,15 @@ private:
         g.drawText ("NOCTURNAL AUDIO  " + String (CharPointer_UTF8 ("\xc2\xb7")) + "  VERSION " + version, head, Justification::topLeft);
 
         r.removeFromTop (18.0f);
-        auto para = [&] (const String& title, const String& body, float h)
+        for (const auto& [title, text] : paragraphs())
         {
             g.setColour (Colours_::textDim);
-            g.setFont (Fonts::label (11.5f, 0.16f));
-            g.drawText (title, r.removeFromTop (16.0f), Justification::centredLeft);
-            g.setColour (Colours_::text);
-            g.setFont (Fonts::regular (14.0f));
-            g.drawFittedText (body, r.removeFromTop (h).toNearestInt(), Justification::topLeft, 4, 1.0f);
-            r.removeFromTop (10.0f);
-        };
-        para ("ABOUT", "A free kick synthesizer for hardstyle, built the old-fashioned way: a swept oscillator or a synthesized 909, "
-                       "two distortion stages around a parametric EQ. No samples.", 42.0f);
-        para ("TIPS", String (CharPointer_UTF8 ("Hover any control for help  \xc2\xb7  Double-click a knob to reset  \xc2\xb7  Shift-drag for fine control  \xc2\xb7  "
-                                                "Double-click the EQ to add a band  \xc2\xb7  Set KEY to the key of your track; the tuner confirms the root.")), 42.0f);
-        para ("CREDITS", "Built with JUCE. Fonts: Barlow by The Barlow Project Authors, SIL Open Font License 1.1. "
-                         "VST is a registered trademark of Steinberg Media Technologies GmbH.", 42.0f);
+            g.setFont (Fonts::label (12.5f, 0.14f));
+            g.drawText (title, r.removeFromTop (titleH), Justification::centredLeft);
+            const auto tl = body (text);
+            tl.draw (g, r.removeFromTop (tl.getHeight()));
+            r.removeFromTop (gap);
+        }
     }
 
     void layoutCard (juce::Rectangle<int> c) override
@@ -217,14 +252,11 @@ private:
             for (const auto& [title, body] : rows)
             {
                 g.setColour (Colours_::accent);
-                g.setFont (Fonts::label (11.5f, 0.12f));
-                g.drawText (title, area.removeFromTop (16.0f), Justification::centredLeft);
-                g.setColour (Colours_::text);
-                g.setFont (Fonts::regular (13.0f));
-                const int lines = jmax (1, (int) std::ceil (GlyphArrangement::getStringWidth (Font (Fonts::regular (13.0f)), body) / (area.getWidth() - 10.0f)) + body.containsChar ('\n'));
-                const float h = 17.0f * (float) lines + 2.0f;
-                g.drawFittedText (body, area.removeFromTop (h).toNearestInt(), Justification::topLeft, lines + 1, 1.0f);
-                area.removeFromTop (10.0f);
+                g.setFont (Fonts::label (12.5f, 0.12f));
+                g.drawText (title, area.removeFromTop (18.0f), Justification::centredLeft);
+                const auto tl = cardText (body, Fonts::regular (14.5f), 20.0f, area.getWidth() - 6.0f, Colours_::text);
+                tl.draw (g, area.removeFromTop (tl.getHeight()));
+                area.removeFromTop (14.0f);
             }
         };
         auto left = r.removeFromLeft (r.getWidth() * 0.5f - 12.0f);

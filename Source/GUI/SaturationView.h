@@ -86,22 +86,23 @@ public:
     void paint (juce::Graphics& g) override
     {
         using namespace juce;
+        const Px::Snap px (g, *this);
         auto r = getLocalBounds().toFloat();
         g.setColour (Colours_::display);
         g.fillRoundedRectangle (r, 6.0f);
         g.setColour (Colours_::outline);
-        g.drawRoundedRectangle (r.reduced (0.5f), 6.0f, 1.0f);
+        px.border (r, 6.0f);
 
         const bool enabled = value (ID::sat ("On")) > 0.5f;
         const int nb = satBands::count (apvts);
 
-        g.setFont (Fonts::label (10.5f, 0.1f));
         for (float f : { 50.0f, 100.0f, 200.0f, 500.0f, 1000.0f, 2000.0f, 5000.0f, 10000.0f })
         {
             g.setColour (Colours_::grid.brighter (0.25f));
-            g.drawVerticalLine ((int) freqToX (f), plot.getY(), plot.getBottom());
-            g.setColour (Colours_::textFaint);
-            g.drawText (f >= 1000 ? String ((int) (f / 1000)) + "k" : String ((int) f), Rectangle<float> (freqToX (f) - 15, plot.getBottom() + 1, 30, 12), Justification::centred);
+            px.vline (freqToX (f), plot.getY(), plot.getBottom());
+            const bool decade = approximatelyEqual (f, 100.0f) || approximatelyEqual (f, 1000.0f) || approximatelyEqual (f, 10000.0f);
+            drawAxisText (g, f >= 1000 ? String ((int) (f / 1000)) + "k" : String ((int) f), Rectangle<float> (freqToX (f) - 15, plot.getBottom() + 1, 30, 14),
+                          Justification::centred, decade);
         }
 
         // Band regions
@@ -120,7 +121,7 @@ public:
 
             auto label = region.reduced (8.0f, 0.0f).removeFromBottom (44.0f);
             const int style = (int) value (ID::satBand (b, "Style"));
-            g.setColour (mute || bypass || ! enabled ? Colours_::textFaint : Colours_::text);
+            g.setColour (mute || bypass || ! enabled ? Colours_::textMuted : Colours_::text);
             g.setFont (Fonts::semibold (13.5f));
             g.drawFittedText (sat::styles()[(size_t) jlimit (0, (int) sat::styles().size() - 1, style)].name,
                               label.removeFromTop (18.0f).toNearestInt(), Justification::centredLeft, 1, 0.8f);
@@ -140,6 +141,7 @@ public:
             // M / S / B badges
             for (int k = 0; k < 3; ++k)
             {
+                if (! badgeFits (b, k)) continue;
                 const auto badge = badgeRect (b, k);
                 const char* sfx = k == 0 ? "Mute" : k == 1 ? "Solo" : "Bypass";
                 const bool on = value (ID::satBand (b, sfx)) > 0.5f;
@@ -149,7 +151,7 @@ public:
                 g.setColour (on ? onCol : Colours_::outline);
                 g.drawRoundedRectangle (badge, 3.0f, 1.0f);
                 g.setColour (on ? Colour (0xff140900) : Colours_::textDim);
-                g.setFont (Fonts::label (11.0f, 0.05f));
+                g.setFont (Fonts::label (Fonts::Size::caption, 0.05f));
                 g.drawText (k == 0 ? "M" : k == 1 ? "S" : "B", badge, Justification::centred);
             }
         }
@@ -183,13 +185,13 @@ public:
             const auto h = levelHandle (b);
             const bool hot = b == hoverHandle || b == draggingHandle;
             g.setColour (Colours_::band (b).withAlpha (0.25f));
-            g.drawHorizontalLine ((int) h.getCentreY(), bandRegion (b).getX() + 2.0f, bandRegion (b).getRight() - 2.0f);
+            px.hline (h.getCentreY(), bandRegion (b).getX() + 2.0f, bandRegion (b).getRight() - 2.0f);
             g.setColour (hot ? Colours_::band (b) : Colours_::panelTop);
             g.fillRoundedRectangle (h, 5.0f);
             g.setColour (Colours_::band (b));
             g.drawRoundedRectangle (h, 5.0f, 1.2f);
             g.setColour (hot ? Colour (0xff140900) : Colours_::text);
-            g.setFont (Fonts::medium (11.5f));
+            g.setFont (Fonts::medium (Fonts::Size::micro));
             const float lvDb = value (ID::satBand (b, "Level"));
             g.drawText ((altHeld && hot ? "DRV " + String (value (ID::satBand (b, "Drive")), 1)
                                         : (lvDb > 0 ? "+" : "") + String (lvDb, 1)) + " dB", h, Justification::centred);
@@ -208,7 +210,7 @@ public:
             g.setColour (hot ? Colours_::accent : Colours_::outlineHi);
             g.drawRoundedRectangle (handle, 9.0f, 1.0f);
             g.setColour (hot ? Colour (0xff140900) : Colours_::text);
-            g.setFont (Fonts::medium (11.5f));
+            g.setFont (Fonts::medium (Fonts::Size::micro));
             const float f = crossover (j);
             g.drawText (f < 1000 ? String (roundToInt (f)) : String (f / 1000.0f, 1) + "k", handle, Justification::centred);
         }
@@ -220,7 +222,7 @@ public:
             g.setColour (Colours_::accent);
             g.fillEllipse (plus);
             Icons::draw (g, [] { Path p; p.startNewSubPath (0.5f, 0.22f); p.lineTo (0.5f, 0.78f); p.startNewSubPath (0.22f, 0.5f); p.lineTo (0.78f, 0.5f); return p; }(),
-                         plus.reduced (3.0f), Colour (0xff140900), 2.0f);
+                         plus.reduced (4.0f), Colour (0xff140900), 2.0f);
         }
 
         if (! enabled)
@@ -271,7 +273,7 @@ public:
 
         for (int b = 0; b < nb; ++b)
             for (int k = 0; k < 3; ++k)
-                if (badgeRect (b, k).contains (e.position))
+                if (badgeFits (b, k) && badgeRect (b, k).contains (e.position))
                 {
                     const char* sfx = k == 0 ? "Mute" : k == 1 ? "Solo" : "Bypass";
                     const bool on = value (ID::satBand (b, sfx)) > 0.5f;
@@ -425,8 +427,10 @@ private:
     juce::Rectangle<float> badgeRect (int b, int k) const
     {
         const auto region = bandRegion (b);
-        return { region.getX() + 8.0f + (float) k * 22.0f, region.getY() + 30.0f, 19.0f, 18.0f };
+        return { region.getX() + 8.0f + (float) k * 25.0f, region.getY() + 30.0f, 22.0f, 20.0f };
     }
+    /** Badges that would spill into the next band (crossovers close together) are left out. */
+    bool badgeFits (int b, int k) const { return badgeRect (b, k).getRight() <= bandRegion (b).getRight() - 4.0f; }
 
     juce::Rectangle<float> levelHandle (int b) const
     {
@@ -448,7 +452,7 @@ private:
         return mouseInside && satBands::count (apvts) < sat::maxBands && hoverCrossover < 0 && hoverHandle < 0
             && mousePos.y < plot.getY() + 26.0f && plot.contains (mousePos);
     }
-    juce::Rectangle<float> addButtonRect() const { return juce::Rectangle<float> (18.0f, 18.0f).withCentre ({ mousePos.x, plot.getY() + 12.0f }); }
+    juce::Rectangle<float> addButtonRect() const { return juce::Rectangle<float> (22.0f, 22.0f).withCentre ({ mousePos.x, plot.getY() + 13.0f }); }
 
     int hitCrossover (juce::Point<float> p) const
     {
@@ -564,15 +568,15 @@ public:
 
     void paint (juce::Graphics& g) override
     {
-        drawSectionPanel (g, displayArea, "MULTIBAND SATURATION", Colours_::accent);
-        drawSectionPanel (g, bandArea, "BAND " + juce::String (band + 1), Colours_::band (band));
-        drawSectionPanel (g, globalArea, "GLOBAL", Colours_::accent);
-        drawGroupCaption (g, levelCaption, "MIX  /  LEVEL");
-        drawGroupCaption (g, colourCaption, "FEEDBACK  /  DYNAMICS");
-        drawGroupCaption (g, toneCaption, "TONE");
+        drawSectionPanel (g, *this, displayArea, "MULTIBAND SATURATION", Colours_::accent);
+        drawSectionPanel (g, *this, bandArea, "BAND " + juce::String (band + 1), Colours_::band (band));
+        drawSectionPanel (g, *this, globalArea, "GLOBAL", Colours_::accent);
+        drawGroupCaption (g, *this, levelCaption, "MIX  /  LEVEL");
+        drawGroupCaption (g, *this, colourCaption, "FEEDBACK  /  DYNAMICS");
+        drawGroupCaption (g, *this, toneCaption, "TONE");
 
         g.setColour (Colours_::textDim);
-        g.setFont (Fonts::label (11.5f, 0.14f));
+        g.setFont (Fonts::label (Fonts::Size::caption, 0.12f));
         g.drawText ("BANDS", bandCount.getBounds().translated (0, -18).withHeight (16), juce::Justification::centredLeft);
         g.drawText ("CHANNEL MODE", channelMode.getBounds().translated (0, -18).withHeight (16), juce::Justification::centredLeft);
     }
@@ -581,14 +585,14 @@ public:
     {
         auto r = getLocalBounds();
         displayArea = r.removeFromTop (r.getHeight() * 44 / 100);
-        powerButton.setBounds (displayArea.withHeight (28).removeFromRight (32).reduced (4));
+        powerButton.setBounds (displayArea.withHeight (28).removeFromRight (32).reduced (2));
         display.setBounds (displayArea.reduced (10).withTrimmedTop (30));
         r.removeFromTop (12);
 
         globalArea = r.removeFromRight (300);
         r.removeFromRight (12);
         bandArea = r;
-        removeButton.setBounds (bandArea.withHeight (28).removeFromRight (32).reduced (5));
+        removeButton.setBounds (bandArea.withHeight (28).removeFromRight (32).reduced (3));
 
         // Band panel: [style, M/S/B, drive + drive pan] [mix/level row, feedback/dynamics row] [tone sliders]
         {

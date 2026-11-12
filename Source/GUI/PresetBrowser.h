@@ -12,7 +12,7 @@ public:
     PresetBrowserOverlay (PresetManager& pm, juce::PropertiesFile* settingsFile) : presets (pm), settings (settingsFile)
     {
         cardSize = { 820, 590 };
-        search.setTextToShowWhenEmpty ("Search presets...", Colours_::textFaint);
+        search.setTextToShowWhenEmpty ("Search presets...", Colours_::textMuted);
         search.setFont (juce::Font (Fonts::regular (15.0f)));
         search.setIndents (12, 8);
         search.addListener (this);
@@ -71,7 +71,7 @@ protected:
         g.setColour (Colours_::text);
         g.setFont (Fonts::display (20.0f, 0.18f));
         g.drawText ("PRESETS", r.removeFromTop (30), juce::Justification::centredLeft);
-        g.setColour (Colours_::textFaint);
+        g.setColour (Colours_::textMuted);
         g.setFont (Fonts::regular (12.5f));
         g.drawText (juce::String ((int) rows.size()) + " presets  \xc2\xb7  click to audition, double-click or Enter to load, star to favourite",
                     c.reduced (24, 14).removeFromBottom (18), juce::Justification::centredLeft);
@@ -120,7 +120,7 @@ private:
         g.setFont (Fonts::medium (14.5f));
         g.drawText (row.name, r, juce::Justification::centredLeft);
         g.setColour (Colours_::textDim);
-        g.setFont (Fonts::label (11.5f, 0.08f));
+        g.setFont (Fonts::label (Fonts::Size::micro, 0.08f));
         g.drawText ((row.user ? juce::String ("USER") : row.category.toUpperCase()), r, juce::Justification::centredRight);
         g.setColour (Colours_::outline.withAlpha (0.6f));
         g.drawHorizontalLine (h - 1, 0.0f, (float) w);

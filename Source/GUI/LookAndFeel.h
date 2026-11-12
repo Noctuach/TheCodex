@@ -21,7 +21,11 @@ namespace Colours_
     const juce::Colour warn       { 0xffff4d4d };
     const juce::Colour text       { 0xffefedea };
     const juce::Colour textDim    { 0xff9a9590 };
+    /** Faint: disabled / inactive states, placeholders and decoration (chevrons). Not for text that carries information. */
     const juce::Colour textFaint  { 0xff5c5955 };
+    /** Muted: the quietest text that still carries information (axis scales, empty states, counts).
+        At least 4.1:1 on every surface (4.5 on the background), clearly below textDim. */
+    const juce::Colour textMuted  { 0xff7a7671 };
     const juce::Colour grid       { 0xff161616 };
 
     inline juce::Colour band (int i)
@@ -73,6 +77,82 @@ namespace Fonts
     inline juce::FontOptions label (float h, float tracking = 0.08f) { return make (faces().condensed, h).withKerningFactor (tracking); }
     /** Headlines / logo. */
     inline juce::FontOptions display (float h, float tracking = 0.18f) { return make (faces().condensedBold, h).withKerningFactor (tracking); }
+
+    /** The type scale (base px at 100 %; the UI never goes below 75 %). Display sizes (19 / 20 / 28 / 34) stay as they are.
+        micro is the floor: nothing smaller is drawn. */
+    namespace Size
+    {
+        constexpr float micro   = 11.5f;   // axis ticks, chips, badges, compact readouts
+        constexpr float caption = 12.0f;   // knob / group captions, in-display pane titles
+        constexpr float body    = 13.0f;   // values, body text
+        constexpr float title   = 14.5f;   // panel titles, tabs
+    }
+
+    /** Graph axis labels: one face, size and tracking for every plot. */
+    inline juce::FontOptions axis() { return label (Size::micro, 0.06f); }
+}
+
+//==============================================================================
+/** UI-wide state constants. */
+namespace Ui
+{
+    /** Component alpha of a disabled (greyed-out) control. The only dimming: labels draw at full colour (see drawLabel). */
+    constexpr float disabledAlpha = 0.5f;
+}
+
+//==============================================================================
+/**
+    Device-pixel snapping for axis-aligned hairlines. The whole UI is drawn under one AffineTransform (window scale x host
+    DPI), so a 1-unit line at 60 / 75 / 150 % would be smeared over two device rows at reduced contrast. A Snap places lines
+    on whole device pixels and makes them exactly one device pixel thick (two at 2x), giving the same result as
+    drawHorizontalLine / drawVerticalLine at 100 % and 200 %.
+*/
+namespace Px
+{
+    class Snap
+    {
+    public:
+        Snap (juce::Graphics& gr, const juce::Component& c) : g (gr)
+        {
+            s = juce::jmax (0.25f, g.getInternalContext().getPhysicalPixelScaleFactor());
+            if (auto* top = c.getTopLevelComponent(); top != nullptr && top != &c)
+            {
+                const auto p0 = top->getLocalPoint (&c, juce::Point<float>());
+                const auto p1 = top->getLocalPoint (&c, juce::Point<float> (1.0f, 0.0f));
+                const float k = juce::jmax (1.0e-3f, p0.getDistanceFrom (p1));   // top-level units per local unit
+                origin = p0 * (s / k);                                            // this component's origin, in device pixels
+            }
+            hair = juce::jmax (1.0f, std::floor (s + 0.25f)) / s;
+        }
+
+        /** Device scale (device pixels per local unit). */
+        float scale() const noexcept { return s; }
+        /** Line width: one device pixel (two at 2x and above), in local units. */
+        float hairline() const noexcept { return hair; }
+
+        float x (float v) const { return (std::round (origin.x + v * s) - origin.x) / s; }
+        float y (float v) const { return (std::round (origin.y + v * s) - origin.y) / s; }
+        juce::Rectangle<float> rect (juce::Rectangle<float> r) const
+        {
+            const float l = x (r.getX()), t = y (r.getY());
+            return { l, t, x (r.getRight()) - l, y (r.getBottom()) - t };
+        }
+
+        /** Same contract as Graphics::drawHorizontalLine / drawVerticalLine (the line occupies [v, v + 1) at 100 %). */
+        void hline (float yy, float x0, float x1) const { if (x1 > x0) g.fillRect (juce::Rectangle<float> (x0, y (yy), x1 - x0, hair)); }
+        void vline (float xx, float y0, float y1) const { if (y1 > y0) g.fillRect (juce::Rectangle<float> (x (xx), y0, hair, y1 - y0)); }
+
+        /** A rounded border along the inside of r: replaces drawRoundedRectangle (r.reduced (0.5f), radius, 1.0f). */
+        void border (juce::Rectangle<float> r, float radius) const
+        {
+            g.drawRoundedRectangle (rect (r).reduced (hair * 0.5f), radius, hair);
+        }
+
+    private:
+        juce::Graphics& g;
+        float s = 1.0f, hair = 1.0f;
+        juce::Point<float> origin;
+    };
 }
 
 //==============================================================================
@@ -210,13 +290,14 @@ public:
 
     void paintButton (juce::Graphics& g, bool over, bool down) override
     {
-        auto r = getLocalBounds().toFloat().reduced (0.5f);
+        const Px::Snap px (g, *this);
+        auto r = px.rect (getLocalBounds().toFloat()).reduced (px.hairline() * 0.5f);
         if (frame)
         {
             g.setColour (down ? Colours_::outlineHi : (over ? Colours_::panelTop.brighter (0.1f) : Colours_::display));
             g.fillRoundedRectangle (r, 5.0f);
             g.setColour (over ? Colours_::outlineHi : Colours_::outline);
-            g.drawRoundedRectangle (r, 5.0f, 1.0f);
+            g.drawRoundedRectangle (r, 5.0f, px.hairline());
         }
         auto c = getToggleState() ? Colours_::accent : (over ? Colours_::text : Colours_::textDim);
         if (! isEnabled()) c = Colours_::textFaint;
@@ -463,19 +544,49 @@ public:
         if (l.getProperties().contains ("captionLarge"))
             return juce::Font (Fonts::label (14.0f, 0.12f));
         if (l.getProperties().contains ("caption"))
-            return juce::Font (Fonts::label (11.5f, 0.09f));
-        return juce::Font (Fonts::regular (13.0f));
+            return juce::Font (Fonts::label (Fonts::Size::caption, 0.08f));
+        return juce::Font (Fonts::regular (Fonts::Size::body));
     }
+
+    /** As LookAndFeel_V2::drawLabel, without its extra 0.5 alpha for disabled labels: a disabled control is dimmed once,
+        by its component alpha (Ui::disabledAlpha), instead of twice (which left captions at ~1.25:1). */
+    void drawLabel (juce::Graphics& g, juce::Label& label) override
+    {
+        g.fillAll (label.findColour (juce::Label::backgroundColourId));
+        if (! label.isBeingEdited())
+        {
+            const juce::Font font (getLabelFont (label));
+            g.setColour (label.findColour (juce::Label::textColourId));
+            g.setFont (font);
+            auto textArea = getLabelBorderSize (label).subtractedFrom (label.getLocalBounds());
+            g.drawFittedText (label.getText(), textArea, label.getJustificationType(),
+                              juce::jmax (1, (int) ((float) textArea.getHeight() / font.getHeight())),
+                              label.getMinimumHorizontalScale());
+            g.setColour (label.findColour (juce::Label::outlineColourId));
+        }
+        else if (label.isEnabled())
+        {
+            g.setColour (label.findColour (juce::Label::outlineColourId));
+        }
+        g.drawRect (label.getLocalBounds());
+    }
+
+    //==========================================================================
+    /** The editor's window scale (set by CodexEditor::resized). Popup menus and tooltips inherit the view transform, so
+        below 90 % their text would shrink to 8-11 px; popupScale() compensates (1.0 at 90 % and above). */
+    float uiScale = 1.0f;
+    float popupScale() const { return juce::jmax (1.0f, 0.9f / juce::jmax (0.1f, uiScale)); }
 
     //==========================================================================
     void drawComboBox (juce::Graphics& g, int w, int h, bool, int, int, int, int, juce::ComboBox& box) override
     {
-        auto r = juce::Rectangle<float> (0, 0, (float) w, (float) h).reduced (0.5f);
+        const Px::Snap px (g, box);
+        auto r = px.rect (juce::Rectangle<float> (0, 0, (float) w, (float) h)).reduced (px.hairline() * 0.5f);
         const bool hot = box.isMouseOver (true) || box.isPopupActive();
         g.setColour (hot ? Colours_::panelTop.brighter (0.05f) : Colours_::panelTop);
         g.fillRoundedRectangle (r, 4.0f);
         g.setColour (hot ? Colours_::outlineHi.brighter (0.2f) : Colours_::outline);
-        g.drawRoundedRectangle (r, 4.0f, 1.0f);
+        g.drawRoundedRectangle (r, 4.0f, px.hairline());
         Icons::draw (g, Icons::chevronDown(), juce::Rectangle<float> ((float) w - 22.0f, 0.0f, 14.0f, (float) h).withSizeKeepingCentre (10.0f, 10.0f),
                      hot ? Colours_::text : Colours_::textDim, 1.4f);
     }
@@ -490,11 +601,11 @@ public:
 
     juce::PopupMenu::Options getOptionsForComboBoxPopupMenu (juce::ComboBox& box, juce::Label& label) override
     {
-        return LookAndFeel_V4::getOptionsForComboBoxPopupMenu (box, label).withStandardItemHeight (26);
+        return LookAndFeel_V4::getOptionsForComboBoxPopupMenu (box, label).withStandardItemHeight (juce::roundToInt (26.0f * popupScale()));
     }
 
     //==========================================================================
-    juce::Font getPopupMenuFont() override { return juce::Font (Fonts::medium (14.5f)); }
+    juce::Font getPopupMenuFont() override { return juce::Font (Fonts::medium (14.5f * popupScale())); }
 
     void drawPopupMenuBackground (juce::Graphics& g, int w, int h) override
     {
@@ -507,6 +618,7 @@ public:
                             bool isHighlighted, bool isTicked, bool hasSubMenu, const juce::String& text,
                             const juce::String& shortcutKeyText, const juce::Drawable*, const juce::Colour*) override
     {
+        const float k = popupScale();
         if (isSeparator)
         {
             g.setColour (Colours_::outline);
@@ -522,41 +634,45 @@ public:
         if (isTicked)
         {
             g.setColour (Colours_::accent);
-            g.fillEllipse (juce::Rectangle<float> (6.0f, 6.0f).withCentre ({ r.getX() + 11.0f, r.getCentreY() }));
+            g.fillEllipse (juce::Rectangle<float> (6.0f * k, 6.0f * k).withCentre ({ r.getX() + 11.0f * k, r.getCentreY() }));
         }
         g.setColour (! isActive ? Colours_::textFaint : (isHighlighted ? juce::Colours::white : (isTicked ? Colours_::accentHi : Colours_::text)));
         g.setFont (getPopupMenuFont());
-        g.drawText (text, r.withTrimmedLeft (22.0f).withTrimmedRight (24.0f), juce::Justification::centredLeft);
+        g.drawText (text, r.withTrimmedLeft (22.0f * k).withTrimmedRight (24.0f * k), juce::Justification::centredLeft);
         if (shortcutKeyText.isNotEmpty())
         {
             g.setColour (Colours_::textDim);
-            g.setFont (Fonts::regular (12.5f));
-            g.drawText (shortcutKeyText, r.withTrimmedRight (10.0f), juce::Justification::centredRight);
+            g.setFont (Fonts::regular (12.5f * k));
+            g.drawText (shortcutKeyText, r.withTrimmedRight (10.0f * k), juce::Justification::centredRight);
         }
         if (hasSubMenu)
-            Icons::draw (g, Icons::chevronRight(), r.removeFromRight (20.0f).withSizeKeepingCentre (10.0f, 10.0f), Colours_::textDim, 1.4f);
+            Icons::draw (g, Icons::chevronRight(), r.removeFromRight (20.0f * k).withSizeKeepingCentre (10.0f * k, 10.0f * k), Colours_::textDim, 1.4f);
     }
 
     void drawPopupMenuSectionHeader (juce::Graphics& g, const juce::Rectangle<int>& area, const juce::String& name) override
     {
+        const float k = popupScale();
         g.setColour (Colours_::textDim);
-        g.setFont (Fonts::label (11.0f, 0.18f));
-        g.drawText (name.toUpperCase(), area.reduced (14, 0).withTrimmedTop (4), juce::Justification::centredLeft);
+        g.setFont (Fonts::label (11.0f * k, 0.18f));
+        g.drawText (name.toUpperCase(), area.reduced (juce::roundToInt (14.0f * k), 0).withTrimmedTop (4), juce::Justification::centredLeft);
     }
 
     void getIdealPopupMenuItemSize (const juce::String& text, bool isSeparator, int standardHeight, int& w, int& h) override
     {
-        if (isSeparator) { w = 50; h = 9; return; }
-        h = standardHeight > 0 ? standardHeight : 28;
+        const float k = popupScale();
+        if (isSeparator) { w = 50; h = juce::roundToInt (9.0f * k); return; }
+        h = standardHeight > 0 ? standardHeight : juce::roundToInt (28.0f * k);
         juce::GlyphArrangement ga;
         ga.addLineOfText (getPopupMenuFont(), text, 0, 0);
-        w = (int) ga.getBoundingBox (0, -1, true).getWidth() + 60;
+        w = (int) ga.getBoundingBox (0, -1, true).getWidth() + juce::roundToInt (60.0f * k);
     }
 
     //==========================================================================
     void drawButtonBackground (juce::Graphics& g, juce::Button& b, const juce::Colour& bg, bool over, bool down) override
     {
-        auto r = b.getLocalBounds().toFloat().reduced (0.5f);
+        const Px::Snap px (g, b);
+        const float hair = px.hairline();
+        auto r = px.rect (b.getLocalBounds().toFloat()).reduced (hair * 0.5f);
         const auto id = b.getComponentID();
 
         if (id == "kick")
@@ -591,7 +707,7 @@ public:
                 g.setColour (over ? Colours_::panelTop.brighter (0.04f) : Colours_::panelTop);
             g.fillRoundedRectangle (r, 4.0f);
             g.setColour (on ? Colours_::accent.withAlpha (0.8f) : (over ? Colours_::outlineHi : Colours_::outline));
-            g.drawRoundedRectangle (r, 4.0f, 1.0f);
+            g.drawRoundedRectangle (r, 4.0f, hair);
             return;
         }
 
@@ -609,7 +725,7 @@ public:
                 g.setColour (over ? Colours_::panelTop.brighter (0.04f) : Colours_::panelTop);
             g.fillPath (p);
             g.setColour (on ? Colours_::accent.withAlpha (0.8f) : Colours_::outline);
-            g.strokePath (p, juce::PathStrokeType (1.0f));
+            g.strokePath (p, juce::PathStrokeType (hair));
             return;
         }
 
@@ -618,7 +734,7 @@ public:
         g.setColour (c);
         g.fillRoundedRectangle (r, 5.0f);
         g.setColour (b.getToggleState() ? c.brighter (0.3f) : (over ? Colours_::outlineHi : Colours_::outline));
-        g.drawRoundedRectangle (r, 5.0f, 1.0f);
+        g.drawRoundedRectangle (r, 5.0f, hair);
     }
 
     void drawButtonText (juce::Graphics& g, juce::TextButton& b, bool over, bool) override
@@ -664,15 +780,17 @@ public:
 
     void drawTextEditorOutline (juce::Graphics& g, int w, int h, juce::TextEditor& te) override
     {
+        const Px::Snap px (g, te);
         g.setColour (te.hasKeyboardFocus (true) ? Colours_::accent : Colours_::outline);
-        g.drawRoundedRectangle (0.5f, 0.5f, (float) w - 1.0f, (float) h - 1.0f, 5.0f, 1.0f);
+        px.border (juce::Rectangle<float> (0.0f, 0.0f, (float) w, (float) h), 5.0f);
     }
 
     //==========================================================================
     juce::Rectangle<int> getTooltipBounds (const juce::String& tip, juce::Point<int> pos, juce::Rectangle<int> parentArea) override
     {
-        const auto layout = tooltipLayout (tip);
-        const int w = (int) std::ceil (layout.getWidth()) + 22, h = (int) std::ceil (layout.getHeight()) + 14;
+        const float k = popupScale();
+        const auto layout = tooltipLayout (tip, k);
+        const int w = (int) std::ceil (layout.getWidth() + 22.0f * k), h = (int) std::ceil (layout.getHeight() + 14.0f * k);
         return juce::Rectangle<int> (pos.x > parentArea.getCentreX() ? pos.x - (w + 12) : pos.x + 18,
                                      pos.y > parentArea.getCentreY() ? pos.y - (h + 8) : pos.y + 18, w, h)
                    .constrainedWithin (parentArea);
@@ -685,11 +803,12 @@ public:
         g.fillRoundedRectangle (r, 6.0f);
         g.setColour (Colours_::outlineHi);
         g.drawRoundedRectangle (r.reduced (0.5f), 6.0f, 1.0f);
-        tooltipLayout (text).draw (g, r.reduced (11.0f, 7.0f));
+        const float k = popupScale();
+        tooltipLayout (text, k).draw (g, r.reduced (11.0f * k, 7.0f * k));
     }
 
 private:
-    static juce::TextLayout tooltipLayout (const juce::String& text)
+    static juce::TextLayout tooltipLayout (const juce::String& text, float k)
     {
         juce::AttributedString s;
         s.setJustification (juce::Justification::topLeft);
@@ -697,13 +816,13 @@ private:
         const int colon = text.indexOfChar (':');
         if (colon > 0 && colon < 28)
         {
-            s.append (text.substring (0, colon) + "\n", juce::Font (Fonts::semibold (14.0f)), Colours_::accentHi);
-            s.append (text.substring (colon + 1).trim(), juce::Font (Fonts::regular (13.5f)), Colours_::text);
+            s.append (text.substring (0, colon) + "\n", juce::Font (Fonts::semibold (14.0f * k)), Colours_::accentHi);
+            s.append (text.substring (colon + 1).trim(), juce::Font (Fonts::regular (13.5f * k)), Colours_::text);
         }
         else
-            s.append (text, juce::Font (Fonts::regular (13.5f)), Colours_::text);
+            s.append (text, juce::Font (Fonts::regular (13.5f * k)), Colours_::text);
         juce::TextLayout tl;
-        tl.createLayoutWithBalancedLineLengths (s, 300.0f);
+        tl.createLayoutWithBalancedLineLengths (s, 300.0f * k);
         return tl;
     }
 

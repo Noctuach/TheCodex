@@ -37,11 +37,12 @@ public:
     void paint (juce::Graphics& g) override
     {
         using namespace juce;
+        const Px::Snap px (g, *this);
         auto r = getLocalBounds().toFloat();
         g.setColour (Colours_::display);
         g.fillRoundedRectangle (r, 6.0f);
         g.setColour (Colours_::outline);
-        g.drawRoundedRectangle (r.reduced (0.5f), 6.0f, 1.0f);
+        px.border (r, 6.0f);
 
         const auto& m = kick909Models()[(size_t) jlimit (0, (int) kick909Models().size() - 1, (int) shown[0])];
         const float land = landingMs (m, shown[1]);
@@ -49,28 +50,25 @@ public:
         const float peak = semisAt (m, shown[1], shown[2], 0.0f);
         const float top = std::max (24.0f, std::ceil (peak / 12.0f) * 12.0f);
 
-        auto plot = r.reduced (10.0f, 8.0f).withTrimmedLeft (34.0f).withTrimmedBottom (12.0f).withTrimmedTop (12.0f);
+        auto plot = r.reduced (10.0f, 8.0f).withTrimmedLeft (34.0f).withTrimmedBottom (14.0f).withTrimmedTop (12.0f);
         auto X = [&] (float ms) { return plot.getX() + ms / spanMs * plot.getWidth(); };
         auto Y = [&] (float st) { return plot.getBottom() - st / top * plot.getHeight(); };
 
         // grid: octaves and time
-        g.setFont (Fonts::label (10.0f, 0.06f));
         for (float st = 0.0f; st <= top + 0.1f; st += 12.0f)
         {
             g.setColour (Colours_::grid.brighter (st == 0.0f ? 0.6f : 0.25f));
-            g.drawHorizontalLine (roundToInt (Y (st)), plot.getX(), plot.getRight());
+            px.hline (Y (st), plot.getX(), plot.getRight());
             if (plot.getHeight() < 90.0f && st > 0.0f && st < top - 0.1f) continue;   // small display: root and top only
-            g.setColour (Colours_::textFaint);
-            g.drawText (st == 0.0f ? String ("ROOT") : "+" + String (roundToInt (st)), Rectangle<float> (r.getX() + 4.0f, Y (st) - 6.0f, 38.0f, 12.0f),
-                        Justification::centredRight);
+            drawAxisText (g, st == 0.0f ? String ("ROOT") : "+" + String (roundToInt (st)), Rectangle<float> (r.getX() + 4.0f, Y (st) - 7.0f, 38.0f, 14.0f),
+                          Justification::centredRight, st < 0.5f);
         }
         const float step = spanMs > 200.0f ? 50.0f : 25.0f;
         for (float t = step; t < spanMs; t += step)
         {
             g.setColour (Colours_::grid.brighter (0.25f));
-            g.drawVerticalLine (roundToInt (X (t)), plot.getY(), plot.getBottom());
-            g.setColour (Colours_::textFaint);
-            g.drawText (String (roundToInt (t)) + " ms", Rectangle<float> (X (t) - 24.0f, plot.getBottom() + 1.0f, 48.0f, 12.0f), Justification::centred);
+            px.vline (X (t), plot.getY(), plot.getBottom());
+            drawAxisText (g, String (roundToInt (t)) + " ms", Rectangle<float> (X (t) - 24.0f, plot.getBottom() + 1.0f, 48.0f, 14.0f), Justification::centred);
         }
 
         // the sweep
@@ -95,13 +93,13 @@ public:
             g.setColour (Colours_::accent.withAlpha (0.7f));
             const float lx = X (land);
             for (float y = plot.getY(); y < plot.getBottom(); y += 6.0f)
-                g.drawVerticalLine (roundToInt (lx), y, std::min (y + 3.0f, plot.getBottom()));
+                px.vline (lx, y, std::min (y + 3.0f, plot.getBottom()));
             g.fillEllipse (Rectangle<float> (7.0f, 7.0f).withCentre ({ lx, Y (0.0f) }));
         }
-        g.setFont (Fonts::label (10.5f, 0.1f));
+        g.setFont (Fonts::label (Fonts::Size::micro, 0.08f));
         g.setColour (Colours_::textDim);
-        g.drawText ("+" + String (peak, 1) + " ST AT THE HIT   /   ON THE ROOT AFTER " + String (roundToInt (land)) + " MS",
-                    plot.withHeight (14.0f).translated (0.0f, -12.0f), Justification::centredRight);
+        g.drawText ("+" + String (peak, 1) + " ST AT HIT" + String::fromUTF8 ("  \xc2\xb7  ") + "ROOT AFTER " + String (roundToInt (land)) + " MS",
+                    plot.withHeight (14.0f).translated (0.0f, -14.0f), Justification::centredRight);
     }
 
 private:

@@ -21,6 +21,34 @@
 
 class CodexProcessor;
 
+/**
+    The user settings file (UI size, tooltips, preset favourites), shared by every editor in the process so that one
+    instance cannot write back a stale copy of another's values. The process lock keeps writes from plug-in instances in
+    other processes (sandboxed / bridged hosts, the Standalone beside a DAW) from interleaving.
+*/
+struct CodexSettings
+{
+    CodexSettings()
+    {
+        juce::PropertiesFile::Options o;
+        o.applicationName = "Codex";
+        o.filenameSuffix = ".settings";
+       #if JUCE_LINUX
+        o.folderName = ".config/Codex";   // keep the user's home folder tidy
+       #else
+        o.folderName = "Codex";
+       #endif
+        o.osxLibrarySubFolder = "Application Support";
+        o.millisecondsBeforeSaving = 500;
+        o.processLock = &lock;
+        props.setStorageParameters (o);
+    }
+    juce::PropertiesFile* user() { return props.getUserSettings(); }
+
+    juce::InterProcessLock lock { "CodexSettings" };   // declared first: outlives the properties, which save on destruction
+    juce::ApplicationProperties props;
+};
+
 /** The complete UI at its design size. The editor scales this view to the window size. */
 class MainView : public juce::Component, private juce::Timer
 {
@@ -41,6 +69,8 @@ public:
     void mouseUp (const juce::MouseEvent&) override;
     void openSaveDialog() { presetBar.onSaveRequested(); }
     std::function<void (float)> onScaleRequested;
+    /** The window's actual scale (window width / baseWidth) and the largest scale that fits the editor's screen. */
+    std::function<float()> getWindowScale, getFitScale;
 
 private:
     void timerCallback() override;
@@ -157,16 +187,25 @@ public:
     explicit CodexEditor (CodexProcessor&);
     ~CodexEditor() override;
 
+    void paint (juce::Graphics&) override;
     void resized() override;
+    void parentHierarchyChanged() override;
     void showTab (int tab) { view.showTab (tab); }
     MainView& getView() { return view; }
 
+    static constexpr float minScale = 0.75f;    // smallest size offered by the menu and the resize corner
+    static constexpr float maxScale = 2.0f;
+
 private:
     void applyScale (float scale);
+    /** The largest scale whose window fits the work area of the editor's display (or, before the editor is on screen, the
+        display under the mouse). Never below 0.6, so a very small screen still gets a window. */
+    float maxScaleForScreen() const;
 
     bool initialised = false;   // only save the window size once the user can actually change it
+    bool screenChecked = false; // the one-shot fit check once the editor has a peer
     CodexLookAndFeel lnf;
-    juce::ApplicationProperties appProperties;
+    juce::SharedResourcePointer<CodexSettings> settings;
     MainView view;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (CodexEditor)

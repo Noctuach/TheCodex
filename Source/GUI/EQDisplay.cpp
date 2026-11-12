@@ -241,7 +241,7 @@ void EQDisplay::paint (Graphics& g)
     g.setColour (Colours_::display);
     g.fillRoundedRectangle (getLocalBounds().toFloat(), 5.0f);
     g.setColour (Colours_::outline);
-    g.drawRoundedRectangle (getLocalBounds().toFloat().reduced (0.5f), 5.0f, 1.0f);
+    Px::Snap (g, *this).border (getLocalBounds().toFloat(), 5.0f);
 
     drawGrid (g);
     drawAnalyzer (g);
@@ -252,7 +252,7 @@ void EQDisplay::paint (Graphics& g)
 
 void EQDisplay::drawGrid (Graphics& g)
 {
-    g.setFont (Fonts::regular (11.0f));
+    const Px::Snap px (g, *this);
     const float freqs[] = { 20, 30, 40, 50, 60, 80, 100, 200, 300, 400, 500, 800, 1000, 2000, 3000, 4000, 5000, 8000, 10000, 20000 };
     for (float f : freqs)
     {
@@ -260,13 +260,13 @@ void EQDisplay::drawGrid (Graphics& g)
         const bool major = exactlyEqual (f, 50.0f) || exactlyEqual (f, 100.0f) || exactlyEqual (f, 500.0f)
                         || exactlyEqual (f, 1000.0f) || exactlyEqual (f, 5000.0f) || exactlyEqual (f, 10000.0f);
         g.setColour (major ? Colours_::grid.brighter (0.35f) : Colours_::grid);
-        g.drawVerticalLine (roundToInt (x), plot.getY(), plot.getBottom());
+        px.vline (x, plot.getY(), plot.getBottom());
         if (major || exactlyEqual (f, 20.0f) || exactlyEqual (f, 20000.0f))
         {
+            // the EQ keeps every label at textDim (it is the main editing display)
             const String label = f >= 1000 ? String ((int) (f / 1000)) + "k" : String ((int) f);
-            g.setColour (Colours_::textDim);
             const float lx = jlimit (plot.getX(), plot.getRight() - 40.0f, x - 20.0f);
-            g.drawText (label, Rectangle<float> (lx, plot.getBottom() + 1, 40, 14), f <= 20 ? Justification::centredLeft : Justification::centred);
+            drawAxisText (g, label, Rectangle<float> (lx, plot.getBottom() + 1, 40, 14), f <= 20 ? Justification::centredLeft : Justification::centred, true);
         }
     }
 
@@ -275,9 +275,8 @@ void EQDisplay::drawGrid (Graphics& g)
     {
         const float y = gainToY (db);
         g.setColour (std::abs (db) < 0.01f ? Colours_::grid.brighter (0.7f) : Colours_::grid);
-        g.drawHorizontalLine (roundToInt (y), plot.getX(), plot.getRight());
-        g.setColour (Colours_::textDim);
-        g.drawText ((db > 0 ? "+" : "") + String ((int) db), Rectangle<float> (plot.getRight() + 2, y - 7, 28, 14), Justification::centredLeft);
+        px.hline (y, plot.getX(), plot.getRight());
+        drawAxisText (g, (db > 0 ? "+" : "") + String ((int) db), Rectangle<float> (plot.getRight() + 3, y - 7, 28, 14), Justification::centredLeft, true);
     }
 }
 
@@ -405,7 +404,7 @@ void EQDisplay::drawCurves (Graphics& g)
     // Legend when channel-specific bands exist
     if (anyGroup)
     {
-        g.setFont (Fonts::label (11.0f, 0.14f));
+        g.setFont (Fonts::label (Fonts::Size::micro, 0.12f));
         float x = plot.getX() + 10.0f;
         const float y = plot.getY() + 34.0f;
         for (int p = 0; p < 5; ++p)
@@ -439,8 +438,8 @@ void EQDisplay::drawNodes (Graphics& g)
             g.setColour (col);
             g.fillEllipse (circle);
             g.setColour (Colours::black);
-            g.setFont (Fonts::semibold (10.0f));
-            g.drawText (String (b + 1), circle, Justification::centred);
+            g.setFont (Fonts::semibold (Fonts::Size::micro));
+            g.drawText (String (b + 1), circle, Justification::centred, false);
         }
         else
         {
@@ -456,11 +455,11 @@ void EQDisplay::drawNodes (Graphics& g)
 
         if (s.placement != eq::Placement::Stereo)
         {
-            auto badge = Rectangle<float> (13.0f, 13.0f).withCentre (pos.translated (10.0f, -10.0f));
+            auto badge = Rectangle<float> (14.0f, 14.0f).withCentre (pos.translated (10.5f, -10.5f));
             g.setColour (placementColour (s.placement));
             g.fillEllipse (badge);
             g.setColour (Colours::black);
-            g.setFont (Fonts::label (10.0f, 0.0f));
+            g.setFont (Fonts::label (Fonts::Size::micro, 0.0f));
             g.drawText (placementTag (s.placement), badge, Justification::centred);
         }
 
@@ -500,7 +499,7 @@ void EQDisplay::drawHoverReadout (Graphics& g)
                       + noteNameFor (n) + String (octaveFor (n)) + (cents == 0 ? String() : String (cents > 0 ? " +" : " ") + String (cents) + "c");
 
     g.setColour (Colours_::textDim.withAlpha (0.35f));
-    g.drawVerticalLine ((int) mousePos.x, plot.getY(), plot.getBottom());
+    Px::Snap (g, *this).vline (mousePos.x, plot.getY(), plot.getBottom());
     g.setFont (Fonts::medium (12.0f));
     auto box = Rectangle<float> (130.0f, 18.0f).withCentre ({ mousePos.x, plot.getBottom() - 14.0f }).constrainedWithin (plot);
     g.setColour (Colours_::panelTop.withAlpha (0.92f));
@@ -909,7 +908,7 @@ void BandControls::timerCallback()
     const bool usesSlope = eq::typeUsesSlope (t), usesGain = eq::typeUsesGain (t);
     const bool usesQ = ! (usesSlope && sl == 0) && t != eq::BandType::FlatTilt;
     const bool present = EQDisplay::isPresent (apvts, eqIdx, band);
-    auto enable = [] (Component& c, bool on) { if (c.isEnabled() != on) { c.setEnabled (on); c.setAlpha (on ? 1.0f : 0.35f); } };
+    auto enable = [] (Component& c, bool on) { if (c.isEnabled() != on) { c.setEnabled (on); c.setAlpha (on ? 1.0f : Ui::disabledAlpha); } };
     enable (onButton, present);
     enable (deleteButton, present);
     enable (resetButton, present);
@@ -926,7 +925,7 @@ void BandControls::timerCallback()
 void BandControls::paint (Graphics& g)
 {
     g.setColour (Colours_::textDim);
-    g.setFont (Fonts::label (11.5f, 0.14f));
+    g.setFont (Fonts::label (Fonts::Size::caption, 0.12f));
     g.drawText ("BAND", Rectangle<int> (1, 0, 200, 16), Justification::centredLeft);
     g.drawText (String (EQDisplay::numPresent (apvts, eqIdx)) + " / " + String (Params::numBands),
                 Rectangle<int> (1, 0, 200, 16), Justification::centredRight);
@@ -947,13 +946,13 @@ void BandControls::paint (Graphics& g)
     }
     else
     {
-        g.setColour (Colours_::textFaint);
-        g.setFont (Fonts::regular (11.5f));
+        g.setColour (Colours_::textMuted);
+        g.setFont (Fonts::regular (Fonts::Size::micro));
         g.drawFittedText ("Double-click the\ndisplay to add", bandLabelArea, Justification::centred, 2);
     }
 
     g.setColour (Colours_::outline);
-    g.drawVerticalLine (toolsArea.getX() - 18, 6.0f, (float) getHeight() - 6.0f);
+    Px::Snap (g, *this).vline ((float) toolsArea.getX() - 18.0f, 6.0f, (float) getHeight() - 6.0f);
 }
 
 void BandControls::resized()

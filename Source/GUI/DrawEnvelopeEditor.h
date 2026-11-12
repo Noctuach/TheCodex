@@ -23,31 +23,30 @@ public:
 
     void paint (juce::Graphics& g) override
     {
+        const Px::Snap px (g, *this);
         auto area = getLocalBounds().toFloat();
         g.setColour (Colours_::display);
         g.fillRoundedRectangle (area, 6.0f);
         g.setColour (Colours_::outline);
-        g.drawRoundedRectangle (area.reduced (0.5f), 6.0f, 1.0f);
+        px.border (area, 6.0f);
         plot = area.reduced (10.0f, 9.0f);
 
         const auto s = shape();
         if (dragging < 0 && bendDrag < 0) viewMs = niceRange (s.points[(size_t) s.count - 1].timeMs);
 
         // time grid
-        g.setFont (Fonts::regular (10.0f));
         const float step = viewMs <= 300 ? 50.0f : viewMs <= 800 ? 100.0f : viewMs <= 2000 ? 250.0f : 500.0f;
         for (float t = step; t < viewMs; t += step)
         {
             const float x = tx (t);
             g.setColour (Colours_::grid);
-            g.drawVerticalLine ((int) x, plot.getY(), plot.getBottom());
-            g.setColour (Colours_::textFaint);
-            g.drawText (juce::String ((int) t), juce::Rectangle<float> (x + 2, plot.getBottom() - 11, 40, 10), juce::Justification::centredLeft);
+            px.vline (x, plot.getY(), plot.getBottom());
+            drawAxisText (g, juce::String ((int) t), juce::Rectangle<float> (x + 3, plot.getBottom() - 13, 40, 13), juce::Justification::centredLeft);
         }
         for (int i = 1; i < 4; ++i)
         {
             g.setColour (Colours_::grid);
-            g.drawHorizontalLine ((int) (plot.getY() + plot.getHeight() * (float) i / 4.0f), plot.getX(), plot.getRight());
+            px.hline (plot.getY() + plot.getHeight() * (float) i / 4.0f, plot.getX(), plot.getRight());
         }
 
         // curve
@@ -95,7 +94,7 @@ public:
             const auto& pt = s.points[(size_t) shown];
             const float v = levelToText ? levelToText (pt.level) : pt.level * 100.0f;
             const juce::String txt = juce::String (pt.timeMs, pt.timeMs < 10 ? 1 : 0) + " ms   " + juce::String (v, 1) + " " + unit;
-            g.setFont (Fonts::medium (11.5f));
+            g.setFont (Fonts::medium (Fonts::Size::micro));
             auto box = juce::Rectangle<float> (130.0f, 18.0f).withCentre (point (s, shown).translated (0, -16.0f)).constrainedWithin (plot);
             g.setColour (Colours_::panelTop.withAlpha (0.92f));
             g.fillRoundedRectangle (box, 4.0f);

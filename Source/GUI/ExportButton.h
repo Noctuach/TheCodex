@@ -17,12 +17,13 @@ public:
 
     void paint (juce::Graphics& g) override
     {
-        auto r = getLocalBounds().toFloat().reduced (0.5f);
+        const Px::Snap px (g, *this);
+        auto r = px.rect (getLocalBounds().toFloat()).reduced (px.hairline() * 0.5f);
         const bool hot = isMouseOver() || busy;
         g.setColour (hot ? Colours_::accent.withAlpha (0.16f) : Colours_::panelTop);
         g.fillRoundedRectangle (r, 4.0f);
         g.setColour (hot ? Colours_::accent.withAlpha (0.8f) : Colours_::outline);
-        g.drawRoundedRectangle (r, 4.0f, 1.0f);
+        g.drawRoundedRectangle (r, 4.0f, px.hairline());
         auto icon = r.removeFromLeft (r.getHeight()).reduced (5.0f);
         Icons::draw (g, Icons::exportArrow(), icon, hot ? Colours_::accentHi : Colours_::textDim, 1.5f);
         g.setColour (hot ? Colours_::accentHi : Colours_::textDim);

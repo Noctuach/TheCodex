@@ -43,11 +43,12 @@ public:
 
     void paint (juce::Graphics& g) override
     {
+        const Px::Snap px (g, *this);
         auto b = getLocalBounds().toFloat();
         g.setColour (Colours_::display);
         g.fillRoundedRectangle (b, 5.0f);
         g.setColour (Colours_::outline);
-        g.drawRoundedRectangle (b.reduced (0.5f), 5.0f, 1.0f);
+        px.border (b, 5.0f);
 
         const bool on = compUi::val (apvts, ID::cmp ("On")) > 0.5f;
         const int nb = (int) compUi::val (apvts, ID::cmp ("Bands"));
@@ -55,15 +56,15 @@ public:
         const int style = (int) compUi::val (apvts, ID::cmp ("Style"));
         const bool limit = compUi::val (apvts, ID::cmp ("Limit")) > 0.5f;
 
-        // dB grid shared by both displays
-        g.setFont (Fonts::regular (10.5f));
+        // dB grid shared by both displays (the lines stop at the label gutter between them)
         for (int db = -6; db >= -54; db -= 6)
         {
             const float y = dbToY ((float) db);
             g.setColour (Colours_::grid);
-            g.drawHorizontalLine (juce::roundToInt (y), levelArea.getX(), kneeArea.getRight());
-            g.setColour (Colours_::textFaint);
-            g.drawText (juce::String (db), juce::Rectangle<float> (levelArea.getRight() + 2.0f, y - 6.0f, 26.0f, 12.0f), juce::Justification::centred);
+            px.hline (y, levelArea.getX(), levelArea.getRight());
+            px.hline (y, kneeArea.getX(), kneeArea.getRight());
+            drawAxisText (g, juce::String (db), juce::Rectangle<float> (levelArea.getRight() + 1.0f, y - 7.0f, 28.0f, 14.0f), juce::Justification::centred,
+                          db % 12 == 0);
         }
 
         // ---- scrolling levels ----
@@ -87,41 +88,62 @@ public:
             g.setGradientFill (juce::ColourGradient (Colours_::accent.withAlpha (0.55f), 0, levelArea.getY(), Colours_::accent.withAlpha (0.12f), 0, levelArea.getBottom(), false));
             g.fillPath (out);
 
-            // gain change per band: downward hangs from the top, upward rises from the bottom
+            // 0 dB gain-change reference: a neutral hairline (no red line at rest)
+            g.setColour (Colours_::outline);
+            px.hline (levelArea.getY() + 1.0f, levelArea.getX(), levelArea.getRight());
+
+            // gain change per band: downward hangs from the top, upward rises from the bottom. Only the stretches with
+            // gain change (> 0.1 dB) are stroked.
             for (int band = 0; band < nb; ++band)
             {
                 juce::Path gr;
+                bool inSegment = false;
                 for (int i = 0; i < n; ++i)
                 {
                     const auto& f = history[(size_t) ((writePos + i) % n)];
+                    const float db = f.grDb[(size_t) band];
+                    if (std::abs (db) < 0.1f) { inSegment = false; continue; }
                     const float x = levelArea.getX() + w * (float) i / (float) (n - 1);
-                    const float y = levelArea.getY() + juce::jlimit (-levelArea.getHeight() * 0.5f, levelArea.getHeight() * 0.5f, -f.grDb[(size_t) band] * grScale());
-                    if (i == 0) gr.startNewSubPath (x, y); else gr.lineTo (x, y);
+                    const float depth = juce::jlimit (0.0f, levelArea.getHeight() * 0.5f, std::abs (db) * grScale());
+                    const float y = db < 0.0f ? levelArea.getY() + 1.0f + depth : levelArea.getBottom() - depth;
+                    if (! inSegment) { gr.startNewSubPath (x, y); inSegment = true; } else gr.lineTo (x, y);
                 }
                 const auto col = nb > 1 ? Colours_::band (band) : Colours_::warn;
                 g.setColour (col.withAlpha (band == selected || nb == 1 ? 0.95f : 0.45f));
                 g.strokePath (gr, juce::PathStrokeType (band == selected ? 1.8f : 1.2f));
             }
-            g.setColour (Colours_::textFaint);
-            g.setFont (Fonts::label (10.5f, 0.12f));
-            g.drawText ("GAIN CHANGE", levelArea.reduced (8, 4).removeFromTop (14), juce::Justification::topLeft);
+            g.setColour (Colours_::textDim);
+            g.setFont (Fonts::label (Fonts::Size::caption, 0.12f));
+            g.drawText ("GAIN CHANGE", levelArea.reduced (8, 4).removeFromTop (15), juce::Justification::topLeft);
         }
 
         // threshold line across the level display
         {
             const float y = dbToY (bs.thresholdDb);
             const auto col = nb > 1 ? Colours_::band (selected) : Colours_::accentHi;
+            // the line dims when idle (0.6) and brightens on hover / drag; it skips the dB label gutter
             g.setColour (col.withAlpha (dragMode == 1 || hoverThreshold ? 0.95f : 0.6f));
             const float dashes[] = { 5.0f, 4.0f };
-            g.drawDashedLine (juce::Line<float> (levelArea.getX(), y, kneeArea.getRight(), y), dashes, 2, 1.2f);
-            g.setFont (Fonts::medium (11.5f));
-            g.drawText ("THRESHOLD " + juce::String (bs.thresholdDb, 1) + " dB", juce::Rectangle<float> (levelArea.getX() + 8, y - 16, 200, 14), juce::Justification::centredLeft);
+            g.drawDashedLine (juce::Line<float> (levelArea.getX(), y, levelArea.getRight(), y), dashes, 2, 1.2f);
+            g.drawDashedLine (juce::Line<float> (kneeArea.getX(), y, kneeArea.getRight(), y), dashes, 2, 1.2f);
+
+            // the read-out: full colour on a pill sized to the text, above the line (below it near the top)
+            const juce::Font font (Fonts::medium (Fonts::Size::caption));
+            const juce::String text = "THRESHOLD " + juce::String (bs.thresholdDb, 1) + " dB";
+            const float tw = textWidth (font, text);
+            const float ty = y - 19.0f < levelArea.getY() + 18.0f ? y + 4.0f : y - 19.0f;
+            const auto box = juce::Rectangle<float> (levelArea.getX() + 8.0f, ty, tw + 12.0f, 16.0f);
+            g.setColour (Colours_::panelTop.withAlpha (0.88f));
+            g.fillRoundedRectangle (box, 3.5f);
+            g.setColour (col);
+            g.setFont (font);
+            g.drawText (text, box, juce::Justification::centred, false);
         }
 
         // ---- knee display ----
         {
             g.setColour (Colours_::outline);
-            g.drawVerticalLine (juce::roundToInt (kneeArea.getX()) - 1, kneeArea.getY(), kneeArea.getBottom());
+            px.vline (kneeArea.getX() - 1.0f, kneeArea.getY(), kneeArea.getBottom());
             const float dashes[] = { 3.0f, 3.0f };
             g.setColour (Colours_::grid.brighter (0.4f));
             g.drawDashedLine (juce::Line<float> (kneeArea.getBottomLeft(), kneeArea.getTopRight()), dashes, 2, 1.0f);
@@ -149,9 +171,9 @@ public:
                 g.setColour (Colours_::text);
                 g.fillEllipse (juce::Rectangle<float> (6, 6).withCentre ({ juce::jmap (inNow, minDb, 0.0f, kneeArea.getX(), kneeArea.getRight()), dbToY (outNow) }));
             }
-            g.setColour (Colours_::textFaint);
-            g.setFont (Fonts::label (10.5f, 0.12f));
-            g.drawText ("KNEE", kneeArea.reduced (8, 4).removeFromTop (14), juce::Justification::topLeft);
+            g.setColour (Colours_::textDim);
+            g.setFont (Fonts::label (Fonts::Size::caption, 0.12f));
+            g.drawText ("KNEE", kneeArea.reduced (8, 4).removeFromTop (15), juce::Justification::topLeft);
             g.setColour (Colours_::text);
             g.setFont (Fonts::medium (12.0f));
             const juce::String ratio = bs.ratio >= 99.5f ? juce::String::fromUTF8 ("\xe2\x88\x9e") : juce::String (bs.ratio, bs.ratio < 10 ? 1 : 0);
@@ -277,7 +299,7 @@ public:
             g.fillRect (smoothed[(size_t) b] < 0 ? meter.withHeight (h) : meter.withTop (meter.getBottom() - h));
 
             g.setColour (b == selected ? Colours_::text : Colours_::textDim);
-            g.setFont (Fonts::label (11.0f, 0.14f));
+            g.setFont (Fonts::label (Fonts::Size::micro, 0.12f));
             const juce::String name = nb == 1 ? "FULL BAND" : "BAND " + juce::String (b + 1);
             const float shown = std::abs (smoothed[(size_t) b]) < 0.05f ? 0.0f : smoothed[(size_t) b];   // no "-0.0"
             g.drawText (name + "   " + juce::String (shown, 1) + " dB", seg.reduced (10.0f, 0.0f), juce::Justification::centredLeft);
@@ -287,7 +309,7 @@ public:
             const float x = fx (xover (j));
             g.setColour (j == hoverX || j == dragX ? Colours_::text : Colours_::textDim);
             g.fillRect (x - 1.0f, r.getY() + 3.0f, 2.0f, r.getHeight() - 6.0f);
-            g.setFont (Fonts::regular (10.5f));
+            g.setFont (Fonts::regular (Fonts::Size::micro));
             const float f = xover (j);
             // frequency right-aligned against its divider (inside the lower band), clear of the band names
             g.drawText (f < 1000 ? juce::String (f, 0) + " Hz" : juce::String (f / 1000.0f, 2) + " kHz",
@@ -393,11 +415,11 @@ public:
     void paint (juce::Graphics& g) override
     {
         const auto acc = off ? Colours_::textFaint : Colours_::accent;
-        drawSectionPanel (g, displayArea, juce::String::fromUTF8 ("COMPRESSOR  \xc2\xb7  DOWNWARD / UPWARD"), acc);
-        drawSectionPanel (g, bandArea, numBands() > 1 ? "BAND " + juce::String (band + 1) : juce::String ("FULL BAND"), numBands() > 1 ? Colours_::band (band) : acc);
-        drawSectionPanel (g, globalArea, "GLOBAL", acc);
+        drawSectionPanel (g, *this, displayArea, juce::String::fromUTF8 ("COMPRESSOR  \xc2\xb7  DOWNWARD / UPWARD"), acc);
+        drawSectionPanel (g, *this, bandArea, numBands() > 1 ? "BAND " + juce::String (band + 1) : juce::String ("FULL BAND"), numBands() > 1 ? Colours_::band (band) : acc);
+        drawSectionPanel (g, *this, globalArea, "GLOBAL", acc);
         g.setColour (Colours_::textDim);
-        g.setFont (Fonts::label (11.5f, 0.14f));
+        g.setFont (Fonts::label (Fonts::Size::caption, 0.12f));
         g.drawText ("DIRECTION", direction.translated (0, -18).withHeight (16), juce::Justification::centredLeft);
         g.drawText ("BANDS", bandCount.getBounds().translated (0, -18).withHeight (16), juce::Justification::centredLeft);
         g.drawText ("T4 OPTO MODE", t4Mode.getBounds().translated (0, -18).withHeight (16), juce::Justification::centredLeft);
@@ -407,7 +429,7 @@ public:
     {
         auto r = getLocalBounds();
         displayArea = r.removeFromTop (r.getHeight() * 47 / 100);
-        powerButton.setBounds (displayArea.withHeight (28).removeFromRight (32).reduced (4));
+        powerButton.setBounds (displayArea.withHeight (28).removeFromRight (32).reduced (2));
         {
             auto c = displayArea.reduced (10).withTrimmedTop (30);
             bandBar.setBounds (c.removeFromBottom (30));
@@ -513,7 +535,7 @@ private:
             for (int i = 0; i < 3; ++i) dirButtons[i].setToggleState (i == d, juce::dontSendNotification);
         }
         const int st = (int) compUi::val (apvts, ID::cmp ("Style"));
-        auto enable = [] (juce::Component& c, bool on) { if (c.isEnabled() != on) { c.setEnabled (on); c.setAlpha (on ? 1.0f : 0.35f); } };
+        auto enable = [] (juce::Component& c, bool on) { if (c.isEnabled() != on) { c.setEnabled (on); c.setAlpha (on ? 1.0f : Ui::disabledAlpha); } };
         const bool t4 = st == comp::T4Opto;
         enable (attack, ! t4);
         enable (release, ! t4);

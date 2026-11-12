@@ -194,6 +194,7 @@ MainView::MainView (CodexProcessor& p, PropertiesFile* settingsFile)
     presetBar.onBrowseRequested = [this] { browserOverlay.open(); };
     addChildComponent (aboutOverlay);
 
+    setOpaque (true);   // paint() fills the whole view
     setTooltipsEnabled (settings == nullptr || settings->getBoolValue (tooltipsKey, true));
     setSize (baseWidth, baseHeight);
     showTab (0);
@@ -278,10 +279,24 @@ void MainView::timerCallback()
 void MainView::showMainMenu()
 {
     PopupMenu menu, sizes;
-    const float current = settings != nullptr ? (float) settings->getDoubleValue (scaleKey, 1.0) : 1.0f;
+    // The tick follows the actual window (after a drag, an auto-fit or a host resize the saved value can differ);
+    // sizes larger than the editor's screen are greyed out, but 75 % and the current size always stay available.
+    const float current = getWindowScale ? getWindowScale() : 1.0f;
+    const float fit = getFitScale ? getFitScale() : 2.0f;
     const float scales[] = { 0.75f, 0.9f, 1.0f, 1.25f, 1.5f, 1.75f, 2.0f };
+    const int currentWidth = roundToInt (current * (float) baseWidth);
+    bool matched = false;
+    for (float sc : scales)
+        matched |= std::abs (roundToInt (sc * (float) baseWidth) - currentWidth) <= 1;
+    if (! matched)
+        sizes.addSectionHeader ("Current: " + String (roundToInt (current * 100.0f)) + " %");
     for (int i = 0; i < 7; ++i)
-        sizes.addItem (100 + i, String (roundToInt (scales[i] * 100.0f)) + " %", true, std::abs (current - scales[i]) < 0.01f);
+    {
+        const bool ticked = std::abs (roundToInt (scales[i] * (float) baseWidth) - currentWidth) <= 1;
+        sizes.addItem (100 + i, String (roundToInt (scales[i] * 100.0f)) + " %", ticked || i == 0 || scales[i] <= fit + 0.01f, ticked);
+    }
+    sizes.addSeparator();
+    sizes.addItem (107, "Fit to screen");
 
     const auto presetName = proc.presets.getCurrentName();
     menu.addSectionHeader ("Presets");
@@ -301,8 +316,9 @@ void MainView::showMainMenu()
     menu.addItem (8, "About Codex");
 
     SafePointer<MainView> safe (this);
-    menu.showMenuAsync (PopupMenu::Options().withTargetComponent (&menuButton).withMinimumWidth (220),
-        [safe, scales] (int r)
+    const float popupScale = [this] { auto* l = dynamic_cast<CodexLookAndFeel*> (&getLookAndFeel()); return l != nullptr ? l->popupScale() : 1.0f; }();
+    menu.showMenuAsync (PopupMenu::Options().withTargetComponent (&menuButton).withMinimumWidth (roundToInt (220.0f * popupScale)),
+        [safe, scales, fit] (int r)
         {
             if (safe == nullptr || r == 0) return;
             auto& v = *safe;
@@ -320,6 +336,7 @@ void MainView::showMainMenu()
                 case 8: v.aboutOverlay.open(); break;
                 default:
                     if (r >= 100 && r < 107 && v.onScaleRequested) v.onScaleRequested (scales[r - 100]);
+                    if (r == 107 && v.onScaleRequested) v.onScaleRequested (fit);
                     break;
             }
         });
@@ -402,16 +419,16 @@ void MainView::updateEngineView()
     ampDrawEditor.setVisible (kickTab && ampDraw);
     pitchModeSwitch.setVisible (kickTab && ! is909);
     ampModeSwitch.setVisible (kickTab && ! is909);
-    auto enable = [] (Component& c, bool on, float offAlpha) { c.setEnabled (on); c.setAlpha (on ? 1.0f : offAlpha); };
+    auto enable = [] (Component& c, bool on) { c.setEnabled (on); c.setAlpha (on ? 1.0f : Ui::disabledAlpha); };
 
     // The 909 has its own pitch sweep; the amp ADSR only gates it (attack + release)
     for (Component* c : std::initializer_list<Component*> { &pitchEnvDisplay, &pitchDrawEditor, &pAmount })
-        enable (*c, ! is909, 0.2f);
+        enable (*c, ! is909);
     for (Component* c : std::initializer_list<Component*> { &pAttack, &pDecay, &pSustain, &pRelease, &pCurve })
-        enable (*c, ! is909 && ! pitchDraw, is909 ? 0.2f : 0.3f);
+        enable (*c, ! is909 && ! pitchDraw);
     for (Component* c : std::initializer_list<Component*> { &aDecay, &aSustain, &ampEnvDisplay })
-        enable (*c, ! is909 && ! ampDraw, 0.3f);
-    enable (aAttack, ! ampDraw, 0.3f);
+        enable (*c, ! is909 && ! ampDraw);
+    enable (aAttack, ! ampDraw);
     // aCurve shapes the release in both modes
     engineNotice.setVisible (false);   // replaced by the 909 sweep display and circuit controls
     repaint();
@@ -457,28 +474,32 @@ void MainView::showTab (int tab)
 //==============================================================================
 void MainView::paint (Graphics& g)
 {
+    // Structural rules are snapped to device pixels (crisp at 75 / 150 %), together with the fills they edge
+    const Px::Snap px (g, *this);
+    const float hair = px.hairline();
+
     // Background: black with a faint warm lift in the centre
+    const auto headerBar = getLocalBounds().removeFromTop (header.getBottom() + 8).toFloat().withBottom (px.y ((float) header.getBottom() + 8.0f));
     g.fillAll (Colours_::background);
     g.setGradientFill (ColourGradient (Colour (0xff0d0b09), (float) getWidth() * 0.5f, (float) getHeight() * 0.45f,
                                        Colours_::background, 0.0f, (float) getHeight() * 1.1f, true));
-    g.fillRect (getLocalBounds().withTrimmedTop (header.getBottom() + 8));
+    g.fillRect (getLocalBounds().toFloat().withTop (headerBar.getBottom()));
 
     // Header bar: brushed-dark gradient with a sun-orange hairline that fades out at both ends
-    const auto bar = getLocalBounds().removeFromTop (header.getBottom() + 8).toFloat();
-    g.setGradientFill (ColourGradient (Colour (0xff161514), 0, bar.getY(), Colour (0xff0c0c0c), 0, bar.getBottom(), false));
-    g.fillRect (bar);
+    g.setGradientFill (ColourGradient (Colour (0xff161514), 0, headerBar.getY(), Colour (0xff0c0c0c), 0, headerBar.getBottom(), false));
+    g.fillRect (headerBar);
     g.setColour (Colours::black);
-    g.drawHorizontalLine ((int) bar.getBottom() - 1, 0, (float) getWidth());
+    g.fillRect (Rectangle<float> (0.0f, headerBar.getBottom() - hair, (float) getWidth(), hair));
     {
         ColourGradient line (Colours_::accent.withAlpha (0.0f), 0, 0, Colours_::accent.withAlpha (0.0f), (float) getWidth(), 0, false);
         line.addColour (0.25, Colours_::accent.withAlpha (0.55f));
         line.addColour (0.75, Colours_::accent.withAlpha (0.55f));
         g.setGradientFill (line);
-        g.fillRect (Rectangle<float> (0.0f, bar.getBottom() - 1.0f, (float) getWidth(), 1.0f));
-        ColourGradient glow (Colours_::accent.withAlpha (0.07f), (float) getWidth() * 0.5f, bar.getBottom(),
-                             Colours_::accent.withAlpha (0.0f), (float) getWidth() * 0.5f, bar.getBottom() + 10.0f, false);
+        g.fillRect (Rectangle<float> (0.0f, headerBar.getBottom() - hair, (float) getWidth(), hair));
+        ColourGradient glow (Colours_::accent.withAlpha (0.07f), (float) getWidth() * 0.5f, headerBar.getBottom(),
+                             Colours_::accent.withAlpha (0.0f), (float) getWidth() * 0.5f, headerBar.getBottom() + 10.0f, false);
         g.setGradientFill (glow);
-        g.fillRect (Rectangle<float> (0.0f, bar.getBottom(), (float) getWidth(), 10.0f));
+        g.fillRect (Rectangle<float> (0.0f, headerBar.getBottom(), (float) getWidth(), 10.0f));
     }
 
     // Logo: mark + wordmark + subtitle
@@ -498,20 +519,20 @@ void MainView::paint (Graphics& g)
         g.setFont (Fonts::display (28.0f, 0.22f));
         g.drawText ("CODEX", r.removeFromTop (r.getHeight() * 0.64f), Justification::bottomLeft);
         g.setColour (Colours_::textDim);
-        g.setFont (Fonts::label (10.5f, 0.2f));
+        g.setFont (Fonts::label (Fonts::Size::micro, 0.16f));
         g.drawText ("NOCTURNAL AUDIO", r.translated (1.0f, 0.0f), Justification::topLeft);
     }
 
     g.setColour (Colours_::textDim);
-    g.setFont (Fonts::label (11.5f, 0.14f));
+    g.setFont (Fonts::label (Fonts::Size::caption, 0.12f));
     g.drawText ("PRESET", presetArea.withHeight (16).translated (1, 0), Justification::centredLeft);
 
     // Footer
     {
         g.setColour (Colours_::outline);
-        g.drawHorizontalLine (footer.getY(), (float) footer.getX(), (float) footer.getRight());
+        px.hline ((float) footer.getY(), (float) footer.getX(), (float) footer.getRight());
         g.setColour (Colours_::textDim);
-        g.setFont (Fonts::label (11.5f, 0.1f));
+        g.setFont (Fonts::label (Fonts::Size::caption, 0.1f));
         g.drawText ("MACROS", footer.withTrimmedTop (4).withWidth (72), Justification::centredLeft);
         auto cpuArea = footer.withTrimmedTop (4).removeFromRight (76);
         // clip activity: a small bar under the CLIP button
@@ -522,7 +543,7 @@ void MainView::paint (Graphics& g)
             g.fillRoundedRectangle (bar.withWidth (bar.getWidth() * jlimit (0.05f, 1.0f, clipShown / 6.0f)), 1.5f);
         }
         g.setColour (Colours_::textDim);
-        g.setFont (Fonts::label (11.5f, 0.1f));
+        g.setFont (Fonts::label (Fonts::Size::caption, 0.1f));
         g.drawText ("A / B", abA.getBounds().translated (-48, 0).withWidth (44), Justification::centredRight);
         g.setFont (Fonts::medium (12.0f));
         g.setColour (cpuShown > 0.7f ? Colours_::warn : Colours_::textDim);
@@ -531,7 +552,7 @@ void MainView::paint (Graphics& g)
 
     // Tab bar, with the sliding underline of the selected tab (glow rising from it)
     g.setColour (Colours_::outline);
-    g.drawHorizontalLine (tabBar.getBottom() - 1, (float) tabBar.getX(), (float) tabBar.getRight());
+    px.hline ((float) tabBar.getBottom() - 1.0f, (float) tabBar.getX(), (float) tabBar.getRight());
     if (! underline.isEmpty())
     {
         g.setGradientFill (ColourGradient (Colours_::accent.withAlpha (0.16f), underline.getCentreX(), underline.getY(),
@@ -555,7 +576,7 @@ void MainView::paint (Graphics& g)
             x -= w;
             const bool hi = currentTab == 0 ? (i == 0 || i == 2) : currentTab == 1 ? (i == 1 || i == 3)
                           : currentTab == 2 ? i == 4 : currentTab == 3 ? i == 5 : currentTab == 4 ? i == 6 : currentTab == 5 ? i == 7 : false;
-            g.setColour (hi ? Colours_::accent : Colours_::textFaint);
+            g.setColour (hi ? Colours_::accent : Colours_::textMuted);
             g.drawText (steps[i], Rectangle<float> (x, (float) tabBar.getY(), w + 2.0f, (float) tabBar.getHeight() - 2.0f), Justification::centredLeft);
             if (i > 0)
             {
@@ -567,13 +588,13 @@ void MainView::paint (Graphics& g)
 
     if (currentTab == 0)
     {
-        drawSectionPanel (g, sourceArea, "SOURCE", Colours_::accent);
-        drawSectionPanel (g, pitchArea, engineSwitch.getIndex() == 1 ? "909 PITCH SWEEP  /  CIRCUIT" : "PITCH ENVELOPE", Colours_::accent2);
-        drawSectionPanel (g, ampArea, engineSwitch.getIndex() == 1 ? "AMP GATE" : "AMP ENVELOPE", Colours_::accent);
-        drawSectionPanel (g, eqArea, "EQUALIZER", Colours_::accent);
+        drawSectionPanel (g, *this, sourceArea, "SOURCE", Colours_::accent);
+        drawSectionPanel (g, *this, pitchArea, engineSwitch.getIndex() == 1 ? "909 PITCH SWEEP  /  CIRCUIT" : "PITCH ENVELOPE", Colours_::accent2);
+        drawSectionPanel (g, *this, ampArea, engineSwitch.getIndex() == 1 ? "AMP GATE" : "AMP ENVELOPE", Colours_::accent);
+        drawSectionPanel (g, *this, eqArea, "EQUALIZER", Colours_::accent);
         const bool subOn = proc.apvts.getRawParameterValue (ID::subOn)->load() > 0.5f;
-        drawSectionPanel (g, subArea, "SUB LAYER", subOn ? Colours_::good : Colours_::textFaint);
-        drawGroupCaption (g, velocityCaption, "DYNAMICS");
+        drawSectionPanel (g, *this, subArea, "SUB LAYER", subOn ? Colours_::good : Colours_::textFaint);
+        drawGroupCaption (g, *this, velocityCaption, "DYNAMICS");
     }
 }
 
@@ -704,7 +725,7 @@ void MainView::resized()
     r.removeFromRight (12);
     eqArea = r;
     {
-        subPower.setBounds (subArea.withHeight (28).removeFromRight (32).reduced (4));
+        subPower.setBounds (subArea.withHeight (28).removeFromRight (32).reduced (2));
         auto c = subArea.reduced (10).withTrimmedTop (30);
         auto velRow = c.removeFromBottom (100);
         velocityCaption = c.removeFromBottom (18);
@@ -772,39 +793,29 @@ void MainView::resized()
 
 //==============================================================================
 CodexEditor::CodexEditor (CodexProcessor& p)
-    : AudioProcessorEditor (p),
-      view (p, [this]
-      {
-          PropertiesFile::Options o;
-          o.applicationName = "Codex";
-          o.filenameSuffix = ".settings";
-         #if JUCE_LINUX
-          o.folderName = ".config/Codex";   // keep the user's home folder tidy
-         #else
-          o.folderName = "Codex";
-         #endif
-          o.osxLibrarySubFolder = "Application Support";
-          o.millisecondsBeforeSaving = 500;
-          appProperties.setStorageParameters (o);
-          return appProperties.getUserSettings();
-      }())
+    : AudioProcessorEditor (p), view (p, settings->user())
 {
     setLookAndFeel (&lnf);
+    setOpaque (true);
     addAndMakeVisible (view);
     view.onScaleRequested = [this] (float s) { applyScale (s); };
+    view.getWindowScale = [this] { return (float) getWidth() / (float) MainView::baseWidth; };
+    view.getFitScale = [this] { return maxScaleForScreen(); };
 
-    // Read the saved size first: setting the resize limits below triggers resized() calls
-    // that must not overwrite it.
+    // Read the saved size first: setting the resize limits below triggers resized() calls that must not overwrite it.
+    // The saved size is the user's preference: it is clamped to the current screen when applied, but not rewritten,
+    // so a 200 % chosen on a large monitor comes back there.
     float scale = 1.0f;
-    auto* s = appProperties.getUserSettings();
+    auto* s = settings->user();
     if (s != nullptr && s->containsKey (scaleKey))
-        scale = (float) s->getDoubleValue (scaleKey, 1.0);
+        scale = jlimit (minScale, maxScale, (float) s->getDoubleValue (scaleKey, 1.0));
     else if (auto* display = Desktop::getInstance().getDisplays().getPrimaryDisplay())
-        scale = jmin (1.0f, 0.85f * (float) display->userArea.getHeight() / (float) MainView::baseHeight);   // fit smaller screens
+        scale = jlimit (minScale, 1.0f, 0.85f * (float) display->userArea.getHeight() / (float) MainView::baseHeight);   // fit smaller screens
+    scale = jmin (scale, maxScaleForScreen());
 
     const auto w = MainView::baseWidth, h = MainView::baseHeight;
     setResizable (true, true);
-    setResizeLimits (roundToInt (w * 0.6), roundToInt (h * 0.6), w * 2, h * 2);
+    setResizeLimits (roundToInt ((float) w * minScale), roundToInt ((float) h * minScale), roundToInt ((float) w * maxScale), roundToInt ((float) h * maxScale));
     getConstrainer()->setFixedAspectRatio ((double) w / (double) h);
 
     applyScale (scale);
@@ -816,18 +827,60 @@ CodexEditor::~CodexEditor()
     setLookAndFeel (nullptr);
 }
 
+float CodexEditor::maxScaleForScreen() const
+{
+    const auto& displays = Desktop::getInstance().getDisplays();
+    const Displays::Display* d = nullptr;
+    if (getPeer() != nullptr)
+        d = displays.getDisplayForRect (getScreenBounds());
+    if (d == nullptr)
+        d = displays.getDisplayForPoint (Desktop::getMousePosition());
+    if (d == nullptr)
+        d = displays.getPrimaryDisplay();
+    if (d == nullptr || d->userArea.getHeight() < 200)
+        return maxScale;   // no usable screen information (headless)
+    const auto ua = d->userArea.toFloat();
+    // leave room for the host's title bar and toolbar
+    return jlimit (0.6f, maxScale, jmin (0.95f * ua.getWidth() / (float) MainView::baseWidth,
+                                         (ua.getHeight() - 60.0f) / (float) MainView::baseHeight));
+}
+
 void CodexEditor::applyScale (float scale)
 {
-    scale = jlimit (0.6f, 2.0f, scale);
-    setSize (roundToInt (MainView::baseWidth * scale), roundToInt (MainView::baseHeight * scale));
+    // 0.6 is reachable only through the screen fit on very small screens; the menu and the resize corner stop at 75 %
+    scale = jlimit (0.6f, maxScale, scale);
+    setSize (roundToInt ((float) MainView::baseWidth * scale), roundToInt ((float) MainView::baseHeight * scale));
+}
+
+void CodexEditor::parentHierarchyChanged()
+{
+    AudioProcessorEditor::parentHierarchyChanged();
+    // Once, when the editor first lands on a screen: shrink (never grow) if the host opened it on a smaller display than
+    // the one the constructor measured. Not saved: the stored preference stays as it was.
+    if (screenChecked || getPeer() == nullptr)
+        return;
+    screenChecked = true;
+    const float fit = maxScaleForScreen();
+    if ((float) getWidth() > fit * (float) MainView::baseWidth + 1.0f)
+    {
+        const ScopedValueSetter<bool> noSave (initialised, false);
+        applyScale (fit);
+    }
+}
+
+void CodexEditor::paint (Graphics& g)
+{
+    // covers the sub-pixel strip the uniformly scaled view can leave at the bottom edge
+    g.fillAll (Colours_::background);
 }
 
 void CodexEditor::resized()
 {
     const float scale = (float) getWidth() / (float) MainView::baseWidth;
+    lnf.uiScale = scale;   // first, so popups and tooltips opened from now on use it
     view.setTransform (AffineTransform::scale (scale));
     view.setBounds (0, 0, MainView::baseWidth, MainView::baseHeight);
     if (initialised)
-        if (auto* s = appProperties.getUserSettings())
+        if (auto* s = settings->user())
             s->setValue (scaleKey, scale);
 }
