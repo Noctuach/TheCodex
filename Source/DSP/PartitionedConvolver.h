@@ -2,6 +2,7 @@
 #include <juce_dsp/juce_dsp.h>
 #include <complex>
 #include <vector>
+#include <cstdint>
 
 /**
     Stereo 2x2 FIR convolver (uniform partitioned, overlap-save) for the linear-phase EQ.
@@ -89,6 +90,8 @@ public:
     {
         maxPartitions = (maxIrLength + B - 1) / B;
         for (auto& f : fdl) f.assign ((size_t) maxPartitions * binsPad * 2, 0.0f);
+        slotZero.assign ((size_t) maxPartitions, 1);           // the delay line starts cleared
+        segments.assign ((size_t) maxPartitions + 2, Segment {});
         for (auto& b : inBuf) b.assign ((size_t) fftSize, 0.0f);
         for (auto& b : outBuf) b.assign ((size_t) B, 0.0f);
         for (auto& b : fadeBuf) b.assign ((size_t) B, 0.0f);
@@ -108,6 +111,7 @@ public:
     void reset()
     {
         for (auto& f : fdl) std::fill (f.begin(), f.end(), 0.0f);
+        std::fill (slotZero.begin(), slotZero.end(), (std::uint8_t) 1);
         for (auto& b : inBuf) std::fill (b.begin(), b.end(), 0.0f);
         for (auto& b : outBuf) std::fill (b.begin(), b.end(), 0.0f);
         fill = 0;
@@ -165,8 +169,20 @@ private:
     {
         // forward FFT of [previous B | new B] for both inputs into the frequency-domain delay line
         fdlPos = (fdlPos + maxPartitions - 1) % maxPartitions;
+        // An input window that is exactly zero in both channels has an all-zero spectrum: its slot is only marked
+        // (no FFT), and the MAC skips it (its products are +-0, which never change a sum that starts at +0).
+        bool silent = true;
+        for (int c = 0; c < 2 && silent; ++c)
+            for (float v : inBuf[(size_t) c])
+                if (v != 0.0f) { silent = false; break; }
+        slotZero[(size_t) fdlPos] = silent ? 1 : 0;
         for (int c = 0; c < 2; ++c)
         {
+            if (silent)
+            {
+                std::copy (inBuf[(size_t) c].begin() + B, inBuf[(size_t) c].end(), inBuf[(size_t) c].begin());
+                continue;
+            }
             std::copy (inBuf[(size_t) c].begin(), inBuf[(size_t) c].end(), work.begin());
             std::fill (work.begin() + fftSize, work.end(), 0.0f);
             fft.performRealOnlyForwardTransform (work.data(), true);
@@ -191,10 +207,10 @@ private:
         if (incoming != nullptr && active != nullptr)
         {
             // crossfade over this block: old filter fading out, new filter fading in (same input history)
-            convolve (*active, fadeBuf[0].data(), fadeBuf[1].data());
+            convolve (*active, fadeBuf[0].data(), fadeBuf[1].data(), false);
             auto old = std::move (active);
             active = std::move (incoming);
-            convolve (*active, outBuf[0].data(), outBuf[1].data());
+            convolve (*active, outBuf[0].data(), outBuf[1].data(), false);
             for (int c = 0; c < 2; ++c)
             {
                 for (int i = 0; i < B; ++i)
@@ -222,7 +238,7 @@ private:
             if (sl.isLocked() && retired == nullptr) retired = std::move (spare);
         }
 
-        if (active != nullptr) convolve (*active, outBuf[0].data(), outBuf[1].data());
+        if (active != nullptr) convolve (*active, outBuf[0].data(), outBuf[1].data(), true);
         else for (auto& o : outBuf) std::fill (o.begin(), o.end(), 0.0f);
     }
 
@@ -232,11 +248,33 @@ private:
         p (0 .. P-1) would add them, starting from 0, with each complex product formed as (xr*hr - xi*hi, xr*hi + xi*hr)
         before it is added: the result is the same as accumulating std::complex<float> products, bit for bit.
         The loops run over blocks of `lanes` bins (accumulators held in registers across all partitions), with both
-        outputs computed from each input load, and the circular delay line walked as two linear runs. */
-    void convolve (const FilterSet& set, float* dest0, float* dest1) noexcept
+        outputs computed from each input load, and the circular delay line walked as linear runs that skip silent slots.
+        zeroShortcut: when every slot is silent, write silence without the inverse FFTs (not used while crossfading). */
+    void convolve (const FilterSet& set, float* dest0, float* dest1, bool zeroShortcut) noexcept
     {
         const int P = juce::jmin (set.partitions, maxPartitions);
-        const int run1 = juce::jmin (P, maxPartitions - fdlPos);   // slots fdlPos .. maxPartitions-1, then 0 ..
+        // runs of partitions whose delay-line slot is not silent (slot = p + offset; the ring wraps at maxPartitions)
+        int numSegments = 0;
+        for (int p = 0; p < P;)
+        {
+            const int offset = fdlPos + p < maxPartitions ? fdlPos : fdlPos - maxPartitions;
+            const int end = fdlPos + p < maxPartitions ? juce::jmin (P, maxPartitions - fdlPos) : P;
+            while (p < end)
+            {
+                while (p < end && slotZero[(size_t) (p + offset)] != 0) ++p;
+                if (p == end) break;
+                const int begin = p;
+                while (p < end && slotZero[(size_t) (p + offset)] == 0) ++p;
+                segments[(size_t) numSegments++] = { begin, p, offset };
+            }
+        }
+        if (numSegments == 0 && zeroShortcut)
+        {
+            // every product is zero: the output is silence
+            std::fill (dest0, dest0 + B, 0.0f);
+            std::fill (dest1, dest1 + B, 0.0f);
+            return;
+        }
         float* w0 = outWork[0].data();
         float* w1 = outWork[1].data();
 
@@ -257,18 +295,27 @@ private:
                 const float* h1I = h1R + lanes;
                 if (use0 && use1)
                 {
-                    macRun<true, true> (xR, xI, h0R, h0I, h1R, h1I, a0r, a0i, a1r, a1i, fdlPos, 0, run1);
-                    macRun<true, true> (xR, xI, h0R, h0I, h1R, h1I, a0r, a0i, a1r, a1i, -run1, run1, P);
+                    for (int g = 0; g < numSegments; ++g)
+                    {
+                        const auto& sg = segments[(size_t) g];
+                        macRun<true, true> (xR, xI, h0R, h0I, h1R, h1I, a0r, a0i, a1r, a1i, sg.offset, sg.begin, sg.end);
+                    }
                 }
                 else if (use0)
                 {
-                    macRun<true, false> (xR, xI, h0R, h0I, h1R, h1I, a0r, a0i, a1r, a1i, fdlPos, 0, run1);
-                    macRun<true, false> (xR, xI, h0R, h0I, h1R, h1I, a0r, a0i, a1r, a1i, -run1, run1, P);
+                    for (int g = 0; g < numSegments; ++g)
+                    {
+                        const auto& sg = segments[(size_t) g];
+                        macRun<true, false> (xR, xI, h0R, h0I, h1R, h1I, a0r, a0i, a1r, a1i, sg.offset, sg.begin, sg.end);
+                    }
                 }
                 else if (use1)
                 {
-                    macRun<false, true> (xR, xI, h0R, h0I, h1R, h1I, a0r, a0i, a1r, a1i, fdlPos, 0, run1);
-                    macRun<false, true> (xR, xI, h0R, h0I, h1R, h1I, a0r, a0i, a1r, a1i, -run1, run1, P);
+                    for (int g = 0; g < numSegments; ++g)
+                    {
+                        const auto& sg = segments[(size_t) g];
+                        macRun<false, true> (xR, xI, h0R, h0I, h1R, h1I, a0r, a0i, a1r, a1i, sg.offset, sg.begin, sg.end);
+                    }
                 }
             }
             for (int j = 0; j < lanes; ++j)
@@ -325,7 +372,10 @@ private:
 
     juce::dsp::FFT fft { fftOrder };
     int maxPartitions = 1, fdlPos = 0, fill = 0;
-    std::array<std::vector<float>, 2> fdl;   // frequency-domain delay line per input, maxPartitions slots (layout: see binIndex)
+    std::array<std::vector<float>, 2> fdl;
+    std::vector<std::uint8_t> slotZero;              // per delay-line slot: the input window was exactly zero (spectrum not stored)
+    struct Segment { int begin = 0, end = 0, offset = 0; };
+    std::vector<Segment> segments;                   // non-silent partition runs, rebuilt per convolution   // frequency-domain delay line per input, maxPartitions slots (layout: see binIndex)
     std::array<std::vector<float>, 2> inBuf, outBuf, fadeBuf;
     std::vector<float> work;
     std::array<std::vector<float>, 2> outWork;        // per output channel: accumulated spectrum, then inverse FFT

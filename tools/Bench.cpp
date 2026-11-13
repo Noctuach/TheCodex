@@ -295,6 +295,13 @@ void addExtraScenarios (std::vector<Scenario>& list)
                                                                   eq24 (p, 1, 2, 1); },
          [] (CodexProcessor& p, double t) { setParam (p, ID::eqBand (1, 2, "Gain"), t < 2.3 ? 3.0f : -4.0f); }, true);
     add ("EQ linear M/S, no shaper", [] (CodexProcessor& p) { setParam (p, ID::clip (1, "On"), 0.0f); eq24 (p, 0, 2, 2); }, {});
+    {
+        // linear-phase EQs with silent input (no notes, no DC-producing module ahead): idle CPU of the convolver
+        Scenario s { "Extra Idle, EQ1+2 Linear Maximum, no shaper (no notes)", [] (CodexProcessor& p) { setParam (p, ID::clip (1, "On"), 0.0f);
+                                                                                                    eq24 (p, 0, 2, 4); eq24 (p, 1, 2, 4); }, false };
+        s.extra = true;
+        list.push_back (std::move (s));
+    }
     add ("Compressor automation", [] (CodexProcessor& p) { setParam (p, ID::cmp ("On"), 1.0f); compAutomate (p, 0.0); }, compAutomate);
     add ("All modules max automated", allModulesMax,
          [] (CodexProcessor& p, double t) { satAutomate (p, t, { 3, 2, 1, 0 }); compAutomate (p, t); eqPlaceAutomate (p, t, 0, false, true);
