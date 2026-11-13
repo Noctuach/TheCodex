@@ -265,7 +265,7 @@ private:
         auto left = r.removeFromLeft (r.getWidth() * 0.5f - 12.0f);
         r.removeFromLeft (24.0f);
         col (left, {
-            { "1  KEY", String::fromUTF8 ("Set KEY (F to E) to the key of your track. Key Mode: Follow MIDI (default) plays the note you press, Fixed Key plays KEY from any note. The ROOT readout confirms it.") },
+            { "1  KEY", String::fromUTF8 ("Set KEY (F to E) to the key of your track. Key Mode: Follow MIDI (default) plays the note name you press in the kick's register (OCT still applies), Fixed Key plays KEY from any note. The ROOT readout confirms it.") },
             { "2  PRESET", String::fromUTF8 ("Browse with the arrows or the grid button (search, categories, favourites). '*' after the name = edited.") },
             { "3  SHAPE THE HIT", String::fromUTF8 ("KICK page: pitch and amp envelopes (ADSR or DRAW). DISTORTION: two units with Pre/Post filter and drawable X-Shaper. EQ sits between them.") },
             { "4  POLISH", String::fromUTF8 ("SATURATION, COMPRESSOR, EQ 2 and SPACE are off until you switch them on. SUB LAYER adds a clean fundamental: press ALIGN.") },

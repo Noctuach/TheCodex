@@ -27,10 +27,15 @@ All notable changes to Codex. Versions follow [Semantic Versioning](https://semv
   click gives Codex the keyboard, so the DAW's typing keyboard stops while Codex has the focus.
 
 ### Changed
-- **Key Mode now defaults to Follow MIDI** for new instances: the note you play (typing keyboard, piano roll) sets the
-  pitch (MIDI note 29 = F1 = 43.65 Hz). Existing sessions keep their saved mode, sessions saved before Key Mode existed
-  open in Fixed Key, and presets never change it. Key and Oct are dimmed in Follow MIDI (they still set the preview,
-  export and tuner target: the exported WAV and Sub ALIGN always render the Key, whatever the Key Mode).
+- **Key Mode now defaults to Follow MIDI** for new instances: the note you play (typing keyboard, piano roll) picks the
+  key. Existing sessions keep their saved mode, sessions saved before Key Mode existed open in Fixed Key, and presets
+  never change it.
+- **Follow MIDI plays the note name you press, in the kick's register** (F1 … E2, shifted by Oct): any E plays the
+  kick's E, exactly where Fixed Key = E puts it. It used to play the literal MIDI pitch, so a typing keyboard (around
+  note 60) or a DAW that names octaves differently (Ableton C3 = 60, FL Studio C5 = 60) put the kick in tom territory
+  ("E2 sounds like E4"). Oct now applies in Follow MIDI too and is no longer dimmed; Key is dimmed in Follow MIDI and
+  still sets the exported WAV and Sub ALIGN (they always render the Key, whatever the Key Mode). The tuner target and
+  the preview button follow the last played note in Follow MIDI (the Key until a note is played).
 - New colour scheme: true black with a sun-orange accent (peach for the pitch envelope, amber instead of green, warm tones for the bands); the tuner turns orange when the kick is in key.
 - Premium finish: machined knobs (lit body, drop shadow, glowing value arc), panels with a soft shadow, lit top edge and an accent marker, a fading sun-orange line under the header, glowing tab underline and selected buttons.
 - Space Mix keeps the dry kick at full level up to 50 % (it used to fall to -3 dB at 50 % and silence at 100 %, which made the kick fade when the reverb was turned up).

@@ -95,7 +95,7 @@ private:
     IconButton undoButton { "undo", Icons::undo() }, redoButton { "redo", Icons::redo() }, menuButton { "menu", Icons::menu() };
     PresetBar presetBar;
     ChoiceBox keyBox { "Key" }, octaveBox { "Oct" }, keyModeBox { "Key Mode" };
-    bool keyDimmed = false;   // Key / Oct dimmed while Key Mode is Follow MIDI
+    bool keyDimmed = false;   // Key dimmed while Key Mode is Follow MIDI (Oct still sets the register)
     PressButton previewButton { "preview", Icons::play() };
     HeaderKnob outGain { "Output" };
     LevelMeter meterL, meterR;

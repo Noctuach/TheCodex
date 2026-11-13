@@ -73,7 +73,7 @@ struct KickExporter
     }
 
     /** Plays the selected Key (and Oct) from any note: the export and the sub-phase search render the kick in the
-        Key, also when the instance is in Follow MIDI mode (which would play the trigger note's literal pitch). */
+        Key, also when the instance is in Follow MIDI mode (which would play the trigger note's note name: C for note 60). */
     static void playKey (CodexProcessor& offline)
     {
         if (auto* m = offline.apvts.getParameter (ID::keyMode)) m->setValueNotifyingHost (0.0f);

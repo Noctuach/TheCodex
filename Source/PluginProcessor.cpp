@@ -194,6 +194,19 @@ int CodexProcessor::getKeyNote() const
     return Params::keyBaseNote + (int) key->load() + 12 * ((int) octave->load() - 1);
 }
 
+int CodexProcessor::getFollowNote (int midiNote) const
+{
+    return Params::keyBaseNote + keyIndexForMidiNote (midiNote) + 12 * ((int) octave->load() - 1);
+}
+
+int CodexProcessor::getPlayedNote() const
+{
+    const int last = lastFollowKey.load (std::memory_order_relaxed);
+    if (keyMode->load() > 0.5f && last >= 0)
+        return Params::keyBaseNote + last + 12 * ((int) octave->load() - 1);
+    return getKeyNote();
+}
+
 void CodexProcessor::updateParameters()
 {
     KickVoice::Settings s;
@@ -417,7 +430,11 @@ void CodexProcessor::handleMidi (const juce::MidiMessage& m, int positionInChunk
         voice.velocityGain = 1.0f - amount * (1.0f - m.getFloatVelocity());
         voice.hitVelocity = m.getFloatVelocity();
         hitCounter.fetch_add (1, std::memory_order_relaxed);
-        voice.noteOn (m.getNoteNumber(), (float) (followMidi ? m.getNoteNumber() : getKeyNote()));
+        // Follow MIDI keeps only the note name: any E plays the kick's E (the same note Fixed Key = E plays), so the
+        // DAW's octave naming and the typing keyboard's range (around note 60) never push the kick into tom territory
+        if (followMidi)
+            lastFollowKey.store (keyIndexForMidiNote (m.getNoteNumber()), std::memory_order_relaxed);
+        voice.noteOn (m.getNoteNumber(), (float) (followMidi ? getFollowNote (m.getNoteNumber()) : getKeyNote()));
     }
     else if (m.isNoteOff())
         voice.noteOff (m.getNoteNumber());
@@ -431,9 +448,10 @@ void CodexProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiB
     juce::AudioProcessLoadMeasurer::ScopedTimer loadTimer (loadMeasurer, buffer.getNumSamples());
     updateParameters();
 
-    // GUI preview button always plays the selected key (uses an out-of-range note id so MIDI can't cut it)
+    // GUI preview button plays the note the tuner targets: the selected key, or in Follow MIDI the last played note name
+    // (the selected key until a note was played). It uses an out-of-range note id so MIDI can't cut it.
     constexpr int previewId = 128;
-    if (previewOn.exchange (false))  { voice.hitVelocity = 1.0f; hitCounter.fetch_add (1, std::memory_order_relaxed); voice.noteOn (previewId, (float) getKeyNote()); captureArmAt = 0; }
+    if (previewOn.exchange (false))  { voice.hitVelocity = 1.0f; hitCounter.fetch_add (1, std::memory_order_relaxed); voice.noteOn (previewId, (float) getPlayedNote()); captureArmAt = 0; }
     if (previewOff.exchange (false)) voice.noteOff (previewId);
 
     const int numSamples  = buffer.getNumSamples();

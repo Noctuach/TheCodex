@@ -133,7 +133,7 @@ static float fftFundamental (const juce::AudioBuffer<float>& b, double startSec,
     return (float) ((best + off) * rate / N);
 }
 
-static float measurePitch (const juce::AudioBuffer<float>& b, double startSec, double lenSec, double rate = sr)
+static float measurePitch (const juce::AudioBuffer<float>& b, double startSec, double lenSec, double rate = sr, float minHz = 25.0f)
 {
     const int decim = juce::roundToInt (rate / 6000.0);
     std::vector<float> d;
@@ -144,7 +144,7 @@ static float measurePitch (const juce::AudioBuffer<float>& b, double startSec, d
         for (int k = 0; k < decim; ++k) acc += b.getSample (0, i + k);
         d.push_back (acc / decim);
     }
-    return detectPitch (d.data(), (int) d.size(), rate / decim, 25.0f, 400.0f).frequency;
+    return detectPitch (d.data(), (int) d.size(), rate / decim, minHz, 400.0f).frequency;
 }
 
 static void writeWav (const juce::AudioBuffer<float>& b, const juce::File& f)
@@ -1925,20 +1925,108 @@ int main (int argc, char** argv)
             std::cout << "\nKey Mode default: " << (followDefault ? "Follow MIDI" : "Fixed Key") << ", kept by Init: "
                       << (bad == 0 ? "OK" : "FAILED") << "\n";
         }
-        // Follow MIDI plays the note's own pitch: 29 = F1, 41 = F2 (key and octave ignored)
+        // Follow MIDI plays only the note name, in the kick's register: keyBaseNote + ((n - keyBaseNote) mod 12) + 12 * (oct - 1),
+        // exactly where Fixed Key puts that key (any E plays the kick's E), and Key must not matter.
+        const auto followTarget = [] (int n, int octIndex) { return Params::keyBaseNote + ((n - Params::keyBaseNote) % 12 + 12) % 12 + 12 * (octIndex - 1); };
+        const auto centsOff = [] (float hz, float note) { return hz > 0 ? 1200.0f * std::log2 (hz / midiToFrequency (note)) : 9999.0f; };
         proc.presets.loadPreset (1);
         setParam (proc, ID::key, 5.0f);   // A#: must not matter
         setParam (proc, ID::keyMode, 1.0f);
-        for (int note : { 29, 41 })
+        for (int note : { 29, 41, 60, 64 })   // default preset: F, F, C, E (E4 = 64 plays E2 like Fixed Key = E)
         {
-            const float target = midiToFrequency ((float) note);
+            const int expect = followTarget (note, 1);
             const float hz = measurePitch (render (proc, 2, note), 0.15, 0.17);
-            const float cents = hz > 0 ? 1200.0f * std::log2 (hz / target) : 9999.0f;
+            const float cents = centsOff (hz, (float) expect);
             const bool ok = std::abs (cents) < 25.0f;
             bad += ok ? 0 : 1;
-            std::cout << "Follow MIDI note " << note << ": " << juce::String (hz, 2) << " Hz (" << juce::String (cents, 1) << " c): "
-                      << (ok ? "OK" : "FAILED") << "\n";
+            std::cout << "Follow MIDI note " << note << " -> " << juce::MidiMessage::getMidiNoteName (expect, true, true, 4) << ": "
+                      << juce::String (hz, 2) << " Hz (" << juce::String (cents, 1) << " c): " << (ok ? "OK" : "FAILED") << "\n";
         }
+        // Every MIDI note 0..127 with Oct -1 / 0 / +1, on a plain sine patch (no pitch sweep, nothing that bends the root):
+        // the note the voice plays (the tuner target) and the measured audio pitch for every one of them (the detector
+        // goes down to 15 Hz here: Oct -1 puts F..G# at 21.8..26 Hz)
+        {
+            setParam (proc, ID::tune, 0.0f);
+            setParam (proc, ID::pAmount, 0.0f);   // the root from the first sample
+            int wrongNote = 0, wrongPitch = 0, measured = 0;
+            float worst = 0.0f;
+            const auto start = juce::Time::getMillisecondCounterHiRes();
+            for (int oct = 0; oct < 3; ++oct)
+            {
+                setParam (proc, ID::octave, (float) oct);
+                for (int n = 0; n < 128; ++n)
+                {
+                    const int expect = followTarget (n, oct);
+                    auto audio = render (proc, 1, n);
+                    wrongNote += proc.getPlayedNote() == expect && std::abs (proc.getTargetNote() - (float) expect) < 1.0e-4f ? 0 : 1;
+                    {
+                        const float hz = measurePitch (audio, 0.1, 0.24, sr, 15.0f);
+                        const float cents = centsOff (hz, (float) expect);
+                        worst = std::max (worst, std::abs (cents));
+                        wrongPitch += std::abs (cents) < 10.0f ? 0 : 1;
+                        ++measured;
+                        if (std::abs (cents) >= 10.0f)
+                            std::cout << "  note " << n << " oct " << (oct - 1) << ": " << juce::String (hz, 2) << " Hz, expected "
+                                      << juce::String (midiToFrequency ((float) expect), 2) << " Hz\n";
+                    }
+                }
+            }
+            const bool ok = wrongNote == 0 && wrongPitch == 0;
+            bad += ok ? 0 : 1;
+            std::cout << "Follow MIDI notes 0..127 x Oct -1/0/+1: " << (384 - wrongNote) << "/384 play keyBase + (n - keyBase) mod 12 + 12*(oct-1); "
+                      << measured << " measured, worst " << juce::String (worst, 2) << " c (< 10 c), "
+                      << juce::String ((juce::Time::getMillisecondCounterHiRes() - start) / 1000.0, 1) << " s: " << (ok ? "OK" : "FAILED") << "\n";
+            setParam (proc, ID::octave, 1.0f);
+        }
+        // Tuner target (and preview) follow the last played note in Follow MIDI; the Key before any note and in Fixed Key
+        {
+            CodexProcessor fresh;
+            setParam (fresh, ID::key, 3.0f);    // G#
+            setParam (fresh, ID::keyMode, 1.0f);
+            setParam (fresh, ID::tune, 0.5f);
+            const float beforeNote = fresh.getTargetNote();
+            bool ok = std::abs (beforeNote - ((float) fresh.getKeyNote() + 0.5f)) < 1.0e-4f;
+            render (fresh, 1, 76);              // E5 -> the kick's E (E2 = 40)
+            const float afterE = fresh.getTargetNote();
+            ok &= std::abs (afterE - 40.5f) < 1.0e-4f;
+            setParam (fresh, ID::octave, 2.0f); // Oct +1 moves the target with it
+            const float afterOct = fresh.getTargetNote();
+            ok &= std::abs (afterOct - 52.5f) < 1.0e-4f;
+            setParam (fresh, ID::octave, 1.0f);
+            setParam (fresh, ID::keyMode, 0.0f);
+            const float fixedTarget = fresh.getTargetNote();
+            ok &= std::abs (fixedTarget - ((float) fresh.getKeyNote() + 0.5f)) < 1.0e-4f;
+            render (fresh, 1, 64);              // Fixed Key: a played note leaves the target on the Key
+            ok &= std::abs (fresh.getTargetNote() - fixedTarget) < 1.0e-4f;
+            setParam (fresh, ID::keyMode, 1.0f);
+            ok &= std::abs (fresh.getTargetNote() - 40.5f) < 1.0e-4f;   // back in Follow MIDI: the last Follow MIDI note
+            // the preview button plays that same note
+            setParam (fresh, ID::tune, 0.0f);
+            setParam (fresh, ID::pAmount, 0.0f);
+            fresh.setRateAndBufferSizeDetails (sr, block);
+            fresh.prepareToPlay (sr, block);
+            juce::AudioBuffer<float> pv (2, (int) (0.4 * sr)), buf (2, block);
+            juce::MidiBuffer none;
+            fresh.triggerPreview (true);
+            for (int pos = 0; pos < pv.getNumSamples(); pos += block)
+            {
+                const int n = std::min (block, pv.getNumSamples() - pos);
+                buf.setSize (2, n, false, false, true);
+                fresh.processBlock (buf, none);
+                for (int ch = 0; ch < 2; ++ch) pv.copyFrom (ch, pos, buf, ch, 0, n);
+            }
+            fresh.triggerPreview (false);
+            const float pvHz = measurePitch (pv, 0.1, 0.2);
+            const float pvCents = centsOff (pvHz, 40.0f);
+            ok &= std::abs (pvCents) < 10.0f;
+            bad += ok ? 0 : 1;
+            std::cout << "Follow MIDI tuner target: before a note " << juce::String (beforeNote, 2) << " (Key + Tune), after E5 "
+                      << juce::String (afterE, 2) << ", Oct +1 " << juce::String (afterOct, 2) << ", Fixed Key " << juce::String (fixedTarget, 2)
+                      << "; preview " << juce::String (pvHz, 2) << " Hz (" << juce::String (pvCents, 1) << " c): " << (ok ? "OK" : "FAILED") << "\n";
+        }
+        proc.presets.loadPreset (1);
+        setParam (proc, ID::key, 5.0f);
+        setParam (proc, ID::keyMode, 1.0f);
         // Export and Sub ALIGN render the selected Key also in Follow MIDI mode (their offline copy plays note 60)
         {
             const float target = juce::MidiMessage::getMidiNoteInHertz (proc.getKeyNote());

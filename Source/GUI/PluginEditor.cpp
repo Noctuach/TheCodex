@@ -284,17 +284,16 @@ void MainView::timerCallback()
     const bool clipOn = proc.apvts.getRawParameterValue (ID::clipOn)->load() > 0.5f;
     clipCeiling.setAlpha (clipOn ? 1.0f : 0.4f);
     clipSoftness.setAlpha (clipOn ? 1.0f : 0.4f);
-    // Follow MIDI: notes play their own pitch, so Key / Oct only set the preview, export and tuner target (dimmed, still usable)
+    // Follow MIDI: notes play their own note name, so Key only sets the export, Sub ALIGN (and the preview and tuner target
+    // until a note is played): dimmed, still usable. Oct still sets the register the notes play in, so it stays lit.
     const bool followMidi = proc.apvts.getRawParameterValue (ID::keyMode)->load() > 0.5f;
     if (followMidi != keyDimmed)
     {
         keyDimmed = followMidi;
-        for (auto* c : { &keyBox, &octaveBox })
-        {
-            c->setAlpha (followMidi ? Ui::disabledAlpha : 1.0f);
-            c->box.setTooltip (Help::forParameter (c == &keyBox ? ID::key : ID::octave)
-                               + (followMidi ? "\n\nKey Mode is Follow MIDI: notes play their own pitch; Key and Octave set the preview, export and tuner target." : ""));
-        }
+        keyBox.setAlpha (followMidi ? Ui::disabledAlpha : 1.0f);
+        keyBox.box.setTooltip (Help::forParameter (ID::key)
+                               + (followMidi ? "\n\nKey Mode is Follow MIDI: the note name you press picks the key (in the kick's register, Oct still applies). "
+                                               "Key sets Export WAV and Sub ALIGN, and the preview and tuner target until you play a note." : ""));
     }
     if (++footerTick % 4 == 0) repaint (footer);
 }

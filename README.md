@@ -33,14 +33,15 @@ Formats: **VST3** (Windows, macOS, Linux), **AU** (macOS) and a **Standalone** a
 
 ## Quick start
 1. Load Codex on an instrument track and play any note (or hold the **play** button next to the root-note readout).
-2. Play the note you want: *Key Mode* is *Follow MIDI* by default, so the kick plays the pitch of the MIDI note
-   (MIDI note 29 = F1 = 43.65 Hz; kicks live in the lowest octaves). Or switch *Key Mode* to *Fixed Key* and set
+2. Play the note you want: *Key Mode* is *Follow MIDI* by default, so the kick plays the note name you press, in the
+   kick's register: any E (E2, E4, whatever your DAW calls it) plays the kick's E (E2 = 82.41 Hz), exactly where
+   *Fixed Key* = E puts it; **Oct** still shifts it an octave. Or switch *Key Mode* to *Fixed Key* and set
    **KEY** to the key of your track: every MIDI note then plays the kick in that key.
 3. Browse the presets with the arrows next to the preset name.
 4. Hover over any control to see what it does.
 
 The **ROOT** readout in the tab bar is a tuner: it measures the actual root note coming out of the plugin, after all
-distortion, so you can see your kick is in key. It turns orange within 10 cents of the selected key (the KEY setting, also in *Follow MIDI* mode).
+distortion, so you can see your kick is in key. It turns orange within 10 cents of the target: the selected key, or in *Follow MIDI* the last note you played (the KEY setting until you play one).
 
 ## Your first hardstyle kick, step by step
 1. Start from **Init** (or **909 Clean** for the 909 engine).
@@ -66,10 +67,10 @@ distortion, so you can see your kick is in key. It turns orange within 10 cents 
 | Preset | Factory presets first, then your own. Selecting the current preset again reverts your edits. |
 | Save | Saves a user preset (`Documents/Codex/Presets/*.cdxpreset`). |
 | Key / Oct | Root note, **F to E** (F1 = 43.65 Hz … E2 = 82.41 Hz), plus an octave shift. Presets never change the key. |
-| Key Mode | *Follow MIDI* (default) plays the note you press; *Fixed Key* plays the selected key from any MIDI note. Key / Oct are dimmed in *Follow MIDI* (they still set the preview, export and tuner target). Sessions saved before Key Mode existed open in *Fixed Key*. |
+| Key Mode | *Follow MIDI* (default) plays the note name you press, in the kick's register (F1 … E2, shifted by Oct: any E plays the same kick as *Fixed Key* = E); *Fixed Key* plays the selected key from any MIDI note. Oct applies in both modes. Key is dimmed in *Follow MIDI*: it still sets the export and Sub ALIGN, and the preview and tuner target until you play a note. Sessions saved before Key Mode existed open in *Fixed Key*. |
 | Output | Final output level, with a stereo meter. |
 | Menu | Save/delete presets, open the preset folder, interface size (75–200 %), tooltips on/off, About. |
-| ROOT / play | Tuner readout of the output's root note, and a play button that previews the kick in the selected key. |
+| ROOT / play | Tuner readout of the output's root note, and a play button that previews the kick in the selected key (in *Follow MIDI*: the last note you played, the tuner's target). |
 
 ### Footer
 | Control | What it does |
