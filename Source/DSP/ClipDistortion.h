@@ -1,6 +1,7 @@
 #pragma once
 #include <juce_dsp/juce_dsp.h>
 #include "ParametricEQ.h"
+#include "StereoOversampling.h"
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -106,8 +107,7 @@ public:
         curveTable.build ([] (float x) { return juce::jlimit (-1.0f, 1.0f, x); }, false);   // allocate the X-Shaper table up front
         for (int i = 0; i < 4; ++i)
         {
-            oversamplers[(size_t) i] = std::make_unique<juce::dsp::Oversampling<float>> (
-                2, i + 1, juce::dsp::Oversampling<float>::filterHalfBandPolyphaseIIR, true, false);
+            oversamplers[(size_t) i] = std::make_unique<StereoOversampling> (i + 1);
             oversamplers[(size_t) i]->initProcessing ((size_t) maxBlockSize);
         }
         dcR = (float) std::exp (-juce::MathConstants<double>::twoPi * 10.0 / sr);
@@ -594,7 +594,7 @@ private:
     }
 
     double baseRate = 44100.0;
-    std::array<std::unique_ptr<juce::dsp::Oversampling<float>>, 4> oversamplers;
+    std::array<std::unique_ptr<StereoOversampling>, 4> oversamplers;
     std::vector<float> tailMul, autoIn;
     juce::SmoothedValue<float> tailDb;
     float tgtLo = 20000.0f, tgtHi = 20.0f, tgtShelfHz = 6000.0f, tgtShelfDb = 0.0f;

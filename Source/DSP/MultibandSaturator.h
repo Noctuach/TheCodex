@@ -1,6 +1,7 @@
 #pragma once
 #include <juce_dsp/juce_dsp.h>
 #include "ParametricEQ.h"
+#include "StereoOversampling.h"
 #include <array>
 #include <cmath>
 #include <cstdint>
@@ -349,8 +350,7 @@ namespace sat
             baseRate = sr;
             for (int i = 0; i < 3; ++i)
             {
-                oversamplers[(size_t) i] = std::make_unique<juce::dsp::Oversampling<float>> (
-                    2, i + 1, juce::dsp::Oversampling<float>::filterHalfBandPolyphaseIIR, true, false);
+                oversamplers[(size_t) i] = std::make_unique<StereoOversampling> (i + 1);
                 oversamplers[(size_t) i]->initProcessing ((size_t) maxBlockSize);
             }
             dcR = (float) std::exp (-juce::MathConstants<double>::twoPi * 10.0 / sr);
@@ -850,7 +850,7 @@ namespace sat
         alignas (16) StereoBuffer inBuf {}, restBuf {}, tmpBuf {}, tmpBuf2 {}, sumBuf {};
 
         double baseRate = 48000.0, rate = 48000.0;
-        std::array<std::unique_ptr<juce::dsp::Oversampling<float>>, 3> oversamplers;
+        std::array<std::unique_ptr<StereoOversampling>, 3> oversamplers;
         int activeOs = -2;
         Settings settings, last;
         std::array<float, maxBands - 1> lastXf {}, targetXf {};
