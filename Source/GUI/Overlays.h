@@ -1,5 +1,6 @@
 #pragma once
 #include "Widgets.h"
+#include "KeyboardFocus.h"
 
 /** Wrapped body text for the overlay cards: laid out once, so the height reserved is exactly the height drawn
     (no row cut off with an ellipsis when it wraps to an extra line). */
@@ -15,11 +16,12 @@ inline juce::TextLayout cardText (const juce::String& text, const juce::FontOpti
     return tl;
 }
 
-/** Full-window modal card that dims the UI behind it. Click outside or press Escape to close. */
+/** Full-window modal card that dims the UI behind it. Click outside or the close button to close it (Escape works while
+    the overlay has the keyboard: in a text field, or with keyboard shortcuts switched on). */
 class Overlay : public juce::Component
 {
 public:
-    Overlay() { setWantsKeyboardFocus (true); setAlwaysOnTop (true); }
+    Overlay() { KeyboardFocusPolicy::markKeyTarget (*this); setAlwaysOnTop (true); }
 
     /** Overlays fade in (160 ms) and out (110 ms). */
     void open()
@@ -28,8 +30,9 @@ public:
         animator.cancelAnimation (this, false);
         setAlpha (0.0f);
         setVisible (true);
-        toFront (true);
-        grabKeyboardFocus();
+        toFront (false);   // never takes the keyboard by itself (see KeyboardFocusPolicy)
+        if (getWantsKeyboardFocus())   // only with keyboard shortcuts switched on
+            grabKeyboardFocus();
         opened();
         animator.animateComponent (this, getBounds(), 1.0f, 160, false, 1.0, 1.0);
     }
@@ -168,7 +171,7 @@ private:
             { "ABOUT", "A free kick synthesizer for hardstyle, built the old-fashioned way: a swept oscillator or a synthesized 909, "
                        "two distortion stages around a parametric EQ. No samples." },
             { "TIPS", String (CharPointer_UTF8 ("Hover any control for help  \xc2\xb7  Double-click a knob to reset  \xc2\xb7  Shift-drag for fine control  \xc2\xb7  "
-                                                "Double-click the EQ to add a band  \xc2\xb7  Set KEY to the key of your track; the tuner confirms the root.")) },
+                                                "Double-click the EQ to add a band  \xc2\xb7  Set KEY to the key of your track (Key Mode: Fixed Key plays it from any note); the tuner confirms the root.")) },
             { "CREDITS", "Built with JUCE. Fonts: Barlow by The Barlow Project Authors, SIL Open Font License 1.1. "
                          "VST is a registered trademark of Steinberg Media Technologies GmbH." },
         };
@@ -262,7 +265,7 @@ private:
         auto left = r.removeFromLeft (r.getWidth() * 0.5f - 12.0f);
         r.removeFromLeft (24.0f);
         col (left, {
-            { "1  KEY", String::fromUTF8 ("Set KEY (F to E) to the key of your track. Every MIDI note plays the kick in that key; the ROOT readout confirms it.") },
+            { "1  KEY", String::fromUTF8 ("Set KEY (F to E) to the key of your track. Key Mode: Follow MIDI (default) plays the note you press, Fixed Key plays KEY from any note. The ROOT readout confirms it.") },
             { "2  PRESET", String::fromUTF8 ("Browse with the arrows or the grid button (search, categories, favourites). '*' after the name = edited.") },
             { "3  SHAPE THE HIT", String::fromUTF8 ("KICK page: pitch and amp envelopes (ADSR or DRAW). DISTORTION: two units with Pre/Post filter and drawable X-Shaper. EQ sits between them.") },
             { "4  POLISH", String::fromUTF8 ("SATURATION, COMPRESSOR, EQ 2 and SPACE are off until you switch them on. SUB LAYER adds a clean fundamental: press ALIGN.") },
@@ -270,9 +273,10 @@ private:
         });
         col (r, {
             { "KNOBS", String::fromUTF8 ("Drag up/down  \xc2\xb7  Shift: fine  \xc2\xb7  double-click: default  \xc2\xb7  click the value to type it.") },
-            { "EQ DISPLAY", String::fromUTF8 ("Double-click: add band  \xc2\xb7  drag: frequency/gain  \xc2\xb7  wheel: Q / slope  \xc2\xb7  Alt-click: bypass  \xc2\xb7  right-click: shape, placement, delete  \xc2\xb7  Delete key: delete band.") },
+            { "EQ DISPLAY", String::fromUTF8 ("Double-click: add band  \xc2\xb7  drag: frequency/gain  \xc2\xb7  wheel: Q / slope  \xc2\xb7  Alt-click: bypass  \xc2\xb7  right-click: shape, placement, delete band.") },
             { "DRAW ENVELOPES / X-SHAPER", String::fromUTF8 ("Drag points; drag the diamonds to bend a segment  \xc2\xb7  double-click: add or delete a point  \xc2\xb7  right-click: preset shapes.") },
-            { "SHORTCUTS", cmd + "Z undo" + dot + cmd + "Shift+Z redo" + dot + cmd + "B browse presets" + dot + cmd + "S save preset" + dot + cmd + "Left/Right previous/next preset." },
+            { "SHORTCUTS", "Off by default, so your DAW keeps the computer keyboard (menu: Keyboard shortcuts in Codex). "
+                          + cmd + "Z undo" + dot + cmd + "Shift+Z redo" + dot + cmd + "B browse" + dot + cmd + "S save" + dot + cmd + "Left/Right preset" + dot + "Delete: EQ band." },
             { "HELP", String::fromUTF8 ("Hover over any control for an explanation (menu: Show tooltips).") },
         });
     }

@@ -12,7 +12,24 @@ All notable changes to Codex. Versions follow [Semantic Versioning](https://semv
 - New default order (Modern): Space first, so the distortions build the reverb into the tail. Old sessions and user presets keep the Classic order (Space last) and sound unchanged.
 - Preset "Reverb-First Rawstyle".
 
+### Fixed
+- The DAW's computer keyboard (typing keyboard to MIDI, transport, shortcuts) keeps working after you click in Codex.
+  Clicking, dragging, hovering (the EQ display used to take the keyboard just by hovering), menus and combo boxes no
+  longer give Codex the keyboard focus; on Windows (FL Studio, Ableton Live, ...) the focused plug-in window swallowed
+  the keys. Text fields (preset name, browser search, typing a knob value) still take the keyboard while you type and
+  hand it back to the host on Return, Escape, a click elsewhere or closing the dialog. The preset browser no longer
+  focuses its search field on open, so the typing keyboard can audition presets.
+
+### Added
+- Menu → **Keyboard shortcuts in Codex** (off by default, saved in the user settings): brings back the plug-in's own
+  shortcuts (Ctrl/Cmd+Z/Y undo/redo, B browse, S save, arrows previous/next preset, Delete on an EQ band). With it on, a
+  click gives Codex the keyboard, so the DAW's typing keyboard stops while Codex has the focus.
+
 ### Changed
+- **Key Mode now defaults to Follow MIDI** for new instances: the note you play (typing keyboard, piano roll) sets the
+  pitch (MIDI note 29 = F1 = 43.65 Hz). Existing sessions keep their saved mode, sessions saved before Key Mode existed
+  open in Fixed Key, and presets never change it. Key and Oct are dimmed in Follow MIDI (they still set the preview,
+  export and tuner target).
 - New colour scheme: true black with a sun-orange accent (peach for the pitch envelope, amber instead of green, warm tones for the bands); the tuner turns orange when the kick is in key.
 - Premium finish: machined knobs (lit body, drop shadow, glowing value arc), panels with a soft shadow, lit top edge and an accent marker, a fading sun-orange line under the header, glowing tab underline and selected buttons.
 - Space Mix keeps the dry kick at full level up to 50 % (it used to fall to -3 dB at 50 % and silence at 100 %, which made the kick fade when the reverb was turned up).

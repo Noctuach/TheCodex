@@ -583,6 +583,15 @@ void CodexProcessor::setStateInformation (const void* data, int sizeInBytes)
                 param.setProperty ("value", chain::classicIndex(), nullptr);
                 tree.appendChild (param, nullptr);
             }
+            // Key Mode defaults to Follow MIDI since it was switched for the typing keyboard; sessions saved without a
+            // Key Mode (builds before it existed) always played the selected key: keep them on Fixed Key
+            if (! tree.getChildWithProperty ("id", ID::keyMode).isValid())
+            {
+                juce::ValueTree param ("PARAM");
+                param.setProperty ("id", ID::keyMode, nullptr);
+                param.setProperty ("value", 0.0f, nullptr);
+                tree.appendChild (param, nullptr);
+            }
             apvts.replaceState (tree);
             // replaceState() only updates a parameter when its stored (unnormalised) value differs from the cached one,
             // so a switch left at an in-between normalised value (hosts may send any 0..1) would not be reset.

@@ -10,6 +10,7 @@ namespace
 
     constexpr const char* scaleKey = "uiScale";
     constexpr const char* tooltipsKey = "tooltips";
+    constexpr const char* shortcutsKey = "keyboardShortcuts";   // off: the DAW keeps the computer keyboard
 }
 
 //==============================================================================
@@ -33,7 +34,8 @@ MainView::MainView (CodexProcessor& p, PropertiesFile* settingsFile)
       compressorPage (p),
       eq2Page (p),
       browserOverlay (p.presets, settingsFile),
-      aboutOverlay (JucePlugin_VersionString)
+      aboutOverlay (JucePlugin_VersionString),
+      focusPolicy (*this, p.wrapperType != AudioProcessor::wrapperType_Standalone)
 {
     auto& s = p.apvts;
 
@@ -196,6 +198,7 @@ MainView::MainView (CodexProcessor& p, PropertiesFile* settingsFile)
 
     setOpaque (true);   // paint() fills the whole view
     setTooltipsEnabled (settings == nullptr || settings->getBoolValue (tooltipsKey, true));
+    focusPolicy.setShortcutsEnabled (settings != nullptr && settings->getBoolValue (shortcutsKey, false));
     setSize (baseWidth, baseHeight);
     showTab (0);
     startTimerHz (60);
@@ -209,6 +212,13 @@ void MainView::setTooltipsEnabled (bool enabled)
         tooltipWindow.reset();
     if (settings != nullptr)
         settings->setValue (tooltipsKey, enabled);
+}
+
+void MainView::setKeyboardShortcutsEnabled (bool enabled)
+{
+    focusPolicy.setShortcutsEnabled (enabled);
+    if (settings != nullptr)
+        settings->setValue (shortcutsKey, enabled);
 }
 
 void MainView::setUnderlineTarget (bool snap)
@@ -274,6 +284,18 @@ void MainView::timerCallback()
     const bool clipOn = proc.apvts.getRawParameterValue (ID::clipOn)->load() > 0.5f;
     clipCeiling.setAlpha (clipOn ? 1.0f : 0.4f);
     clipSoftness.setAlpha (clipOn ? 1.0f : 0.4f);
+    // Follow MIDI: notes play their own pitch, so Key / Oct only set the preview, export and tuner target (dimmed, still usable)
+    const bool followMidi = proc.apvts.getRawParameterValue (ID::keyMode)->load() > 0.5f;
+    if (followMidi != keyDimmed)
+    {
+        keyDimmed = followMidi;
+        for (auto* c : { &keyBox, &octaveBox })
+        {
+            c->setAlpha (followMidi ? Ui::disabledAlpha : 1.0f);
+            c->box.setTooltip (Help::forParameter (c == &keyBox ? ID::key : ID::octave)
+                               + (followMidi ? "\n\nKey Mode is Follow MIDI: notes play their own pitch; Key and Octave set the preview, export and tuner target." : ""));
+        }
+    }
     if (++footerTick % 4 == 0) repaint (footer);
 }
 
@@ -300,18 +322,23 @@ void MainView::showMainMenu()
     sizes.addItem (107, "Fit to screen");
 
     const auto presetName = proc.presets.getCurrentName();
+    // shortcut hints only while the shortcuts work (keyboard shortcuts switched on)
+    const bool keys = focusPolicy.areShortcutsEnabled();
+    auto hint = [keys] (KeyPress k) { return keys ? k.getTextDescriptionWithIcons() : String(); };
     menu.addSectionHeader ("Presets");
-    { PopupMenu::Item it ("Browse presets..."); it.itemID = 9; it.isEnabled = true; it.shortcutKeyDescription = KeyPress ('b', ModifierKeys::commandModifier, 0).getTextDescriptionWithIcons(); menu.addItem (it); }
-    { PopupMenu::Item it ("Save preset..."); it.itemID = 1; it.isEnabled = true; it.shortcutKeyDescription = KeyPress ('s', ModifierKeys::commandModifier, 0).getTextDescriptionWithIcons(); menu.addItem (it); }
+    { PopupMenu::Item it ("Browse presets..."); it.itemID = 9; it.isEnabled = true; it.shortcutKeyDescription = hint (KeyPress ('b', ModifierKeys::commandModifier, 0)); menu.addItem (it); }
+    { PopupMenu::Item it ("Save preset..."); it.itemID = 1; it.isEnabled = true; it.shortcutKeyDescription = hint (KeyPress ('s', ModifierKeys::commandModifier, 0)); menu.addItem (it); }
     menu.addItem (2, "Delete \"" + presetName + "\"", proc.presets.isCurrentUserPreset());
     menu.addItem (3, "Open preset folder");
     menu.addItem (4, "Rescan preset folder");
     menu.addSectionHeader ("Edit");
-    { PopupMenu::Item it ("Undo"); it.itemID = 5; it.isEnabled = proc.undoManager.canUndo(); it.shortcutKeyDescription = KeyPress ('z', ModifierKeys::commandModifier, 0).getTextDescriptionWithIcons(); menu.addItem (it); }
-    { PopupMenu::Item it ("Redo"); it.itemID = 6; it.isEnabled = proc.undoManager.canRedo(); it.shortcutKeyDescription = KeyPress ('z', ModifierKeys::commandModifier | ModifierKeys::shiftModifier, 0).getTextDescriptionWithIcons(); menu.addItem (it); }
+    { PopupMenu::Item it ("Undo"); it.itemID = 5; it.isEnabled = proc.undoManager.canUndo(); it.shortcutKeyDescription = hint (KeyPress ('z', ModifierKeys::commandModifier, 0)); menu.addItem (it); }
+    { PopupMenu::Item it ("Redo"); it.itemID = 6; it.isEnabled = proc.undoManager.canRedo(); it.shortcutKeyDescription = hint (KeyPress ('z', ModifierKeys::commandModifier | ModifierKeys::shiftModifier, 0)); menu.addItem (it); }
     menu.addSectionHeader ("View");
     menu.addSubMenu ("Interface size", sizes);
     menu.addItem (7, "Show tooltips", true, tooltipWindow != nullptr);
+    // Off by default: Codex never keeps the keyboard, so the DAW's typing keyboard and shortcuts keep working
+    menu.addItem (11, "Keyboard shortcuts in Codex (the DAW's typing keyboard stops while Codex has focus)", true, keys);
     menu.addSeparator();
     menu.addItem (10, "Quick guide");
     menu.addItem (8, "About Codex");
@@ -334,6 +361,7 @@ void MainView::showMainMenu()
                 case 5: v.proc.undoManager.undo(); break;
                 case 6: v.proc.undoManager.redo(); break;
                 case 7: v.setTooltipsEnabled (v.tooltipWindow == nullptr); break;
+                case 11: v.setKeyboardShortcutsEnabled (! v.focusPolicy.areShortcutsEnabled()); break;
                 case 8: v.aboutOverlay.open(); break;
                 default:
                     if (r >= 100 && r < 107 && v.onScaleRequested) v.onScaleRequested (scales[r - 100]);
@@ -345,7 +373,8 @@ void MainView::showMainMenu()
 
 bool MainView::keyPressed (const KeyPress& k)
 {
-    // Shortcuts (when the plugin window has keyboard focus; text fields keep their own keys)
+    // Shortcuts: only with "Keyboard shortcuts in Codex" switched on (by default Codex never takes the keyboard, so these
+    // keys stay with the host). Text fields keep their own keys.
     const auto mods = k.getModifiers();
     if (! mods.isCommandDown()) return false;
     const int code = k.getKeyCode();
@@ -820,6 +849,7 @@ CodexEditor::CodexEditor (CodexProcessor& p)
 
     applyScale (scale);
     initialised = true;
+    view.getKeyboardFocusPolicy().apply();   // after the look-and-feel change, which rebuilds the slider text boxes
 }
 
 CodexEditor::~CodexEditor()

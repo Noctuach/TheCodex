@@ -70,7 +70,8 @@ set(HK_SOURCES
     Source/PresetManager.cpp
     Source/PluginProcessor.cpp
     Source/GUI/PluginEditor.cpp
-    Source/GUI/EQDisplay.cpp)
+    Source/GUI/EQDisplay.cpp
+    Source/GUI/KeyboardFocusNative.cpp)
 
 target_sources(Codex PRIVATE ${HK_SOURCES})
 if(MINGW)

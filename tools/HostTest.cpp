@@ -61,6 +61,8 @@ int main (int argc, char** argv)
     check (plugin->acceptsMidi(), "accepts MIDI");
     std::cout << "        " << plugin->getParameters().size() << " parameters, latency " << plugin->getLatencySamples() << " samples\n";
     check (plugin->getParameters().size() > 100, "parameters exposed to the host");
+    // parameter 2 is Key Mode (Key, Octave, Key Mode come first); a new instance follows the MIDI note
+    check (plugin->getParameters()[2]->getName (40) == "Key Mode" && plugin->getParameters()[2]->getValue() > 0.5f, "Key Mode defaults to Follow MIDI");
 
     plugin->prepareToPlay (48000.0, 512);
     juce::AudioBuffer<float> buffer (2, 512);

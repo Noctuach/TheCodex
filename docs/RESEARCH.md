@@ -53,7 +53,7 @@ The 10 models are my own starting points, not measured from a real unit. Each on
 - Tune the kick to the **root of the track**. Reference roots: F1 ≈ 43.7 Hz, A1 = 55 Hz ([BeatKey](https://beatkey.pages.dev/how-to-make-hardstyle-music)).
 - Tuning to the root can cause phase issues against the bass; try a note up or down, the third or the fifth ([Fader Pro](https://blog.faderpro.com/?p=1215)).
 
-**In Codex:** *Key* runs **F to E**: F1 (43.65 Hz) up to E2 (82.41 Hz), the octave that hardstyle kick roots sit in. *Oct* shifts it by an octave. *Mode* = Fixed Key (any MIDI note plays the selected key) or Follow MIDI. Presets never change the key.
+**In Codex:** *Key* runs **F to E**: F1 (43.65 Hz) up to E2 (82.41 Hz), the octave that hardstyle kick roots sit in. *Oct* shifts it by an octave. *Mode* = Fixed Key (any MIDI note plays the selected key) or Follow MIDI (the default: the MIDI note sets the pitch). Presets never change the key.
 
 ## Other kick synths (feature comparison)
 - **Kick 3 (Sonic Academy):** dedicated kick synth; node-based pitch and amp envelopes ([MusicTech](https://musictech.com/guides/buyers-guide/best-kick-drum-plugins-2026-tested-reviewed), [Dubspot](https://blog.dubspot.com/plugins/compare/kick-2-vs-substance)).

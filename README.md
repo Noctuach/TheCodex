@@ -33,12 +33,14 @@ Formats: **VST3** (Windows, macOS, Linux), **AU** (macOS) and a **Standalone** a
 
 ## Quick start
 1. Load Codex on an instrument track and play any note (or hold the **play** button next to the root-note readout).
-2. Set **KEY** to the key of your track. With *Fixed Key* mode, every MIDI note plays the kick in that key.
+2. Play the note you want: *Key Mode* is *Follow MIDI* by default, so the kick plays the pitch of the MIDI note
+   (MIDI note 29 = F1 = 43.65 Hz; kicks live in the lowest octaves). Or switch *Key Mode* to *Fixed Key* and set
+   **KEY** to the key of your track: every MIDI note then plays the kick in that key.
 3. Browse the presets with the arrows next to the preset name.
 4. Hover over any control to see what it does.
 
 The **ROOT** readout in the tab bar is a tuner: it measures the actual root note coming out of the plugin, after all
-distortion, so you can see your kick is in key. It turns orange within 10 cents of the selected key.
+distortion, so you can see your kick is in key. It turns orange within 10 cents of the selected key (the KEY setting, also in *Follow MIDI* mode).
 
 ## Your first hardstyle kick, step by step
 1. Start from **Init** (or **909 Clean** for the 909 engine).
@@ -64,7 +66,7 @@ distortion, so you can see your kick is in key. It turns orange within 10 cents 
 | Preset | Factory presets first, then your own. Selecting the current preset again reverts your edits. |
 | Save | Saves a user preset (`Documents/Codex/Presets/*.cdxpreset`). |
 | Key / Oct | Root note, **F to E** (F1 = 43.65 Hz … E2 = 82.41 Hz), plus an octave shift. Presets never change the key. |
-| Key Mode | *Fixed Key* plays the selected key from any MIDI note; *Follow MIDI* plays the note you press. |
+| Key Mode | *Follow MIDI* (default) plays the note you press; *Fixed Key* plays the selected key from any MIDI note. Key / Oct are dimmed in *Follow MIDI* (they still set the preview, export and tuner target). Sessions saved before Key Mode existed open in *Fixed Key*. |
 | Output | Final output level, with a stereo meter. |
 | Menu | Save/delete presets, open the preset folder, interface size (75–200 %), tooltips on/off, About. |
 | ROOT / play | Tuner readout of the output's root note, and a play button that previews the kick in the selected key. |
@@ -79,7 +81,7 @@ distortion, so you can see your kick is in key. It turns orange within 10 cents 
 | CPU | Share of the audio time Codex uses. |
 
 The **grid button** next to the preset name opens the preset browser: search, categories, favourites (click the star),
-click to audition, double-click or Enter to load.
+click to audition, double-click (or Enter in the search field) to load.
 
 ### Kick page
 | Section | Controls |
@@ -90,7 +92,7 @@ click to audition, double-click or Enter to load.
 | **Pitch Envelope** | ADSR for the pitch sweep (drag the points in the display, or use the knobs), with *Amount* (semitones above the root) and *Curve*. In 909 mode this panel shows the 909 sweep and circuit controls instead. |
 | **Draw mode** | Click **DRAW** in the pitch or amp envelope header to replace the ADSR with a breakpoint envelope (up to 8 points). Drag points (time + level), drag the diamond in a segment to bend it, double-click to add or delete points, right-click for shapes (Hardstyle punch, Long zap, Rawstyle snap, ...). The amp *Release* still fades the note out on note-off. |
 | **Amp Envelope** | ADSR for volume with *Curve*. In 909 mode it acts as a gate (attack and release only). |
-| **Equalizer** | Up to **24 bands** (the Pro-Q 4 limit): double-click the display or press **+ ADD** to add one, **DELETE** (or the Delete key) to remove it, the power button or Alt-click to bypass it; only bands in use are shown. 10 shapes: Bell, Low/High Shelf, Low/High Cut, Notch, Band Pass, Tilt Shelf, Flat Tilt, All Pass. Slopes 6–96 dB/oct. Each band has a **stereo placement** (Stereo, Left, Right, **Mid**, **Side**); the display draws a result curve per channel group. Right-click a node to **split** a band into L+R or M+S. *Gain Scale* scales all gains at once. Analyzer with Pre/Post/Freeze and range/speed/tilt settings; display range 3/6/12/30 dB (expands automatically). |
+| **Equalizer** | Up to **24 bands** (the Pro-Q 4 limit): double-click the display or press **+ ADD** to add one, **DELETE** (or right-click a node → Delete band) to remove it, the power button or Alt-click to bypass it; only bands in use are shown. 10 shapes: Bell, Low/High Shelf, Low/High Cut, Notch, Band Pass, Tilt Shelf, Flat Tilt, All Pass. Slopes 6–96 dB/oct. Each band has a **stereo placement** (Stereo, Left, Right, **Mid**, **Side**); the display draws a result curve per channel group. Right-click a node to **split** a band into L+R or M+S. *Gain Scale* scales all gains at once. Analyzer with Pre/Post/Freeze and range/speed/tilt settings; display range 3/6/12/30 dB (expands automatically). |
 
 **Processing mode** (both EQs, top right of the display, as in Pro-Q 4): *Zero Latency* (minimum phase, no delay),
 *Natural Phase* (analog-matched response up to the top of the spectrum, a few samples of latency) or *Linear Phase*
@@ -104,7 +106,7 @@ renders the kick at 24 phases and picks the fullest one. *Velocity* sets how muc
 
 **EQ mouse controls:** drag a node for frequency/gain (Shift: fine, Ctrl/Cmd + vertical drag: Q) · mouse wheel: Q, or slope on
 cut filters (Ctrl/Cmd + wheel: gain) · Alt-click or double-click a node: on/off · double-click empty space: new band (far left = low
-cut, far right = high cut, bottom = notch, elsewhere = bell) · right-click a node: shape, slope, stereo placement, split, reset, delete · Delete / Backspace: delete the selected band ·
+cut, far right = high cut, bottom = notch, elsewhere = bell) · right-click a node: shape, slope, stereo placement, split, reset, delete ·
 hover the display to read the frequency and note.
 
 ### Distortion page
@@ -171,7 +173,16 @@ and only fades it above that. The layout follows ValhallaRoom:
 Double-click any knob to reset it · Shift-drag for fine control · click a value to type it in · drag the bottom-right
 corner to resize the window. **Menu → Quick guide** shows all gestures on one page.
 
-| Shortcut (Cmd on macOS) | Action |
+**Codex leaves the computer keyboard to your DAW.** Clicking, dragging or hovering anywhere in Codex never takes the
+keyboard focus, so the DAW's typing keyboard (computer keys as MIDI notes), its transport and its shortcuts keep
+working. Only text fields (preset name, browser search, a value you are typing in) take the keyboard while you type;
+Return, Escape or a click elsewhere gives it back.
+
+The shortcuts below are **off by default**. Switch them on with **Menu → Keyboard shortcuts in Codex**: a click in
+Codex then gives it the keyboard (as most plug-ins do), so the DAW's typing keyboard stops reaching your tracks while
+Codex has the focus.
+
+| Shortcut (Cmd on macOS), with keyboard shortcuts on | Action |
 |---|---|
 | Ctrl+Z / Ctrl+Shift+Z (or Ctrl+Y) | Undo / redo |
 | Ctrl+B | Preset browser |

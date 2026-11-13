@@ -18,6 +18,7 @@
 #include "ChainStrip.h"
 #include "Sweep909Display.h"
 #include "Dancer.h"
+#include "KeyboardFocus.h"
 
 class CodexProcessor;
 
@@ -68,6 +69,9 @@ public:
     void toggleDancer() { dancer.toggle(); }
     void mouseUp (const juce::MouseEvent&) override;
     void openSaveDialog() { presetBar.onSaveRequested(); }
+    /** Keyboard focus policy (KeyboardFocus.h): off = the host keeps the computer keyboard (default). */
+    void setKeyboardShortcutsEnabled (bool);
+    KeyboardFocusPolicy& getKeyboardFocusPolicy() { return focusPolicy; }
     std::function<void (float)> onScaleRequested;
     /** The window's actual scale (window width / baseWidth) and the largest scale that fits the editor's screen. */
     std::function<float()> getWindowScale, getFitScale;
@@ -91,6 +95,7 @@ private:
     IconButton undoButton { "undo", Icons::undo() }, redoButton { "redo", Icons::redo() }, menuButton { "menu", Icons::menu() };
     PresetBar presetBar;
     ChoiceBox keyBox { "Key" }, octaveBox { "Oct" }, keyModeBox { "Key Mode" };
+    bool keyDimmed = false;   // Key / Oct dimmed while Key Mode is Follow MIDI
     PressButton previewButton { "preview", Icons::play() };
     HeaderKnob outGain { "Output" };
     LevelMeter meterL, meterR;
@@ -179,6 +184,8 @@ private:
     PresetBrowserOverlay browserOverlay;
     QuickGuideOverlay guideOverlay;
     AboutOverlay aboutOverlay;
+
+    KeyboardFocusPolicy focusPolicy;   // last: its sweep covers every component above
 };
 
 class CodexEditor : public juce::AudioProcessorEditor
