@@ -17,6 +17,16 @@ All notable changes to Codex. Versions follow [Semantic Versioning](https://semv
 - Premium finish: machined knobs (lit body, drop shadow, glowing value arc), panels with a soft shadow, lit top edge and an accent marker, a fading sun-orange line under the header, glowing tab underline and selected buttons.
 - Space Mix keeps the dry kick at full level up to 50 % (it used to fall to -3 dB at 50 % and silence at 100 %, which made the kick fade when the reverb was turned up).
 
+### Changed (performance)
+- About 20 % less CPU on typical presets and 40-60 % less on heavy patches, with identical sound (every preset and
+  test patch renders bit-exact against the previous build). "All modules max" at 96 kHz drops from ~160 % to ~90 %
+  of a core; 24-band linear-phase EQ at Maximum from ~75 % to ~24 %.
+  - Linear-phase EQ: vectorised, cache-friendly convolution; skipped entirely in silence.
+  - Saturation, compressor and EQ filters process left and right together with SIMD.
+  - New stereo oversampler (bit-exact copy of JUCE's) for the distortions, saturation and clipper.
+  - Per-sample pow/tanh calls removed where the result cannot change.
+- New `CodexBench` tool: CPU benchmark plus null-test renderer used to prove the changes are sound-neutral.
+
 ### Changed (readability)
 - Readability and scaling pass:
   - Text: a minimum text size (11.5 px at 100 %), and a new muted tone so small text that carries information reaches about 4.5:1 contrast. Disabled controls are dimmed once instead of twice, so they read as off but stay legible.
