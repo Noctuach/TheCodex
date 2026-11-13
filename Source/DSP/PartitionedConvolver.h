@@ -372,10 +372,10 @@ private:
 
     juce::dsp::FFT fft { fftOrder };
     int maxPartitions = 1, fdlPos = 0, fill = 0;
-    std::array<std::vector<float>, 2> fdl;
+    std::array<std::vector<float>, 2> fdl;           // frequency-domain delay line per input, maxPartitions slots (layout: see binIndex)
     std::vector<std::uint8_t> slotZero;              // per delay-line slot: the input window was exactly zero (spectrum not stored)
     struct Segment { int begin = 0, end = 0, offset = 0; };
-    std::vector<Segment> segments;                   // non-silent partition runs, rebuilt per convolution   // frequency-domain delay line per input, maxPartitions slots (layout: see binIndex)
+    std::vector<Segment> segments;                   // non-silent partition runs, rebuilt per convolution
     std::array<std::vector<float>, 2> inBuf, outBuf, fadeBuf;
     std::vector<float> work;
     std::array<std::vector<float>, 2> outWork;        // per output channel: accumulated spectrum, then inverse FFT

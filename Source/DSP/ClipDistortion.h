@@ -617,9 +617,9 @@ private:
         the curve are unchanged (the offset term is constant unless Offset / Spatial move; in silence both ADAA calls are). */
     struct ShapeMemo
     {
-        std::uint32_t xBits = 0, version = 0;   // version 0 never matches (shapeVersion starts at 1)
+        std::uint32_t xBits = 0; std::uint64_t version = 0;   // version 0 never matches (shapeVersion starts at 1)
         float value = 0.0f;
-        inline float get (int m, float x, const Curve* c, std::uint32_t ver) noexcept
+        inline float get (int m, float x, const Curve* c, std::uint64_t ver) noexcept
         {
             std::uint32_t bits;
             std::memcpy (&bits, &x, sizeof (bits));
@@ -633,7 +633,7 @@ private:
         }
     };
     std::array<ShapeMemo, 2> offShape {}, midShape {};
-    std::uint32_t shapeVersion = 1;
+    std::uint64_t shapeVersion = 1;   // 64-bit: bumped every block, must never wrap
     float downsampleHold = 1.0f;
     std::array<int, 2> holdCount { 0, 0 };
     std::array<float, 2> holdValue { 0.0f, 0.0f };
