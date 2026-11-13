@@ -112,11 +112,22 @@ public:
 
     /** MIDI note of the selected key (F1..E2, shifted by the octave setting). */
     int getKeyNote() const;
-    /** Exact root the kick is tuned to, including the Tune parameter (fractional MIDI note). */
+    /** Key index (0 = F .. 11 = E) of a MIDI note's note name: Follow MIDI keeps only the pitch class. */
+    static int keyIndexForMidiNote (int midiNote) noexcept
+    {
+        return ((midiNote - Params::keyBaseNote) % 12 + 12) % 12;
+    }
+    /** Kick note a MIDI note plays in Follow MIDI: its note name in the kick register (F1..E2, shifted by Oct),
+        exactly where Fixed Key would put that key. */
+    int getFollowNote (int midiNote) const;
+    /** Kick note the instance plays now: in Follow MIDI the note name of the last MIDI note (in the current Oct),
+        otherwise (or before any note was played) the selected Key. Used by the tuner target and the preview button. */
+    int getPlayedNote() const;
     /** Counts note-ons (MIDI and preview), so the editor can animate each hit. */
     std::atomic<unsigned int> hitCounter { 0 };
 
-    float getTargetNote() const { return (float) getKeyNote() + tune->load(); }
+    /** Exact root the kick is tuned to, including the Tune parameter (fractional MIDI note). */
+    float getTargetNote() const { return (float) getPlayedNote() + tune->load(); }
 
 private:
     void updateParameters();
@@ -126,6 +137,7 @@ private:
     void updateLatency();
     void handleAsyncUpdate() override;
     std::atomic<int> latencyTarget { 0 };
+    std::atomic<int> lastFollowKey { -1 };   // key index of the last Follow MIDI note (audio thread writes, GUI reads); -1 = none yet
 
     static constexpr int chunkSize = 256;
 
