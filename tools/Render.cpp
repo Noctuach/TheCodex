@@ -2090,6 +2090,9 @@ int main (int argc, char** argv)
         // in a real window, as a host shows it (the window is the top-level component, like a plug-in wrapper)
         juce::DocumentWindow window ("Codex focus test", juce::Colours::black, juce::DocumentWindow::closeButton, true);
         window.setUsingNativeTitleBar (true);
+        // like a host's plug-in wrapper, the window itself never wants the keyboard (a DocumentWindow does by default, so
+        // JUCE could park focus on it when a value box closes - that is the test window, not Codex)
+        window.setWantsKeyboardFocus (false);
         window.setContentNonOwned (editor.get(), true);
         window.setVisible (true);
         auto pump = [] (int ms) { juce::MessageManager::getInstance()->runDispatchLoopUntil (ms); };
