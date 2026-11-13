@@ -253,145 +253,173 @@ namespace comp
             const float memUp = (float) (1.0 / (2.0 * rate)), memDown = (float) (1.0 / (6.0 * rate));
             mixSmooth.setTargetValue (settings.mix);
             const int len = (int) channels[0].dryDelay.size();
+            const bool feedback = style == Classic || style == VariMu;
+            const bool peakStyle = style == Clean || style == Mastering || style == TTM || style == Pumping || style == Classic;
 
-            for (int i = 0; i < n; ++i)
+            // The crossover network (bands, phase alignment, dry phase) is linear and runs ahead of the per-sample loop,
+            // in sub-blocks, both channels in one SIMD register (sat::stereo: the same operations as the scalar filters).
+            for (int i0 = 0; i0 < n; i0 += subBlock)
             {
-                const float outNow = outSmooth.getNextValue();
-                const float wetMix = mixSmooth.getNextValue(), dryMix = 1.0f - wetMix;
-                std::array<std::array<float, maxBands>, 2> sig {};
-                float inPeak = 0.0f;
-                for (int c = 0; c < 2; ++c)
+                const int m = juce::jmin (subBlock, n - i0);
+                auto& c0 = channels[0];
+                auto& c1 = channels[1];
+                float* in = inBuf.data();
+                for (int i = 0; i < m; ++i) { in[2 * i] = l[i0 + i]; in[2 * i + 1] = r[i0 + i]; }
+                float* rest = restBuf.data();
+                std::copy (in, in + 2 * m, rest);
+                for (int j = 0; j < nb - 1; ++j)
                 {
-                    auto& ch = channels[(size_t) c];
-                    const float x = chans[c][i];
-                    inPeak = juce::jmax (inPeak, std::abs (x));
-                    float rest = x;
-                    for (int j = 0; j < nb - 1; ++j) ch.xover[(size_t) j].split (rest, sig[(size_t) c][(size_t) j], rest);
-                    sig[(size_t) c][(size_t) nb - 1] = rest;
-                    for (int b = 0; b < nb - 1; ++b)
-                        for (int j = b + 1; j < nb - 1; ++j)
-                            sig[(size_t) c][(size_t) b] = ch.allpass[(size_t) b][(size_t) j].process (sig[(size_t) c][(size_t) b]);
+                    auto& x0 = c0.xover[(size_t) j];
+                    auto& x1 = c1.xover[(size_t) j];
+                    float* lo = bandBuf[(size_t) j].data();
+                    float* hi = tmpBuf.data();
+                    jassert (x0.slope == 2);
+                    sat::stereo::run (x0.lp, x1.lp, &x0.hp, &x1.hp, rest, lo, hi, m);
+                    for (int k = 0; k < 2 * m; ++k) rest[k] = 1.0f * hi[k];
                 }
+                std::copy (rest, rest + 2 * m, bandBuf[(size_t) nb - 1].data());
+                for (int b = 0; b < nb - 1; ++b)
+                    for (int j = b + 1; j < nb - 1; ++j)
+                        runAllpass (c0.allpass[(size_t) b][(size_t) j], c1.allpass[(size_t) b][(size_t) j], bandBuf[(size_t) b].data(), m);
+                std::copy (in, in + 2 * m, dryBuf.data());
+                for (int j = 0; j < nb - 1; ++j) runAllpass (c0.dryPhase[(size_t) j], c1.dryPhase[(size_t) j], dryBuf.data(), m);
 
-                std::array<float, 2> out {};
-                for (int b = 0; b < nb; ++b)
+                for (int ii = 0; ii < m; ++ii)
                 {
-                    // static curve parameters glide (~10 ms) so threshold / ratio / knee / range moves never step
-                    auto& sm = smoothBands[(size_t) b];
-                    const auto& tgt = settings.bands[(size_t) b];
-                    sm.thresholdDb += paramGlide * (tgt.thresholdDb - sm.thresholdDb);
-                    sm.ratio       += paramGlide * (tgt.ratio - sm.ratio);
-                    sm.kneeDb      += paramGlide * (tgt.kneeDb - sm.kneeDb);
-                    sm.rangeDb     += paramGlide * (tgt.rangeDb - sm.rangeDb);
-                    sm.direction = tgt.direction; sm.mute = tgt.mute; sm.solo = tgt.solo; sm.bypass = tgt.bypass;
-                    const auto& bs = sm;
-                    auto& st = bands[(size_t) b];
+                    const int i = i0 + ii;
+                    const float outNow = outSmooth.getNextValue();
+                    const float wetMix = mixSmooth.getNextValue(), dryMix = 1.0f - wetMix;
+                    float inPeak = 0.0f;
+                    for (int c = 0; c < 2; ++c) inPeak = juce::jmax (inPeak, std::abs (chans[c][i]));
 
-                    // ---- detector: stereo-linked, side-chain high-passed, peak or RMS; feedback styles use the output ----
-                    float det = 0.0f;
-                    const bool feedback = style == Classic || style == VariMu;
-                    for (int c = 0; c < 2; ++c)
+                    std::array<float, 2> out {};
+                    for (int b = 0; b < nb; ++b)
                     {
-                        float v = feedback ? st.lastOut[(size_t) c] : sig[(size_t) c][(size_t) b];
-                        if (b == 0)
-                        {
-                            const float t = (v - st.hp[(size_t) c]) * scG;
-                            const float lp = t + st.hp[(size_t) c];
-                            st.hp[(size_t) c] = lp + t;
-                            v -= lp;
-                        }
-                        det = juce::jmax (det, std::abs (v));
-                    }
-                    // level detector: peak envelope (instant rise, ~20 ms fall) or RMS (window per style)
-                    st.peak = det > st.peak ? det : det + peakC * (st.peak - det);
-                    st.rms = det * det + rmsC * (st.rms - det * det);
-                    const bool peakStyle = style == Clean || style == Mastering || style == TTM || style == Pumping || style == Classic;
-                    const float lvl = peakStyle ? st.peak : std::sqrt (juce::jmax (0.0f, st.rms)) * 1.41421356f;
-                    const float xDb = juce::Decibels::gainToDecibels (juce::jmax (lvl, 1.0e-6f), -120.0f);
-                    const float target = gainComputer (xDb, bs, style, settings.limit);
+                        // static curve parameters glide (~10 ms) so threshold / ratio / knee / range moves never step
+                        auto& sm = smoothBands[(size_t) b];
+                        const auto& tgt = settings.bands[(size_t) b];
+                        sm.thresholdDb += paramGlide * (tgt.thresholdDb - sm.thresholdDb);
+                        sm.ratio       += paramGlide * (tgt.ratio - sm.ratio);
+                        sm.kneeDb      += paramGlide * (tgt.kneeDb - sm.kneeDb);
+                        sm.rangeDb     += paramGlide * (tgt.rangeDb - sm.rangeDb);
+                        sm.direction = tgt.direction; sm.mute = tgt.mute; sm.solo = tgt.solo; sm.bypass = tgt.bypass;
+                        const auto& bs = sm;
+                        auto& st = bands[(size_t) b];
 
-                    // ---- smoothing (dB): attack towards more change, program-dependent release ----
-                    const float cur = st.gr;
-                    const bool attacking = std::abs (target) > std::abs (cur) && (target * cur >= 0.0f);
-                    if (attacking)
-                    {
-                        st.gr = target + attC[(size_t) b] * (cur - target);
-                        st.slow = target + attC[(size_t) b] * (st.slow - target);
-                        st.hold = holdSamples;
-                    }
-                    else if (st.hold > 0.0f)
-                        st.hold -= 1.0f;
-                    else
-                    {
-                        // release: fast for short peaks, slower after long periods of gain change (memory)
-                        st.slow = target + relSlow[(size_t) b] * (st.slow - target);
-                        const float fast = target + relFast[(size_t) b] * (cur - target);
-                        if (style == T4Opto)
+                        // ---- detector: stereo-linked, side-chain high-passed, peak or RMS; feedback styles use the output ----
+                        float det = 0.0f;
+                        const float* sigB = bandBuf[(size_t) b].data() + 2 * ii;
+                        for (int c = 0; c < 2; ++c)
                         {
-                            // two-stage T4 release: ~60 ms for the first half, then 0.5-5 s depending on history
-                            const float slowC = (float) std::exp (-1.0 / ((0.5 + 4.5 * st.memory) * rate));
-                            st.slow = target + slowC * (st.slow - target);
-                            st.gr = 0.5f * fast + 0.5f * st.slow;
+                            float v = feedback ? st.lastOut[(size_t) c] : sigB[c];
+                            if (b == 0)
+                            {
+                                const float t = (v - st.hp[(size_t) c]) * scG;
+                                const float lp = t + st.hp[(size_t) c];
+                                st.hp[(size_t) c] = lp + t;
+                                v -= lp;
+                            }
+                            det = juce::jmax (det, std::abs (v));
                         }
-                        else if (style == Pumping)
+                        // level detector: peak envelope (instant rise, ~20 ms fall) or RMS (window per style)
+                        st.peak = det > st.peak ? det : det + peakC * (st.peak - det);
+                        st.rms = det * det + rmsC * (st.rms - det * det);
+                        const float lvl = peakStyle ? st.peak : std::sqrt (juce::jmax (0.0f, st.rms)) * 1.41421356f;
+                        const float xDb = juce::Decibels::gainToDecibels (juce::jmax (lvl, 1.0e-6f), -120.0f);
+                        const float target = gainComputer (xDb, bs, style, settings.limit);
+
+                        // ---- smoothing (dB): attack towards more change, program-dependent release ----
+                        const float cur = st.gr;
+                        const bool attacking = std::abs (target) > std::abs (cur) && (target * cur >= 0.0f);
+                        if (attacking)
                         {
-                            // release in linear gain: a deep, audible swell back
-                            const float g = juce::Decibels::decibelsToGain (cur), gt = juce::Decibels::decibelsToGain (target);
-                            st.gr = juce::Decibels::gainToDecibels (gt + relSlow[(size_t) b] * (g - gt), -80.0f);
+                            st.gr = target + attC[(size_t) b] * (cur - target);
+                            st.slow = target + attC[(size_t) b] * (st.slow - target);
+                            st.hold = holdSamples;
                         }
+                        else if (st.hold > 0.0f)
+                            st.hold -= 1.0f;
                         else
-                            st.gr = juce::jmap (st.memory, fast, st.slow);
-                    }
-                    st.memory = std::abs (st.gr) > 2.0f ? st.memory + memUp * (1.0f - st.memory) : st.memory * (1.0f - memDown);
+                        {
+                            // release: fast for short peaks, slower after long periods of gain change (memory)
+                            st.slow = target + relSlow[(size_t) b] * (st.slow - target);
+                            const float fast = target + relFast[(size_t) b] * (cur - target);
+                            if (style == T4Opto)
+                            {
+                                // two-stage T4 release: ~60 ms for the first half, then 0.5-5 s depending on history
+                                const float slowC = (float) std::exp (-1.0 / ((0.5 + 4.5 * st.memory) * rate));
+                                st.slow = target + slowC * (st.slow - target);
+                                st.gr = 0.5f * fast + 0.5f * st.slow;
+                            }
+                            else if (style == Pumping)
+                            {
+                                // release in linear gain: a deep, audible swell back
+                                const float g = juce::Decibels::decibelsToGain (cur), gt = juce::Decibels::decibelsToGain (target);
+                                st.gr = juce::Decibels::gainToDecibels (gt + relSlow[(size_t) b] * (g - gt), -80.0f);
+                            }
+                            else
+                                st.gr = juce::jmap (st.memory, fast, st.slow);
+                        }
+                        st.memory = std::abs (st.gr) > 2.0f ? st.memory + memUp * (1.0f - st.memory) : st.memory * (1.0f - memDown);
 
-                    const float g = juce::Decibels::decibelsToGain (st.gr) * makeupSmooth[(size_t) b].getNextValue();
+                        // dB -> gain only when the gain reduction moved (it often sits still); same value either way
+                        if (std::memcmp (&st.gr, &st.grCacheDb, sizeof (float)) != 0 || ! st.grCacheValid)
+                        {
+                            st.grCacheGain = juce::Decibels::decibelsToGain (st.gr);
+                            st.grCacheDb = st.gr;
+                            st.grCacheValid = true;
+                        }
+                        const float g = st.grCacheGain * makeupSmooth[(size_t) b].getNextValue();
+                        for (int c = 0; c < 2; ++c)
+                        {
+                            auto& ch = channels[(size_t) c];
+                            auto& d = ch.delay[(size_t) b];
+                            // lookahead: the gain is applied to the delayed band signal
+                            d[(size_t) ch.pos] = sigB[c];
+                            int rd = ch.pos - lookSamples;   // 0 <= lookSamples < len
+                            if (rd < 0) rd += len;
+                            const float delayed = d[(size_t) rd];
+                            float y = bs.bypass ? delayed : delayed * g;
+                            st.lastOut[(size_t) c] = y;
+                            if (bs.mute || (anySolo && ! bs.solo)) y = 0.0f;
+                            out[(size_t) c] += y;
+                        }
+                        st.peakGr = std::abs (st.gr) > std::abs (st.peakGr) ? st.gr : st.peakGr;
+                    }
+
+                    float outPeak = 0.0f;
                     for (int c = 0; c < 2; ++c)
                     {
                         auto& ch = channels[(size_t) c];
-                        auto& d = ch.delay[(size_t) b];
-                        // lookahead: the gain is applied to the delayed band signal
-                        d[(size_t) ch.pos] = sig[(size_t) c][(size_t) b];
-                        const float delayed = d[(size_t) ((ch.pos - lookSamples + len) % len)];
-                        float y = bs.bypass ? delayed : delayed * g;
-                        st.lastOut[(size_t) c] = y;
-                        if (bs.mute || (anySolo && ! bs.solo)) y = 0.0f;
-                        out[(size_t) c] += y;
+                        // the bands' sum carries the crossovers' all-pass phase: the dry signal gets the same phase
+                        ch.dryDelay[(size_t) ch.pos] = dryBuf[(size_t) (2 * ii + c)];
+                        int rd = ch.pos - lookSamples;
+                        if (rd < 0) rd += len;
+                        const float dry = ch.dryDelay[(size_t) rd];
+                        const float y = (dry * dryMix + out[(size_t) c] * wetMix) * outNow;
+                        chans[c][i] = y;
+                        outPeak = juce::jmax (outPeak, std::abs (y));
+                        if (++ch.pos == len) ch.pos = 0;
                     }
-                    st.peakGr = std::abs (st.gr) > std::abs (st.peakGr) ? st.gr : st.peakGr;
-                }
 
-                float outPeak = 0.0f;
-                for (int c = 0; c < 2; ++c)
-                {
-                    auto& ch = channels[(size_t) c];
-                    // the bands' sum carries the crossovers' all-pass phase: the dry signal gets the same phase
-                    float dryAligned = chans[c][i];
-                    for (int j = 0; j < nb - 1; ++j) dryAligned = ch.dryPhase[(size_t) j].process (dryAligned);
-                    ch.dryDelay[(size_t) ch.pos] = dryAligned;
-                    const float dry = ch.dryDelay[(size_t) ((ch.pos - lookSamples + len) % len)];
-                    const float y = (dry * dryMix + out[(size_t) c] * wetMix) * outNow;
-                    chans[c][i] = y;
-                    outPeak = juce::jmax (outPeak, std::abs (y));
-                    ch.pos = (ch.pos + 1) % len;
-                }
-
-                // meter frames for the display
-                frameIn = juce::jmax (frameIn, inPeak);
-                frameOut = juce::jmax (frameOut, outPeak);
-                if (++frameCount >= frameLen)
-                {
-                    MeterFrame f;
-                    f.inDb = juce::Decibels::gainToDecibels (frameIn, -100.0f);
-                    f.outDb = juce::Decibels::gainToDecibels (frameOut, -100.0f);
-                    for (int b = 0; b < maxBands; ++b)
+                    // meter frames for the display
+                    frameIn = juce::jmax (frameIn, inPeak);
+                    frameOut = juce::jmax (frameOut, outPeak);
+                    if (++frameCount >= frameLen)
                     {
-                        f.grDb[(size_t) b] = b < nb ? bands[(size_t) b].peakGr : 0.0f;
-                        currentGr[(size_t) b].store (f.grDb[(size_t) b], std::memory_order_relaxed);
-                        bands[(size_t) b].peakGr = 0.0f;
+                        MeterFrame f;
+                        f.inDb = juce::Decibels::gainToDecibels (frameIn, -100.0f);
+                        f.outDb = juce::Decibels::gainToDecibels (frameOut, -100.0f);
+                        for (int b = 0; b < maxBands; ++b)
+                        {
+                            f.grDb[(size_t) b] = b < nb ? bands[(size_t) b].peakGr : 0.0f;
+                            currentGr[(size_t) b].store (f.grDb[(size_t) b], std::memory_order_relaxed);
+                            bands[(size_t) b].peakGr = 0.0f;
+                        }
+                        meters.push (f);
+                        frameIn = frameOut = 0.0f;
+                        frameCount = 0;
                     }
-                    meters.push (f);
-                    frameIn = frameOut = 0.0f;
-                    frameCount = 0;
                 }
             }
         }
@@ -403,7 +431,23 @@ namespace comp
         {
             float gr = 0.0f, slow = 0.0f, rms = 0.0f, peak = 0.0f, hold = 0.0f, memory = 0.0f, peakGr = 0.0f;
             std::array<float, 2> hp {}, lastOut {};
+            float grCacheDb = 0.0f, grCacheGain = 1.0f;   // decibelsToGain (grCacheDb), valid when grCacheValid
+            bool grCacheValid = false;
         };
+
+        /** In place, both channels (interleaved): sat::Allpass::process for every sample. */
+        void runAllpass (sat::Allpass& a0, sat::Allpass& a1, float* x, int m) noexcept
+        {
+            if (a0.slope == 0) return;
+            sat::stereo::run (a0.lp, a1.lp, &a0.hp, &a1.hp, x, tmpBuf.data(), tmpBuf2.data(), m);
+            if (a0.slope == 1) for (int k = 0; k < 2 * m; ++k) x[k] = tmpBuf[(size_t) k] + -tmpBuf2[(size_t) k];
+            else               for (int k = 0; k < 2 * m; ++k) x[k] = tmpBuf[(size_t) k] + tmpBuf2[(size_t) k];
+        }
+
+        static constexpr int subBlock = 32;
+        using StereoBuffer = std::array<float, 2 * subBlock>;   // interleaved: [2 * i + channel]
+        alignas (16) std::array<StereoBuffer, maxBands> bandBuf {};
+        alignas (16) StereoBuffer inBuf {}, restBuf {}, tmpBuf {}, tmpBuf2 {}, dryBuf {};
         struct Channel
         {
             std::array<sat::Crossover, maxBands - 1> xover {};

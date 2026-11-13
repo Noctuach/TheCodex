@@ -1,5 +1,6 @@
 #pragma once
 #include <juce_dsp/juce_dsp.h>
+#include "StereoOversampling.h"
 
 /**
     Output clipper (4x oversampled): linear below the knee, a smooth (tanh) knee up to the ceiling,
@@ -11,7 +12,7 @@ class OutputClipper
 public:
     void prepare (double sampleRate, int maxBlock)
     {
-        os = std::make_unique<juce::dsp::Oversampling<float>> (2, 2, juce::dsp::Oversampling<float>::filterHalfBandPolyphaseIIR, true, false);
+        os = std::make_unique<StereoOversampling> (2);
         os->initProcessing ((size_t) maxBlock);
         ceilingGain.reset (sampleRate * 4.0, 0.02);
         juce::ignoreUnused (sampleRate);
@@ -67,7 +68,7 @@ public:
     float getAndResetClip() { return clipAmount.exchange (0.0f); }
 
 private:
-    std::unique_ptr<juce::dsp::Oversampling<float>> os;
+    std::unique_ptr<StereoOversampling> os;
     juce::SmoothedValue<float, juce::ValueSmoothingTypes::Multiplicative> ceilingGain { 1.0f };
     float knee = 0.3f;
     bool enabled = false;

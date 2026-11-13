@@ -7,6 +7,7 @@
 #include "../Source/DSP/PitchDetector.h"
 #include "../Source/GUI/PluginEditor.h"
 #include "../Source/DSP/EqEngine.h"
+#include "../Source/DSP/StereoOversampling.h"
 #include "../Source/DSP/DrawEnvelope.h"
 #include "../Source/KickExporter.h"
 
@@ -514,6 +515,57 @@ int main (int argc, char** argv)
             if (cp.getLatencyInSamples() != (int) std::round (0.002 * sr)) ++bad;
         }
         std::cout << "Compressor checks: " << (bad == 0 ? "OK" : "FAILED") << "\n";
+        failures += bad;
+    }
+
+    // ---- StereoOversampling == juce::dsp::Oversampling (polyphase IIR, max quality), bit for bit ----
+    {
+        int bad = 0;
+        juce::Random rng (1234);
+        for (int stagesN = 1; stagesN <= 4; ++stagesN)
+        {
+            const int maxBlock = 300;
+            juce::dsp::Oversampling<float> ref (2, (size_t) stagesN, juce::dsp::Oversampling<float>::filterHalfBandPolyphaseIIR, true, false);
+            StereoOversampling mine (stagesN);
+            ref.initProcessing ((size_t) maxBlock);
+            mine.initProcessing ((size_t) maxBlock);
+            if (ref.getLatencyInSamples() != mine.getLatencyInSamples() || ref.getOversamplingFactor() != mine.getOversamplingFactor()) ++bad;
+            juce::AudioBuffer<float> a (2, maxBlock), b (2, maxBlock);
+            double ph = 0.0;
+            for (int blk = 0; blk < 400; ++blk)
+            {
+                if (blk == 150 || blk == 151 || blk == 300) { ref.reset(); mine.reset(); }   // resets (twice in a row too)
+                const int n = blk % 50 == 7 ? maxBlock : 1 + rng.nextInt (maxBlock);
+                for (int i = 0; i < n; ++i)
+                {
+                    ph += 0.013 + 0.00002 * blk;
+                    const float x = (float) (0.9 * std::sin (ph)) + 0.05f * (rng.nextFloat() - 0.5f);
+                    // silence stretches exercise the snap-to-zero of the filter states
+                    const float g = (blk / 40) % 3 == 2 ? 0.0f : 1.0f;
+                    a.setSample (0, i, g * x);
+                    a.setSample (1, i, g * (blk % 2 ? -0.7f * x : 0.3f * std::tanh (3.0f * x)));
+                }
+                for (int ch = 0; ch < 2; ++ch) b.copyFrom (ch, 0, a, ch, 0, n);
+                juce::dsp::AudioBlock<float> ba (a.getArrayOfWritePointers(), 2, (size_t) n), bb (b.getArrayOfWritePointers(), 2, (size_t) n);
+                auto ua = ref.processSamplesUp (ba);
+                auto ub = mine.processSamplesUp (bb);
+                if (ua.getNumSamples() != ub.getNumSamples()) { ++bad; break; }
+                for (int ch = 0; ch < 2; ++ch)
+                    for (size_t i = 0; i < ua.getNumSamples(); ++i)
+                    {
+                        if (std::memcmp (ua.getChannelPointer ((size_t) ch) + i, ub.getChannelPointer ((size_t) ch) + i, sizeof (float)) != 0) { ++bad; ch = 2; break; }
+                        // a nonlinearity in the oversampled domain, identical for both
+                        const float y = std::tanh (2.0f * ua.getSample (ch, (int) i));
+                        ua.setSample (ch, (int) i, y);
+                        ub.setSample (ch, (int) i, y);
+                    }
+                ref.processSamplesDown (ba);
+                mine.processSamplesDown (bb);
+                for (int ch = 0; ch < 2; ++ch)
+                    if (std::memcmp (a.getReadPointer (ch), b.getReadPointer (ch), sizeof (float) * (size_t) n) != 0) { ++bad; break; }
+            }
+        }
+        std::cout << "StereoOversampling vs juce::dsp::Oversampling (2x-16x, random blocks, resets): " << (bad == 0 ? "bit-exact" : "FAILED") << "\n";
         failures += bad;
     }
 
