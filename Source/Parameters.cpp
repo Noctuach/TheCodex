@@ -62,7 +62,7 @@ AudioProcessorValueTreeState::ParameterLayout Params::createLayout()
     // ---------------- Key ----------------
     addChoice (l, ID::key, "Key", keyNames(), 0);
     addChoice (l, ID::octave, "Octave", { "-1", "0", "+1" }, 1);
-    addChoice (l, ID::keyMode, "Key Mode", { "Fixed Key", "Follow MIDI" }, 0);
+    addChoice (l, ID::keyMode, "Key Mode", { "Fixed Key", "Follow MIDI" }, 1);   // Follow MIDI: the DAW's typing keyboard / piano roll pick the note
 
     // ---------------- Engine ----------------
     addChoice (l, ID::engine, "Engine", { "Synth", "909" }, 0);

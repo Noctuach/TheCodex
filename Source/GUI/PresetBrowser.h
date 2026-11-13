@@ -3,8 +3,8 @@
 #include "../PresetManager.h"
 
 /**
-    Full preset browser: search, categories, favourites. Click a preset to audition it, double-click or press
-    Enter to load it and close. Favourites are stored in the user's Codex settings.
+    Full preset browser: search, categories, favourites. Click a preset to audition it, double-click it (or press Enter in
+    the search field) to load it and close. Favourites are stored in the user's Codex settings.
 */
 class PresetBrowserOverlay : public Overlay, private juce::ListBoxModel, private juce::TextEditor::Listener
 {
@@ -16,6 +16,7 @@ public:
         search.setFont (juce::Font (Fonts::regular (15.0f)));
         search.setIndents (12, 8);
         search.addListener (this);
+        search.onEscapeKey = [this] { close(); };
         addAndMakeVisible (search);
 
         const juce::StringArray filters = juce::StringArray { "All", "Favourites", "User" };
@@ -62,7 +63,10 @@ protected:
     {
         presets.refreshUserPresets();
         rebuild();
-        search.grabKeyboardFocus();
+        // The search field only takes the keyboard when clicked (so the DAW's typing keyboard can audition presets),
+        // or straight away with keyboard shortcuts switched on.
+        if (getWantsKeyboardFocus())
+            search.grabKeyboardFocus();
     }
 
     void paintCard (juce::Graphics& g, juce::Rectangle<int> c) override
@@ -73,7 +77,7 @@ protected:
         g.drawText ("PRESETS", r.removeFromTop (30), juce::Justification::centredLeft);
         g.setColour (Colours_::textMuted);
         g.setFont (Fonts::regular (12.5f));
-        g.drawText (juce::String ((int) rows.size()) + " presets  \xc2\xb7  click to audition, double-click or Enter to load, star to favourite",
+        g.drawText (juce::String ((int) rows.size()) + " presets  \xc2\xb7  click to audition, double-click to load, star to favourite",
                     c.reduced (24, 14).removeFromBottom (18), juce::Justification::centredLeft);
     }
 

@@ -79,7 +79,7 @@ EQDisplay::EQDisplay (CodexProcessor& p, int eqIndex) : eqIdx (eqIndex), proc (p
     analyzerMenuButton.setTooltip ("Analyzer settings: range, speed and tilt");
     analyzerMenuButton.onClick = [this] { showAnalyzerMenu(); };
     addAndMakeVisible (analyzerMenuButton);
-    setWantsKeyboardFocus (true);
+    KeyboardFocusPolicy::markKeyTarget (*this);   // Delete removes the selected band, with keyboard shortcuts on
 
     startTimerHz (60);
 }
@@ -592,7 +592,6 @@ void EQDisplay::mouseMove (const MouseEvent& e)
 {
     mouseInside = true;
     mousePos = e.position;
-    if (! hasKeyboardFocus (false) && isShowing()) grabKeyboardFocus();
     const int h = hitTestNode (e.position);
     if (h != hover) hover = h;
     setMouseCursor (h >= 0 ? MouseCursor::DraggingHandCursor : MouseCursor::NormalCursor);
@@ -829,7 +828,7 @@ BandControls::BandControls (AudioProcessorValueTreeState& s, int eqIndex) : eqId
         const int b = EQDisplay::addBand (apvts, eqIdx, eq::BandType::Bell, f);
         if (b >= 0) select (b);
     };
-    deleteButton.setTooltip ("Delete band: removes the selected band (Delete / Backspace on the display)");
+    deleteButton.setTooltip ("Delete band: removes the selected band (also in the node's right-click menu)");
     deleteButton.onClick = [this]
     {
         if (auto* um = apvts.undoManager) um->beginNewTransaction ("Delete EQ band");

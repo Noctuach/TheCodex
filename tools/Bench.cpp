@@ -15,6 +15,8 @@
 //       Nulls every WAV in dirA against the same file in dirB and prints the peak difference in dBFS
 //       (fails if any file is missing, has a different length, or differs by more than -100 dBFS).
 //
+// Key Mode is pinned to Fixed Key before each scenario, so the test notes all play the selected key (F1) whatever
+// the parameter's default is.
 // Deterministic: the click-noise generator gets a fixed seed, the linear-phase EQ filters are installed early in a
 // fixed-length silent pre-roll (see makeProcessor), and random block sizes use a fixed seed.
 #include <juce_audio_utils/juce_audio_utils.h>
@@ -346,6 +348,7 @@ std::unique_ptr<CodexProcessor> makeProcessor (const Scenario& sc, double rate, 
         p->setPlayConfigDetails (0, 2, rate, block);
         p->setNonRealtime (true);
         p->seedNoiseForTesting (noiseSeed);
+        setParam (*p, ID::keyMode, 0.0f);   // Fixed Key (the default is Follow MIDI): every test note plays F1, as in the references
         sc.configure (*p);
         p->prepareToPlay (rate, block);
 

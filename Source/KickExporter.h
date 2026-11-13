@@ -17,6 +17,7 @@ struct KickExporter
 
         CodexProcessor offline;
         offline.setStateInformation (state.getData(), (int) state.getSize());
+        playKey (offline);
         constexpr int block = 512;
         offline.setPlayConfigDetails (0, 2, rate, block);
         offline.setRateAndBufferSizeDetails (rate, block);
@@ -71,6 +72,13 @@ struct KickExporter
         return file;
     }
 
+    /** Plays the selected Key (and Oct) from any note: the export and the sub-phase search render the kick in the
+        Key, also when the instance is in Follow MIDI mode (which would play the trigger note's literal pitch). */
+    static void playKey (CodexProcessor& offline)
+    {
+        if (auto* m = offline.apvts.getParameter (ID::keyMode)) m->setValueNotifyingHost (0.0f);
+    }
+
     /**
         Runs silent blocks until every filter is ready (linear-phase EQ filters designed on the worker thread and
         installed), then a little more for the convolution engine's crossfade. Gives up after 5 s.
@@ -102,6 +110,7 @@ struct KickExporter
         constexpr int block = 512;
         CodexProcessor offline;
         offline.setStateInformation (state.getData(), (int) state.getSize());
+        playKey (offline);
         offline.setPlayConfigDetails (0, 2, rate, block);
         offline.setNonRealtime (true);
         auto* phaseParam = offline.apvts.getParameter (ID::subPhase);

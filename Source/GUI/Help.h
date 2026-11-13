@@ -17,9 +17,9 @@ namespace Help
             { ID::hold909,    "909 Decay Hold: The body does not decay while the note is held, then decays at the 909's rate after note-off (modded-909 decay hold). Note length becomes tail length." },
             { ID::attack909,  "909 Attack: Level of the click at the start of the hit (pulse + noise burst)." },
             { ID::decay909,   "909 Decay: Length of the 909's own volume decay." },
-            { ID::key,        "Key: Root note of the kick, F to E (F1 = 43.65 Hz up to E2 = 82.41 Hz). Set it to the key of your track." },
-            { ID::octave,     "Octave: Shifts the key down or up one octave." },
-            { ID::keyMode,    "Key Mode: Fixed Key plays the selected key from any MIDI note. Follow MIDI plays the note you press instead." },
+            { ID::key,        "Key: Root note of the kick, F to E (F1 = 43.65 Hz up to E2 = 82.41 Hz). Set it to the key of your track. MIDI notes play it in Fixed Key mode; preview, export and the tuner always use it." },
+            { ID::octave,     "Octave: Shifts the key down or up one octave (Fixed Key mode, preview, export and the tuner)." },
+            { ID::keyMode,    "Key Mode: Follow MIDI (the default) plays the note you press (MIDI note 29 = 43.65 Hz, the F1 of the Key list), so kicks sit in the lowest octaves. Fixed Key plays the selected Key and Octave from any MIDI note." },
             { ID::wave,       "Wave: Oscillator shape. Sine is the clean classic; Triangle and Warm Sine add harmonics before distortion." },
             { ID::tune,       "Fine Tune: Shifts the root by semitones and cents. Keep at 0 to stay exactly on the selected key." },
             { ID::phase,      "Start Phase: Where the waveform starts on each hit. 0 degrees is the softest start; 90 degrees gives a harder, clicky start." },
@@ -174,7 +174,7 @@ namespace Help
         {
             const auto sfx = id.substring (2);
             static const std::map<juce::String, juce::String> band {
-                { "Used",  "Band Used: whether this band exists on the EQ display (up to 24 bands). Add bands by double-clicking the display, delete them with the band menu or the Delete key." },
+                { "Used",  "Band Used: whether this band exists on the EQ display (up to 24 bands). Add bands by double-clicking the display, delete them with DELETE or the node's right-click menu." },
                 { "On",    "Band On/Off: bypass this EQ band without deleting it (Alt-click its node). Tip: double-click on the EQ display to add a band." },
                 { "Type",  "Shape: Bell, Low/High Shelf, Low/High Cut, Notch, Band Pass (isolate a range), Tilt Shelf (tilt around the frequency), Flat Tilt (tilt the whole spectrum) or All Pass (phase only, no level change)." },
                 { "Freq",  "Frequency: Centre / corner frequency of the band. Drag the node on the display horizontally." },

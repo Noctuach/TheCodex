@@ -10,11 +10,34 @@
 #include "../Source/DSP/StereoOversampling.h"
 #include "../Source/DSP/DrawEnvelope.h"
 #include "../Source/KickExporter.h"
+#if JUCE_LINUX
+ #include <dlfcn.h>
+
+/** Headless X servers (Xvfb) have no window manager, so atoms such as WM_STATE do not exist and JUCE's window-state
+    query fails with BadAtom; Xlib's default handler would then end the process. Ignore X errors instead (as in
+    HostTest.cpp). Needed for the keyboard-focus test, which shows the editor in a real window. */
+static void installTolerantXErrorHandler()
+{
+    using Handler = int (*) (void*, void*);
+    using SetHandler = Handler (*) (Handler);
+    if (auto* lib = dlopen ("libX11.so.6", RTLD_LAZY | RTLD_GLOBAL))
+        if (auto set = reinterpret_cast<SetHandler> (dlsym (lib, "XSetErrorHandler")))
+            set ([] (void*, void*) -> int { return 0; });
+}
+#endif
 
 static void setParam (CodexProcessor& p, const juce::String& id, float value)
 {
     auto* prm = p.apvts.getParameter (id);
     prm->setValueNotifyingHost (prm->convertTo0to1 (value));
+}
+
+/** Presets never touch the key settings: back to F, octave 0 and Fixed Key (what the pitch checks expect). */
+static void resetKey (CodexProcessor& p)
+{
+    setParam (p, ID::key, 0.0f);
+    setParam (p, ID::octave, 1.0f);   // index 1 = "0"
+    setParam (p, ID::keyMode, 0.0f);
 }
 
 static constexpr double sr = 48000.0;
@@ -168,6 +191,9 @@ static void snapshot (CodexProcessor& proc, const juce::AudioBuffer<float>& audi
 int main (int argc, char** argv)
 {
     if (argc < 2) { std::cerr << "usage: CodexRender <outdir>\n"; return 1; }
+   #if JUCE_LINUX
+    installTolerantXErrorHandler();
+   #endif
     juce::ScopedJuceInitialiser_GUI init;
     const juce::File outDir = juce::File::getCurrentWorkingDirectory().getChildFile (argv[1]);
     outDir.createDirectory();
@@ -175,6 +201,8 @@ int main (int argc, char** argv)
 
     CodexProcessor proc;
     proc.setPlayConfigDetails (0, 2, sr, block);
+    // Key Mode defaults to Follow MIDI; every check below plays MIDI note 60 and expects the selected key (F1)
+    setParam (proc, ID::keyMode, 0.0f);
 
     if (std::getenv ("CODEX_UI_SCALES") != nullptr)
     {
@@ -968,8 +996,7 @@ int main (int argc, char** argv)
         std::cout << "\nState restore after random host values: " << (bad == 0 ? "OK" : juce::String (bad) + " parameters FAILED") << "\n";
         failures += bad > 0 ? 1 : 0;
         proc.presets.loadPreset (0);
-        for (const auto& id : { ID::key, ID::octave, ID::keyMode })
-            if (auto* prm = proc.apvts.getParameter (id)) prm->setValueNotifyingHost (prm->getDefaultValue());
+        resetKey (proc);
     }
 
     // ---- Modified marker: clean after load, modified after an edit, key changes do not count ----
@@ -1018,8 +1045,7 @@ int main (int argc, char** argv)
         failures += bad;
         proc.presets.loadPreset (0);
         // presets never touch the key settings: put them back by hand
-        for (const auto& id : { ID::key, ID::octave, ID::keyMode })
-            if (auto* prm = proc.apvts.getParameter (id)) prm->setValueNotifyingHost (prm->getDefaultValue());
+        resetKey (proc);
         proc.setRateAndBufferSizeDetails (sr, block);
         proc.prepareToPlay (sr, block);
     }
@@ -1887,6 +1913,267 @@ int main (int argc, char** argv)
     snapshot (proc, render (proc, 1), outDir.getChildFile ("ui_save.png"), 0, 2);
     snapshot (proc, render (proc, 1), outDir.getChildFile ("ui_browser.png"), 0, 3);
     snapshot (proc, render (proc, 1), outDir.getChildFile ("ui_guide.png"), 0, 4);
+    // ---- Key Mode: Follow MIDI by default, old sessions without a Key Mode stay on Fixed Key ----
+    {
+        int bad = 0;
+        {
+            CodexProcessor fresh;
+            const bool followDefault = fresh.apvts.getRawParameterValue (ID::keyMode)->load() > 0.5f;
+            bad += followDefault ? 0 : 1;
+            fresh.presets.loadPreset (0);   // Init leaves the key settings alone
+            bad += fresh.apvts.getRawParameterValue (ID::keyMode)->load() > 0.5f ? 0 : 1;
+            std::cout << "\nKey Mode default: " << (followDefault ? "Follow MIDI" : "Fixed Key") << ", kept by Init: "
+                      << (bad == 0 ? "OK" : "FAILED") << "\n";
+        }
+        // Follow MIDI plays the note's own pitch: 29 = F1, 41 = F2 (key and octave ignored)
+        proc.presets.loadPreset (1);
+        setParam (proc, ID::key, 5.0f);   // A#: must not matter
+        setParam (proc, ID::keyMode, 1.0f);
+        for (int note : { 29, 41 })
+        {
+            const float target = midiToFrequency ((float) note);
+            const float hz = measurePitch (render (proc, 2, note), 0.15, 0.17);
+            const float cents = hz > 0 ? 1200.0f * std::log2 (hz / target) : 9999.0f;
+            const bool ok = std::abs (cents) < 25.0f;
+            bad += ok ? 0 : 1;
+            std::cout << "Follow MIDI note " << note << ": " << juce::String (hz, 2) << " Hz (" << juce::String (cents, 1) << " c): "
+                      << (ok ? "OK" : "FAILED") << "\n";
+        }
+        // Export and Sub ALIGN render the selected Key also in Follow MIDI mode (their offline copy plays note 60)
+        {
+            const float target = juce::MidiMessage::getMidiNoteInHertz (proc.getKeyNote());
+            juce::AudioFormatManager fm; fm.registerBasicFormats();
+            const auto file = KickExporter::render (proc, outDir.getChildFile ("export_follow_midi.wav"), 0.4, sr);
+            std::unique_ptr<juce::AudioFormatReader> reader (fm.createReaderFor (file));
+            float hz = 0.0f;
+            if (reader != nullptr)
+            {
+                juce::AudioBuffer<float> b (2, (int) reader->lengthInSamples);
+                reader->read (&b, 0, b.getNumSamples(), 0, true, true);
+                hz = measurePitch (b, 0.2, 0.15);
+            }
+            const float cents = hz > 0 ? 1200.0f * std::log2 (hz / target) : 9999.0f;
+            const bool ok = std::abs (cents) < 25.0f && proc.apvts.getRawParameterValue (ID::keyMode)->load() > 0.5f;
+            bad += ok ? 0 : 1;
+            std::cout << "Follow MIDI export: " << juce::String (hz, 2) << " Hz (Key " << juce::String (target, 2) << " Hz, "
+                      << juce::String (cents, 1) << " c): " << (ok ? "OK" : "FAILED") << "\n";
+            const float followPhase = KickExporter::findBestSubPhase (proc);
+            setParam (proc, ID::keyMode, 0.0f);
+            const float fixedPhase = KickExporter::findBestSubPhase (proc);
+            setParam (proc, ID::keyMode, 1.0f);
+            const bool same = followPhase == fixedPhase;
+            bad += same ? 0 : 1;
+            std::cout << "Follow MIDI sub ALIGN: " << followPhase << " deg (Fixed Key " << fixedPhase << " deg): " << (same ? "OK" : "FAILED") << "\n";
+        }
+        // A session saved before Key Mode existed (no PARAM keyMode) restores as Fixed Key
+        {
+            juce::MemoryBlock st;
+            proc.getStateInformation (st);
+            auto xml = juce::AudioProcessor::getXmlFromBinary (st.getData(), (int) st.getSize());
+            auto tree = juce::ValueTree::fromXml (*xml);
+            tree.removeChild (tree.getChildWithProperty ("id", ID::keyMode), nullptr);
+            juce::MemoryBlock old;
+            juce::AudioProcessor::copyXmlToBinary (*tree.createXml(), old);
+            proc.setStateInformation (old.getData(), (int) old.getSize());
+            const bool fixed = proc.apvts.getRawParameterValue (ID::keyMode)->load() < 0.5f;
+            bad += fixed ? 0 : 1;
+            std::cout << "Old session without Key Mode restores as Fixed Key: " << (fixed ? "OK" : "FAILED") << "\n";
+        }
+        resetKey (proc);
+        failures += bad;
+    }
+
+    // ---- Keyboard focus: clicking, hovering and menus anywhere in the editor never keep the computer keyboard ----
+    {
+        int bad = 0;
+        juce::SharedResourcePointer<CodexSettings> codexSettings;
+        auto* userSettings = codexSettings->user();
+        const bool hadShortcutSetting = userSettings != nullptr && userSettings->containsKey ("keyboardShortcuts");
+        const bool oldShortcutSetting = userSettings != nullptr && userSettings->getBoolValue ("keyboardShortcuts", false);
+        if (userSettings != nullptr) userSettings->setValue ("keyboardShortcuts", false);
+        juce::MemoryBlock savedState;
+        proc.getStateInformation (savedState);
+        proc.presets.loadPreset (8);
+
+        std::unique_ptr<juce::AudioProcessorEditor> editor (proc.createEditor());
+        auto* hk = dynamic_cast<CodexEditor*> (editor.get());
+        auto& view = hk->getView();
+        hk->setSize (MainView::baseWidth, MainView::baseHeight);
+        // in a real window, as a host shows it (the window is the top-level component, like a plug-in wrapper)
+        juce::DocumentWindow window ("Codex focus test", juce::Colours::black, juce::DocumentWindow::closeButton, true);
+        window.setUsingNativeTitleBar (true);
+        window.setContentNonOwned (editor.get(), true);
+        window.setVisible (true);
+        auto pump = [] (int ms) { juce::MessageManager::getInstance()->runDispatchLoopUntil (ms); };
+        pump (150);
+        auto* peer = window.getPeer();
+        auto* top = peer->getComponent().getTopLevelComponent();
+        juce::int64 clock = juce::Time::currentTimeMillis();
+        auto send = [&] (juce::Point<float> pos, juce::ModifierKeys mods)
+        {
+            // presses far apart (never a double-click), releases soon after the press (a click, not a long press)
+            clock += mods.isAnyMouseButtonDown() ? 700 : 60;
+            peer->handleMouseEvent (juce::MouseInputSource::InputSourceType::mouse, pos, mods, juce::MouseInputSource::defaultPressure,
+                                    juce::MouseInputSource::defaultOrientation, clock);
+        };
+        auto focusedInEditor = [&] () -> juce::Component*
+        {
+            auto* f = juce::Component::getCurrentlyFocusedComponent();
+            return f != nullptr && (f == top || top->isParentOf (f)) ? f : nullptr;
+        };
+        auto isInlineTextEditor = [] (juce::Component* f) { return dynamic_cast<juce::TextEditor*> (f) != nullptr && dynamic_cast<juce::Label*> (f->getParentComponent()) != nullptr; };
+        auto closeOverlays = [&]
+        {
+            juce::PopupMenu::dismissAllActiveMenus();
+            for (auto* c : view.getChildren())
+                if (auto* o = dynamic_cast<Overlay*> (c)) o->setVisible (false);
+        };
+        // an empty spot of the view (for clicking away from a text field)
+        juce::Point<float> background;
+        for (int y = MainView::baseHeight - 4; y > 100 && background.isOrigin(); y -= 7)
+            for (int x = MainView::baseWidth - 4; x > 400; x -= 7)
+                if (view.getComponentAt (x, y) == &view) { background = peer->getComponent().getLocalPoint (&view, juce::Point<float> ((float) x, (float) y)); break; }
+
+        int clicked = 0, textFields = 0, focusEvents = 0;
+        juce::StringArray offenders;
+        auto report = [&] (juce::Component* c, const char* when)
+        {
+            if (auto* f = focusedInEditor())
+            {
+                ++focusEvents;
+                if (offenders.size() < 6)
+                    offenders.add (juce::String (when) + " " + typeid (*c).name() + " -> focus on " + typeid (*f).name());
+                f->giveAwayKeyboardFocus();
+            }
+        };
+        for (int tab = 0; tab <= 6; ++tab)
+        {
+            hk->showTab (tab);
+            pump (30);
+            std::vector<juce::Component::SafePointer<juce::Component>> comps;
+            std::function<void (juce::Component&)> collect = [&] (juce::Component& c)
+            {
+                for (auto* child : c.getChildren())
+                {
+                    if (! child->isShowing() || dynamic_cast<ExportButton*> (child) != nullptr || dynamic_cast<Overlay*> (child) != nullptr) continue;
+                    comps.emplace_back (child);
+                    collect (*child);
+                }
+            };
+            collect (view);
+            for (auto& sp : comps)
+            {
+                auto* c = sp.getComponent();
+                if (c == nullptr || ! c->isShowing() || c->getWidth() < 2 || c->getHeight() < 2) continue;
+                const auto pos = peer->getComponent().getLocalPoint (c, c->getLocalBounds().toFloat().getCentre());
+                if (! peer->getComponent().getLocalBounds().toFloat().contains (pos)) continue;
+                ++clicked;
+                send (pos, {});                                      // hover
+                report (c, "hover");
+                send (pos, juce::ModifierKeys::leftButtonModifier);  // press
+                if (! isInlineTextEditor (focusedInEditor())) report (c, "mouse down");
+                send (pos, {});                                      // release
+                pump (8);                                            // combo box popups open asynchronously
+                closeOverlays();
+                pump (4);
+                if (auto* f = focusedInEditor(); f != nullptr && isInlineTextEditor (f))
+                {
+                    // a knob's value box: typing a value is allowed, a click elsewhere hands the keyboard back
+                    ++textFields;
+                    send (background, {});
+                    send (background, juce::ModifierKeys::leftButtonModifier);
+                    send (background, {});
+                    pump (8);
+                }
+                report (c, "click");
+                if (hk->getView().isShowing()) hk->showTab (tab);   // a click may have switched tabs
+            }
+        }
+        std::cout << "\nKeyboard focus: " << clicked << " components hovered and clicked on 7 pages (" << textFields
+                  << " value boxes typed into and left), editor keeps no focus: "
+                  << (focusEvents == 0 ? "OK" : "FAILED (" + juce::String (focusEvents) + " times)") << "\n";
+        for (auto& o : offenders) std::cout << "   " << o << "\n";
+        bad += focusEvents > 0 ? 1 : 0;
+
+        // The save dialog's name field takes the keyboard; closing the dialog gives it back
+        {
+            int b = 0;
+            view.openSaveDialog();
+            auto* f = focusedInEditor();
+            b += dynamic_cast<juce::TextEditor*> (f) != nullptr ? 0 : 1;
+            SavePresetOverlay* save = nullptr;
+            for (auto* c : view.getChildren()) if (auto* o = dynamic_cast<SavePresetOverlay*> (c)) save = o;
+            juce::TextButton* cancel = nullptr;
+            if (save != nullptr)
+                for (auto* c : save->getChildren())
+                    if (auto* tb = dynamic_cast<juce::TextButton*> (c); tb != nullptr && tb->getButtonText() == "CANCEL") cancel = tb;
+            if (cancel != nullptr)
+            {
+                const auto pos = peer->getComponent().getLocalPoint (cancel, cancel->getLocalBounds().toFloat().getCentre());
+                send (pos, {}); send (pos, juce::ModifierKeys::leftButtonModifier); send (pos, {});
+            }
+            else ++b;
+            pump (250);
+            b += focusedInEditor() == nullptr && (save == nullptr || ! save->isVisible()) ? 0 : 1;
+            // the browser opens without taking the keyboard
+            view.openBrowser();
+            pump (30);
+            b += focusedInEditor() == nullptr ? 0 : 1;
+            closeOverlays();
+            std::cout << "Keyboard focus: save dialog name field focused on open, released on close; browser opens unfocused: "
+                      << (b == 0 ? "OK" : "FAILED") << "\n";
+            bad += b;
+        }
+
+        // With "Keyboard shortcuts in Codex" on, a click gives the editor the keyboard (and switching it off releases it)
+        {
+            int b = 0;
+            hk->showTab (0);
+            pump (30);
+            view.setKeyboardShortcutsEnabled (true);
+            juce::Component* knob = nullptr;
+            std::function<void (juce::Component&)> findSlider = [&] (juce::Component& c)
+            {
+                for (auto* child : c.getChildren())
+                {
+                    if (knob != nullptr) return;
+                    if (dynamic_cast<juce::Slider*> (child) != nullptr && child->isShowing()) { knob = child; return; }
+                    findSlider (*child);
+                }
+            };
+            findSlider (view);
+            if (knob != nullptr)
+            {
+                const auto pos = peer->getComponent().getLocalPoint (knob, knob->getLocalBounds().toFloat().getCentre());
+                send (pos, {}); send (pos, juce::ModifierKeys::leftButtonModifier); send (pos, {});
+            }
+            pump (30);
+            b += focusedInEditor() != nullptr ? 0 : 1;
+            const bool handled = view.keyPressed (juce::KeyPress ('b', juce::ModifierKeys::commandModifier, 0));
+            b += handled ? 0 : 1;
+            closeOverlays();
+            view.setKeyboardShortcutsEnabled (false);
+            pump (30);
+            b += focusedInEditor() == nullptr ? 0 : 1;
+            std::cout << "Keyboard focus: with keyboard shortcuts on a click focuses the editor, switching off releases it: "
+                      << (b == 0 ? "OK" : "FAILED") << "\n";
+            bad += b;
+        }
+
+        window.clearContentComponent();
+        window.setVisible (false);
+        editor.reset();
+        pump (50);
+        if (userSettings != nullptr)
+        {
+            if (hadShortcutSetting) userSettings->setValue ("keyboardShortcuts", oldShortcutSetting);
+            else userSettings->removeValue ("keyboardShortcuts");
+        }
+        proc.setStateInformation (savedState.getData(), (int) savedState.getSize());
+        resetKey (proc);
+        failures += bad;
+    }
+
     {
         // Resized window (75 %)
         std::unique_ptr<juce::AudioProcessorEditor> editor (proc.createEditor());
