@@ -286,8 +286,10 @@ namespace sat
             }
         };
 
-        inline __m128d load2 (const float* p) noexcept { return _mm_cvtps_pd (_mm_castpd_ps (_mm_load_sd (reinterpret_cast<const double*> (p)))); }
-        inline void store2 (float* p, __m128d v) noexcept { _mm_store_sd (reinterpret_cast<double*> (p), _mm_castps_pd (_mm_cvtpd_ps (v))); }
+        // Two adjacent floats moved as one 64-bit lane. __m128i is may_alias in GCC/Clang, so these
+        // stay valid under strict aliasing (_mm_load_sd/_mm_store_sd would be a double access to float storage).
+        inline __m128d load2 (const float* p) noexcept { return _mm_cvtps_pd (_mm_castsi128_ps (_mm_loadl_epi64 (reinterpret_cast<const __m128i*> (p)))); }
+        inline void store2 (float* p, __m128d v) noexcept { _mm_storel_epi64 (reinterpret_cast<__m128i*> (p), _mm_castps_si128 (_mm_cvtpd_ps (v))); }
 
         /** ya = A (x) and, if Dual, yb = B (x), where A and B are N-stage cascades (lane c = channel c). */
         template <int N, bool Dual>
