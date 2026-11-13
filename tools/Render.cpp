@@ -587,9 +587,12 @@ int main (int argc, char** argv)
         };
         auto settle = [] (eq::EqEngine& e)
         {
-            for (int i = 0; i < 500 && ! e.isLinearUpToDate(); ++i) juce::Thread::sleep (10);
+            // The filters are built on a worker thread and installed by process(): wait for the build (generous for slow
+            // sanitizer runners), then process until it is installed, then a little more so the crossfade has finished.
+            for (int i = 0; i < 6000 && ! e.isLinearBuildReadyForTesting(); ++i) juce::Thread::sleep (10);
             juce::AudioBuffer<float> z (2, 256);
-            for (int i = 0; i < 200; ++i) { z.clear(); e.process (z.getWritePointer (0), z.getWritePointer (1), 256); juce::Thread::sleep (1); }
+            for (int i = 0; i < 6000 && ! e.isLinearUpToDate(); ++i) { z.clear(); e.process (z.getWritePointer (0), z.getWritePointer (1), 256); juce::Thread::sleep (1); }
+            for (int i = 0; i < 50; ++i) { z.clear(); e.process (z.getWritePointer (0), z.getWritePointer (1), 256); }
         };
         std::cout << "\nEQ processing modes      +6 dB bell @ 200 Hz   side low cut (50 Hz S / M)   latency\n";
         for (int mode = 0; mode < 3; ++mode)
