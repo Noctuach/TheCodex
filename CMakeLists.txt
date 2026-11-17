@@ -69,6 +69,7 @@ set(HK_SOURCES
     Source/Parameters.cpp
     Source/PresetManager.cpp
     Source/PluginProcessor.cpp
+    Source/CustomCurveStore.cpp
     Source/GUI/PluginEditor.cpp
     Source/GUI/EQDisplay.cpp
     Source/GUI/KeyboardFocusNative.cpp)

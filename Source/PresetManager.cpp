@@ -1,4 +1,5 @@
 #include "PresetManager.h"
+#include "CustomCurveStore.h"
 #include "Parameters.h"
 #include "DSP/Chain.h"
 #include "DSP/ClipDistortion.h"
@@ -342,6 +343,7 @@ void PresetManager::resetToDefaults()
                 rp->setValueNotifyingHost (rp->getDefaultValue());
                 rp->endChangeGesture();
             }
+    if (customCurves != nullptr) customCurves->clearAll (apvts.undoManager);   // factory sounds have no custom curve
 }
 
 void PresetManager::setCurrentName (const String& name)
@@ -359,6 +361,7 @@ void PresetManager::markClean()
     cleanValues.clear();
     for (auto* p : apvts.processor.getParameters())
         cleanValues.push_back (p->getValue());
+    cleanCurves = customCurves != nullptr ? customCurves->fingerprint() : juce::String();
 }
 
 bool PresetManager::isModified() const
@@ -371,7 +374,7 @@ bool PresetManager::isModified() const
         if (rp != nullptr && isKeyParameter (rp->paramID)) continue;
         if (std::abs (params[i]->getValue() - cleanValues[(size_t) i]) > 1.0e-5f) return true;
     }
-    return false;
+    return customCurves != nullptr && customCurves->fingerprint() != cleanCurves;
 }
 
 void PresetManager::loadFactory (int index)
@@ -401,7 +404,24 @@ void PresetManager::loadUser (const String& name)
                 setValue (rp->paramID, (float) child.getProperty ("value"));
             else if (rp->paramID == ID::chainOrder)
                 setValue (ID::chainOrder, (float) chain::classicIndex());   // saved before the module order existed
+            else if (rp->paramID == ID::clip (1, "Cust") || rp->paramID == ID::clip (2, "Cust"))
+                setValue (rp->paramID, 0.0f);   // saved before the custom curves existed
         }
+    // custom distortion curves: the preset's own, or none
+    if (customCurves != nullptr)
+    {
+        const auto curves = tree.getChildWithName (ID::curvesNode);
+        if (curves.isValid())
+            for (int stage = 1; stage <= 2; ++stage)
+            {
+                FreeCurve c;
+                const auto t = curves.getProperty (ID::curveProp (stage)).toString();
+                const bool ok = t.isNotEmpty() && FreeCurve::fromString (t, c);
+                customCurves->set (stage, ok ? &c : nullptr, apvts.undoManager);
+            }
+        else
+            customCurves->clearAll (apvts.undoManager);
+    }
     setCurrentName (name);
     markClean();
 }

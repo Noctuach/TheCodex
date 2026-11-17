@@ -204,6 +204,16 @@ namespace Icons
         for (float y : { 0.25f, 0.5f, 0.75f }) { p.startNewSubPath (0.18f, y); p.lineTo (0.82f, y); }
         return p;
     }
+    /** Pencil (freehand drawing): a slanted pencil with a short stroke under its tip. */
+    inline juce::Path pencil()
+    {
+        juce::Path p;
+        p.startNewSubPath (0.62f, 0.16f); p.lineTo (0.84f, 0.38f); p.lineTo (0.4f, 0.82f);
+        p.lineTo (0.16f, 0.86f); p.lineTo (0.2f, 0.62f); p.closeSubPath();
+        p.startNewSubPath (0.2f, 0.62f); p.lineTo (0.4f, 0.82f);
+        p.startNewSubPath (0.54f, 0.24f); p.lineTo (0.76f, 0.46f);
+        return p;
+    }
     /** Export: arrow down onto a tray. */
     inline juce::Path exportArrow()
     {
