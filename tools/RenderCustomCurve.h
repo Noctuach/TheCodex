@@ -23,6 +23,20 @@ void* operator new[] (std::size_t n)
     if (void* p = std::malloc (n > 0 ? n : 1)) return p;
     throw std::bad_alloc();
 }
+// every form of new and delete must be replaced together, or allocations from one pair are freed by the other
+// (the sanitizers report that as an alloc-dealloc mismatch)
+void* operator new (std::size_t n, const std::nothrow_t&) noexcept
+{
+    if (countAllocs) allocCount.fetch_add (1);
+    return std::malloc (n > 0 ? n : 1);
+}
+void* operator new[] (std::size_t n, const std::nothrow_t&) noexcept
+{
+    if (countAllocs) allocCount.fetch_add (1);
+    return std::malloc (n > 0 ? n : 1);
+}
+void operator delete (void* p, const std::nothrow_t&) noexcept { std::free (p); }
+void operator delete[] (void* p, const std::nothrow_t&) noexcept { std::free (p); }
 void operator delete (void* p) noexcept { std::free (p); }
 void operator delete[] (void* p) noexcept { std::free (p); }
 void operator delete (void* p, std::size_t) noexcept { std::free (p); }
@@ -286,7 +300,8 @@ static int customCurveProcessorTests (const juce::File& outDir)
     // ---- the seed sounds like the Type ----
     std::cout << "\nCustom curves: a kick through each Type vs through its seeded custom curve (difference, rel. to the signal)\n";
     {
-        CodexProcessor p;
+        auto pHeap = std::make_unique<CodexProcessor>();   // on the heap: the sanitizer build's stack frame would overflow
+        auto& p = *pHeap;
         p.setPlayConfigDetails (0, 2, sr, block);
         setParam (p, ID::keyMode, 0.0f);
         juce::String line ("  ");
@@ -318,7 +333,8 @@ static int customCurveProcessorTests (const juce::File& outDir)
 
     // ---- old X-Shaper projects: identical with or without the new state ----
     {
-        CodexProcessor p;
+        auto pHeap = std::make_unique<CodexProcessor>();   // on the heap: the sanitizer build's stack frame would overflow
+        auto& p = *pHeap;
         p.setPlayConfigDetails (0, 2, sr, block);
         setParam (p, ID::keyMode, 0.0f);
         const int zaag = p.presets.getFactoryNames().indexOf ("X-Shaped Zaag");
@@ -372,7 +388,8 @@ static int customCurveProcessorTests (const juce::File& outDir)
 
     // ---- round trips: session, A/B, user preset, export, undo ----
     {
-        CodexProcessor p;
+        auto pHeap = std::make_unique<CodexProcessor>();   // on the heap: the sanitizer build's stack frame would overflow
+        auto& p = *pHeap;
         p.setPlayConfigDetails (0, 2, sr, block);
         p.presets.loadPreset (0);
         setParam (p, ID::keyMode, 0.0f);
@@ -383,7 +400,8 @@ static int customCurveProcessorTests (const juce::File& outDir)
         setParam (p, ID::clip (1, "Cust"), 1.0f);
         setParam (p, ID::clip (2, "Cust"), 1.0f);
         const auto st = stateOf (p);
-        CodexProcessor q;
+        auto qHeap = std::make_unique<CodexProcessor>();   // on the heap: the sanitizer build's stack frame would overflow
+        auto& q = *qHeap;
         q.setStateInformation (st.getData(), (int) st.getSize());
         const bool sessionOk = q.getCustomCurves().fingerprint() == p.getCustomCurves().fingerprint() && q.isCustomEnabled (1) && q.isCustomEnabled (2);
         const auto a = renderState (st), b = renderState (stateOf (q));

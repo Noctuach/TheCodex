@@ -82,7 +82,14 @@ struct FreeCurve
             p[1] = { 1.0f, count == 1 ? first.y : 1.0f, 0.0f, false };
             count = 2;
         }
-        std::stable_sort (p.begin(), p.begin() + count, [] (const Point& a, const Point& b) { return a.x < b.x; });
+        // stable insertion sort by x: at most 64 points, and unlike std::stable_sort it never allocates a buffer
+        for (int i = 1; i < count; ++i)
+        {
+            const Point q = p[(size_t) i];
+            int j = i - 1;
+            while (j >= 0 && q.x < p[(size_t) j].x) { p[(size_t) j + 1] = p[(size_t) j]; --j; }
+            p[(size_t) j + 1] = q;
+        }
         p[0].x = lo;
         p[(size_t) count - 1].x = 1.0f;
         // minimum spacing: drop the later colliding point (never an endpoint)
