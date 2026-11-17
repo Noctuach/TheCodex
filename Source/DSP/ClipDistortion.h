@@ -116,6 +116,7 @@ public:
             oversamplers[(size_t) i]->initProcessing ((size_t) maxBlockSize);
         }
         dcR = (float) std::exp (-juce::MathConstants<double>::twoPi * 10.0 / sr);
+        dcAmount.reset (sr, 0.02);   // the DC filter fades in / out over 20 ms when the unit (or its DC switch) toggles
         activeOs = -1;           // force (re)configuration
         applySettings (true);
         reset();
@@ -131,7 +132,7 @@ public:
         dcX = { 0.0f, 0.0f }; dcY = { 0.0f, 0.0f };
         holdCount = { 0, 0 }; holdValue = { 0.0f, 0.0f };
         for (auto& pm : phase) pm.reset();
-        adaaPrev = { 0.0, 0.0 }; adaaPrevF = { 0.0, 0.0 };
+        seedAdaaHistory();
         fadeLeft = 0;
     }
 
@@ -170,6 +171,9 @@ public:
             inPk = std::max (inPk, std::max (std::abs (left[i]), std::abs (right[i])));
         }
 
+        // a switched-off unit drops its pre / post filter only once the wet has faded out (no step in the fading wet)
+        filterPos = settings.enabled || mix.isSmoothing() ? settings.filterPos : 0;
+
         if (activeOs >= 0)
         {
             float* channels[] = { left, right };
@@ -203,21 +207,44 @@ public:
                 right[i] *= autoGainNow;
             }
         }
+        // DC filter: only while the unit is on and its DC switch is on, so a switched-off unit is transparent at low
+        // frequencies. Switching fades the filtered signal in / out (20 ms); once fully out the filter state is cleared.
         float outPk = 0.0f;
         float* chans[] = { left, right };
-        for (int ch = 0; ch < 2; ++ch)
+        if (dcAmount.isSmoothing())
+        {
             for (int i = 0; i < numSamples; ++i)
             {
-                float& v = chans[ch][i];
-                if (settings.dcFilter)
+                const float a = dcAmount.getNextValue();
+                for (int ch = 0; ch < 2; ++ch)
                 {
+                    float& v = chans[ch][i];
                     const float x = v;
                     dcY[(size_t) ch] = x - dcX[(size_t) ch] + dcR * dcY[(size_t) ch];
                     dcX[(size_t) ch] = x;
-                    v = dcY[(size_t) ch];
+                    v = x + a * (dcY[(size_t) ch] - x);
+                    outPk = std::max (outPk, std::abs (v));
                 }
-                outPk = std::max (outPk, std::abs (v));
             }
+            if (! dcAmount.isSmoothing() && dcAmount.getTargetValue() == 0.0f) { dcX = { 0.0f, 0.0f }; dcY = { 0.0f, 0.0f }; }
+        }
+        else
+        {
+            const bool dcOn = dcAmount.getTargetValue() > 0.0f;
+            for (int ch = 0; ch < 2; ++ch)
+                for (int i = 0; i < numSamples; ++i)
+                {
+                    float& v = chans[ch][i];
+                    if (dcOn)
+                    {
+                        const float x = v;
+                        dcY[(size_t) ch] = x - dcX[(size_t) ch] + dcR * dcY[(size_t) ch];
+                        dcX[(size_t) ch] = x;
+                        v = dcY[(size_t) ch];
+                    }
+                    outPk = std::max (outPk, std::abs (v));
+                }
+        }
 
         if (inPk > inPeak.load())   inPeak.store (inPk);
         if (outPk > outPeak.load()) outPeak.store (outPk);
@@ -348,7 +375,7 @@ private:
         {
             if (os >= 0 && oversamplers[(size_t) os] != nullptr)
                 oversamplers[(size_t) os]->reset();
-            for (auto* s : { &drive, &mix, &outGain, &offset, &character, &spatial })
+            for (auto* s : { &drive, &mix, &outGain, &offset, &character, &spatial, &dryPhase })
                 s->reset (rate, 0.02);
             filterCutoff.reset (rate, 0.03);
             for (auto& f : svf) f.reset();
@@ -363,12 +390,15 @@ private:
         setTarget (drive, juce::Decibels::decibelsToGain (s.driveDb), force || rateChanged);
         setTarget (boost, s.enabled ? juce::Decibels::decibelsToGain (s.boostDb) : 1.0f, force || rateChanged);
         setTarget (mix, s.enabled ? s.mix : 0.0f, force || rateChanged);
+        setTarget (dryPhase, s.enabled ? 1.0f : 0.0f, force || rateChanged);
         setTarget (outGain, s.enabled ? juce::Decibels::decibelsToGain (s.outDb) : 1.0f, force || rateChanged);
         setTarget (offset, s.offset, force || rateChanged);
         setTarget (character, s.character, force || rateChanged);
         setTarget (spatial, s.spatial, force || rateChanged);
+        setTarget (dcAmount, s.enabled && s.dcFilter ? 1.0f : 0.0f, force);   // runs at the base rate: an OS change does not snap it
+        if (force && ! (s.enabled && s.dcFilter)) { dcX = { 0.0f, 0.0f }; dcY = { 0.0f, 0.0f }; }
         setTarget (filterCutoff, juce::jlimit (20.0f, (float) (rate * 0.45), s.filterHz), force || rateChanged);
-        filterPos = s.enabled ? s.filterPos : 0;
+        filterPos = s.enabled || mix.isSmoothing() ? s.filterPos : 0;   // see process(): kept while the wet fades out
         filterType = s.filterType;
         // resonance 0..1 -> Q 0.5 .. 18 (quadratic, so most of the knob is musical)
         filterK = 1.0f / (0.5f + 17.5f * s.filterRes * s.filterRes);
@@ -445,6 +475,22 @@ private:
 
     const AdaaTable& legacyTable (int m) const noexcept { return (m == XShaper || m == XShaperAsym) ? curveTable : fixedTable (m); }
 
+    /** Seeds the ADAA history with the operating point of silent input (v = the channel's offset, exactly as
+        processSamples computes it) and the matching antiderivative of the curve that plays, so the first samples after
+        prepare() / reset() carry no step when Offset (or Spatial) is not 0. */
+    void seedAdaaHistory() noexcept
+    {
+        const float off = offset.getCurrentValue(), offsetSpread = 0.3f * spatial.getCurrentValue();
+        for (int ch = 0; ch < 2; ++ch)
+        {
+            const float chOffset = ch == 0 ? off + offsetSpread : off - offsetSpread;
+            const double v = (double) chOffset;
+            adaaPrev[(size_t) ch] = v;
+            adaaPrevF[(size_t) ch] = customActive ? customBank.slot (curFront).Fv (v) : legacyTable (mode).eval (v);
+            adaaPrevFOld[(size_t) ch] = adaaPrevF[(size_t) ch];
+        }
+    }
+
     /** Moves the wet filters a step towards their targets (every 16 samples while gliding) and redesigns them. */
     void glideFilters() noexcept
     {
@@ -500,6 +546,22 @@ private:
         }
     };
 
+    /** Dry path: the phase-matched dry (all-passes + half-sample delay) while the unit is on, the untouched input while it
+        is off, crossfaded over 20 ms when On toggles (dp = 1 on, 0 off). The phase-match filters always run, so their
+        state is current when the unit is switched on (no jump from a stale state). Exactly pmDry at dp = 1 and exactly
+        the input at dp = 0. */
+    inline float dryPath (int ch, float in, float dp, bool adaa) noexcept
+    {
+        auto& pm = phase[(size_t) ch];
+        float pmDry = in;
+        if (loActive) pmDry = pm.allpassLo (pmDry);
+        if (hiActive) pmDry = pm.allpassHi (pmDry);
+        if (adaa)     pmDry = pm.halfSample (pmDry);
+        if (dp >= 1.0f) return pmDry;
+        if (dp <= 0.0f) return in;
+        return in + dp * (pmDry - in);
+    }
+
     inline float runFilter (int ch, float x) noexcept
     {
         float lo, bp, hi;
@@ -545,6 +607,7 @@ private:
             const float d = drive.getNextValue() * (tailActive ? tailMul[(size_t) (i / osFactor)] : 1.0f);
             const float off = offset.getNextValue(), chr = character.getNextValue();
             const float sp = spatial.getNextValue(), m = mix.getNextValue(), og = outGain.getNextValue();
+            const float dp = dryPhase.getNextValue();
             if (filterPos != 0 && filterCutoff.isSmoothing()) updateFilterCoefficients (filterCutoff.getNextValue());
 
             // Spatial: the two channels hit slightly different curves (drive and operating point),
@@ -557,14 +620,9 @@ private:
                 const float chOffset = ch == 0 ? off + offsetSpread : off - offsetSpread;
                 auto& pm = phase[ch];
                 // Dry path, phase-matched to the wet path so the Mix knob never comb-filters: the same all-pass phase as
-                // the Linkwitz-Riley Lo / Hi filters, plus the half-sample delay of the anti-aliasing. A bypassed unit stays untouched.
-                float dry = in;
-                if (settings.enabled)
-                {
-                    if (loActive) dry = pm.allpassLo (dry);
-                    if (hiActive) dry = pm.allpassHi (dry);
-                    if (adaa)     dry = pm.halfSample (dry);
-                }
+                // the Linkwitz-Riley Lo / Hi filters, plus the half-sample delay of the anti-aliasing. A bypassed unit stays untouched
+                // (see dryPath: the phase match fades in / out with On).
+                const float dry = dryPath (ch, in, dp, adaa);
                 float w = loActive ? pm.lowPassLR2 (in) : in;
                 if (filterPos == 1) w = runFilter (ch, w);
                 if (mode == Downsample)
@@ -659,6 +717,7 @@ private:
             const float d = drive.getNextValue() * (tailActive ? tailMul[(size_t) (i / osFactor)] : 1.0f);
             const float off = offset.getNextValue(), chr = character.getNextValue();
             const float sp = spatial.getNextValue(), m = mix.getNextValue(), og = outGain.getNextValue();
+            const float dp = dryPhase.getNextValue();
             if (filterPos != 0 && filterCutoff.isSmoothing()) updateFilterCoefficients (filterCutoff.getNextValue());
 
             const float driveSpread = 1.0f + 0.6f * sp, offsetSpread = 0.3f * sp;
@@ -669,13 +728,7 @@ private:
                 const float chDrive  = ch == 0 ? d * driveSpread : d / driveSpread;
                 const float chOffset = ch == 0 ? off + offsetSpread : off - offsetSpread;
                 auto& pm = phase[ch];
-                float dry = in;
-                if (settings.enabled)
-                {
-                    if (loActive) dry = pm.allpassLo (dry);
-                    if (hiActive) dry = pm.allpassHi (dry);
-                    if (adaa)     dry = pm.halfSample (dry);
-                }
+                const float dry = dryPath (ch, in, dp, adaa);
                 float w = loActive ? pm.lowPassLR2 (in) : in;
                 if (filterPos == 1) w = runFilter (ch, w);
                 if (mode == Downsample)
@@ -762,6 +815,7 @@ private:
     Settings settings;
 
     juce::SmoothedValue<float> drive, boost, mix, outGain, offset, character, spatial;
+    juce::SmoothedValue<float> dryPhase { 1.0f };   // 1 = dry path phase-matched (unit on), 0 = untouched (off)
     eq::Biquad loFilter[2], hiFilter[2], shelf[2];
 
     /**
@@ -807,5 +861,6 @@ private:
 
     float dcR = 0.999f;
     std::array<float, 2> dcX { 0.0f, 0.0f }, dcY { 0.0f, 0.0f };
+    juce::SmoothedValue<float> dcAmount { 1.0f };   // 1 = DC filter fully in, 0 = out (not running)
     std::atomic<float> inPeak { 0.0f }, outPeak { 0.0f };
 };

@@ -190,6 +190,7 @@ static void snapshot (CodexProcessor& proc, const juce::AudioBuffer<float>& audi
 }
 
 #include "RenderCustomCurve.h"
+#include "RenderDistFixes.h"
 
 int main (int argc, char** argv)
 {
@@ -1330,6 +1331,13 @@ int main (int argc, char** argv)
         if (! finite || pk > 12.0f) ++failures;
         std::cout << ClipDistortion::oversamplingNames()[os].paddedRight (' ', 15) << juce::String (proc.getLatencySamples()).paddedRight (' ', 10)
                   << juce::String (pk, 1) << (finite ? "" : "  NaN!") << "\n";
+    }
+
+    // ---- Distortion: no step after prepare with Offset; a switched-off unit is transparent (see RenderDistFixes.h) ----
+    {
+        const int distBad = distortionFixTests() + processorDistOffTest();
+        std::cout << "\nDistortion offset seeding / off-unit transparency: " << (distBad == 0 ? "OK" : "FAILED") << "\n";
+        failures += distBad;
     }
 
     // ---- Distortion engine: aliasing per oversampling, resonant pre/post filter, X-Shaper, new modes ----
