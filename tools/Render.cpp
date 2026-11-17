@@ -193,6 +193,7 @@ static void snapshot (CodexProcessor& proc, const juce::AudioBuffer<float>& audi
 #include "RenderDistFixes.h"
 #include "RenderCompFixes.h"
 #include "RenderSubAlign.h"
+#include "RenderRevFixes.h"
 
 int main (int argc, char** argv)
 {
@@ -220,6 +221,12 @@ int main (int argc, char** argv)
     {
         const int bad = latencyAndSubAlignTests();
         std::cout << "\n" << (bad == 0 ? "SUB CHECKS PASSED" : juce::String (bad) + " SUB CHECK(S) FAILED") << "\n";
+        return bad == 0 ? 0 : 2;
+    }
+    if (std::getenv ("CODEX_REV_ONLY") != nullptr)   // quick run: the reverb decay / crossover / glide checks only
+    {
+        const int bad = reverbFixTests();
+        std::cout << "\n" << (bad == 0 ? "REV CHECKS PASSED" : juce::String (bad) + " REV CHECK(S) FAILED") << "\n";
         return bad == 0 ? 0 : 2;
     }
     if (std::getenv ("CODEX_CURVE_ONLY") != nullptr)   // quick run: the custom curve maths and seeding only
@@ -512,6 +519,7 @@ int main (int argc, char** argv)
             proc.presets.loadPreset (8);
             if (proc.apvts.getRawParameterValue (ID::spc ("On"))->load() > 0.5f) { ++bad; std::cout << "   preset did not reset Space\n"; }
         }
+        bad += reverbFixTests();   // see RenderRevFixes.h
         std::cout << "Space reverb checks: " << (bad == 0 ? "OK" : "FAILED") << "\n";
         failures += bad;
     }

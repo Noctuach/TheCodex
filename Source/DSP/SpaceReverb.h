@@ -92,6 +92,22 @@ namespace space
             return a + f * (b - a);
         }
         float readInt (int d) const noexcept { return buf[(size_t) ((w - d) & mask)]; }
+
+        /** Sample written `d` samples ago (d >= 2) through a first-order all-pass (Thiran) fractional delay.
+            Unlike the linear read, its magnitude response is exactly flat, so inside a feedback loop it adds no
+            frequency-dependent loss (a linear read is a low-pass whose loss compounds on every pass and shortened
+            the decay above ~1 kHz). The fractional part is kept in [0.5, 1.5) so the all-pass coefficient stays in
+            (-0.2, 1/3]: a well-damped pole, so a moving (modulated) delay stays smooth. `z1` is the caller's
+            per-line all-pass state. */
+        float readAllpass (float d, float& z1) const noexcept
+        {
+            const int i = (int) (d - 0.5f);
+            const float frac = d - (float) i;
+            const float a = (1.0f - frac) / (1.0f + frac);
+            const float y = a * (readInt (i) - z1) + readInt (i + 1);
+            z1 = y;
+            return y;
+        }
     };
 
     /** Schroeder all-pass with a (modulatable) fractional delay. */
@@ -137,6 +153,7 @@ namespace space
             for (auto& f : highCutF) f.reset();
             for (auto& f : bassF) f.reset();
             for (auto& f : trebleF) f.reset();
+            apState.fill (0.0f);
             env = 0.0f;
             for (int i = 0; i < numLines; ++i) curLen[(size_t) i] = targetLen[(size_t) i];
         }
@@ -155,16 +172,23 @@ namespace space
             for (int i = 0; i < numLines; ++i)
                 targetLen[(size_t) i] = baseMs[i] * lateScale * 0.001f * fs;
 
-            // Decay: per-band feedback gains from T60 (Decay x multipliers)
+            // Decay: per-band feedback gains from T60 (Decay x multipliers), per line from its mean loop delay
+            // (length + the mean of the 0 .. 2 x lDepth modulation sweep added in process())
             const float t60 = juce::jlimit (0.1f, 20.0f, s.decay);
+            const float lDepthMean = s.lModDepth * 0.0006f * fs * shape.modScale;
+            // Bass Xover above High Xover would make the "mid" band (LP_high - LP_bass) negative, and the three bands
+            // then sum above the largest band gain (loop gain up to 1.0007 at 1.1 kHz with Bass Xover 16 kHz / High
+            // Xover 50 Hz and long bass / high decays). With bass <= high the split is bounded by the largest band
+            // gain, so the bass crossover is limited to the high one (continuous in both knobs: no step).
+            const float bassX = juce::jmin (s.bassXover, s.highXover);
             for (int i = 0; i < numLines; ++i)
             {
-                const float lenS = targetLen[(size_t) i] / fs;
+                const float lenS = (targetLen[(size_t) i] + lDepthMean) / fs;
                 auto g = [lenS] (float t) { return juce::jmin (0.99995f, std::pow (10.0f, -3.0f * lenS / juce::jmax (0.05f, t))); };
                 gMid[(size_t) i]  = g (t60);
                 gBass[(size_t) i] = g (t60 * s.bassMult);
                 gHigh[(size_t) i] = g (t60 * s.highMult * shape.damping);
-                bassF[(size_t) i].set (sr, s.bassXover);
+                bassF[(size_t) i].set (sr, bassX);
                 trebleF[(size_t) i].set (sr, s.highXover);
             }
 
@@ -222,10 +246,10 @@ namespace space
                 const float dryL = left[n], dryR = right[n];
 
                 // smoothed gains
-                earlyGain += (earlyGainT - earlyGain) * smooth;
-                lateGain  += (lateGainT - lateGain) * smooth;
-                dryGain   += (dryGainT - dryGain) * smooth;
-                wetGain   += (wetGainT - wetGain) * smooth;
+                glide (earlyGain, earlyGainT, smooth);
+                glide (lateGain, lateGainT, smooth);
+                glide (dryGain, dryGainT, smooth);
+                glide (wetGain, wetGainT, smooth);
                 curPredelay += (predelaySamples - curPredelay) * smooth;
                 curSpan     += (earlySpanSamples - curSpan) * smooth;
 
@@ -279,7 +303,7 @@ namespace space
                 {
                     curLen[(size_t) i] += (targetLen[(size_t) i] - curLen[(size_t) i]) * 0.0005f;
                     const float mod = lDepth * (1.0f + std::sin (lPhase + (float) i * 0.785398f));
-                    float v = lines[(size_t) i].read (juce::jmax (2.0f, curLen[(size_t) i] + mod));
+                    float v = lines[(size_t) i].readAllpass (juce::jmax (2.0f, curLen[(size_t) i] + mod), apState[(size_t) i]);
                     // 3-band decay: bass / mid / high decay at their own rate
                     const float low  = bassF[(size_t) i].lp (v);
                     const float high = trebleF[(size_t) i].hp (v);
@@ -311,6 +335,15 @@ namespace space
         }
 
     private:
+        /** One-pole glide that lands exactly on the target: in float, x += (t - x) * k stops moving about
+            0.25 / k ulp short of t (1.5e-5 for gains near 0.7 with k = 0.002), so it snaps once a step no longer
+            changes x. Until then it is the plain one-pole, sample for sample. */
+        static void glide (float& x, float t, float k) noexcept
+        {
+            const float n = x + (t - x) * k;
+            x = juce::exactlyEqual (n, x) ? t : n;
+        }
+
         static void hadamard (std::array<float, numLines>& v) noexcept
         {
             for (int h = 1; h < numLines; h <<= 1)
@@ -335,7 +368,7 @@ namespace space
         std::array<Delay, numLines> lines;
         std::array<OnePole, 4> lowCutF, highCutF;
         std::array<OnePole, numLines> bassF, trebleF;
-        std::array<float, numLines> targetLen {}, curLen {}, gMid {}, gBass {}, gHigh {};
+        std::array<float, numLines> targetLen {}, curLen {}, gMid {}, gBass {}, gHigh {}, apState {};
 
         float predelaySamples = 1.0f, curPredelay = 1.0f, earlySpanSamples = 100.0f, curSpan = 100.0f;
         float earlyDiffG = 0.5f, lateDiffG = 0.5f, earlyLevel = 1.0f, modScale = 1.0f;
