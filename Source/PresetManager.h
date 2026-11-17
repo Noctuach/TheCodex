@@ -1,6 +1,8 @@
 #pragma once
 #include <juce_audio_processors/juce_audio_processors.h>
 
+class CustomCurveStore;
+
 /**
     Factory presets (compiled in) + user presets (XML files in the user's documents folder).
     Key, octave and key mode are deliberately NOT part of a preset: pick your track's key
@@ -39,6 +41,9 @@ public:
 
     static const juce::Identifier presetNameProperty;
 
+    /** The custom distortion curves travel with user presets; factory presets have none. */
+    void setCustomCurves (CustomCurveStore* store) { customCurves = store; }
+
 private:
     struct FactoryPreset
     {
@@ -58,5 +63,7 @@ private:
     std::vector<FactoryPreset> factory;
     juce::StringArray userNames;
     std::vector<float> cleanValues;   // parameter values at the last load / save
+    juce::String cleanCurves;         // custom curves at the last load / save
+    CustomCurveStore* customCurves = nullptr;
     juce::CriticalSection userNamesLock;   // hosts may query programs from another thread
 };

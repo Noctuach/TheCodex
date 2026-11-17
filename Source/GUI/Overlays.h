@@ -267,7 +267,7 @@ private:
         col (left, {
             { "1  KEY", String::fromUTF8 ("Set KEY (F to E) to the key of your track. Key Mode: Follow MIDI (default) plays the note you press, Fixed Key plays KEY from any note. The ROOT readout confirms it.") },
             { "2  PRESET", String::fromUTF8 ("Browse with the arrows or the grid button (search, categories, favourites). '*' after the name = edited.") },
-            { "3  SHAPE THE HIT", String::fromUTF8 ("KICK page: pitch and amp envelopes (ADSR or DRAW). DISTORTION: two units with Pre/Post filter and drawable X-Shaper. EQ sits between them.") },
+            { "3  SHAPE THE HIT", String::fromUTF8 ("KICK page: pitch and amp envelopes (ADSR or DRAW). DISTORTION: two units with Pre/Post filter; draw your own curve on any Type (drag the curve, double-click or the pencil). EQ sits between them.") },
             { "4  POLISH", String::fromUTF8 ("SATURATION, COMPRESSOR, EQ 2 and SPACE are off until you switch them on. SUB LAYER adds a clean fundamental: press ALIGN.") },
             { "5  FINISH", String::fromUTF8 ("Macros (Punch, Dirt, Tail, Width) for quick moves, CLIP for loudness, then DRAG KICK straight onto a track in your DAW.") },
         });
@@ -275,6 +275,7 @@ private:
             { "KNOBS", String::fromUTF8 ("Drag up/down  \xc2\xb7  Shift: fine  \xc2\xb7  double-click: default  \xc2\xb7  click the value to type it.") },
             { "EQ DISPLAY", String::fromUTF8 ("Double-click: add band  \xc2\xb7  drag: frequency/gain  \xc2\xb7  wheel: Q / slope  \xc2\xb7  Alt-click: bypass  \xc2\xb7  right-click: shape, placement, delete band.") },
             { "DRAW ENVELOPES / X-SHAPER", String::fromUTF8 ("Drag points; drag the diamonds to bend a segment  \xc2\xb7  double-click: add or delete a point  \xc2\xb7  right-click: preset shapes.") },
+            { "DISTORTION CURVE", String::fromUTF8 ("Double-click: add / delete  \xc2\xb7  drag the diamonds to bend  \xc2\xb7  right-click: shapes  \xc2\xb7  pencil: draw freehand.") },
             { "SHORTCUTS", "Off by default, so your DAW keeps the computer keyboard (menu: Keyboard shortcuts in Codex). "
                           + cmd + "Z undo" + dot + cmd + "Shift+Z redo" + dot + cmd + "B browse" + dot + cmd + "S save" + dot + cmd + "Left/Right preset" + dot + "Delete: EQ band." },
             { "HELP", String::fromUTF8 ("Hover over any control for an explanation (menu: Show tooltips).") },

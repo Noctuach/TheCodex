@@ -2,6 +2,8 @@
 #include <juce_dsp/juce_dsp.h>
 #include "ParametricEQ.h"
 #include "StereoOversampling.h"
+#include "AdaaTable.h"
+#include "CustomCurveBank.h"
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -86,6 +88,9 @@ public:
         Curve curve;
         // Punch / tail split: the drive moves by tailDriveDb from the hit to the tail over splitMs after each note-on
         float tailDriveDb = 0.0f, splitMs = 60.0f;
+        // Custom curve (Dist N Custom Curve): play the published free-point curve instead of the mode's shape.
+        // Without a published curve this has no effect (the unit plays its mode exactly as before).
+        bool custom = false;
     };
 
     /** Drive change (dB) at a time after the hit: 0 at the hit, tailDriveDb after splitMs (smoothstep). */
@@ -127,6 +132,7 @@ public:
         holdCount = { 0, 0 }; holdValue = { 0.0f, 0.0f };
         for (auto& pm : phase) pm.reset();
         adaaPrev = { 0.0, 0.0 }; adaaPrevF = { 0.0, 0.0 };
+        fadeLeft = 0;
     }
 
     /** Latency in base-rate samples for the current oversampling setting. */
@@ -226,59 +232,10 @@ public:
     }
 
     //==========================================================================
-    /**
-        Antiderivative anti-aliasing (first order, Parker et al. 2016): instead of f(v[n]) the stage outputs
-        (F(v[n]) - F(v[n-1])) / (v[n] - v[n-1]), where F is the integral of the curve. This removes most of the
-        aliasing that clipping corners create, on top of oversampling. F is tabulated once per curve
-        (cubic Hermite between nodes), extended linearly beyond the table for saturating curves and wrapped
-        for the periodic folds.
-    */
-    struct AdaaTable
-    {
-        static constexpr double range = 16.0;
-        static constexpr int size = 8192;
-        std::vector<double> F, f;
-        bool periodic = false;
-        double period = 4.0, h = 0.0;
-
-        /** Allocates once; rebuilding later (e.g. while an X-Shaper point is dragged) does not allocate. */
-        template <typename Fn>
-        void build (Fn&& fn, bool isPeriodic)
-        {
-            periodic = isPeriodic;
-            const double lo = periodic ? -0.5 * period : -range, hi = periodic ? 0.5 * period : range;
-            h = (hi - lo) / (size - 1);
-            if ((int) F.size() != size) { F.resize (size); f.resize (size); }
-            std::fill (F.begin(), F.end(), 0.0);
-            for (int i = 0; i < size; ++i) f[(size_t) i] = fn ((float) (lo + h * i));
-            // trapezoid integration from the centre so F(0) = 0
-            const int mid = (size - 1) / 2;
-            for (int i = mid + 1; i < size; ++i) F[(size_t) i] = F[(size_t) i - 1] + 0.5 * h * (f[(size_t) i - 1] + f[(size_t) i]);
-            for (int i = mid - 1; i >= 0; --i)    F[(size_t) i] = F[(size_t) i + 1] - 0.5 * h * (f[(size_t) i + 1] + f[(size_t) i]);
-            const double offsetAtZero = F[(size_t) mid] + (0.0 - (lo + h * mid)) * f[(size_t) mid];
-            for (auto& v : F) v -= offsetAtZero;
-        }
-
-        double eval (double v) const noexcept
-        {
-            const double lo = periodic ? -0.5 * period : -range, hi = periodic ? 0.5 * period : range;
-            if (periodic)
-            {
-                v = std::fmod (v - lo, period);
-                if (v < 0.0) v += period;
-                v += lo;
-            }
-            else if (v >= hi) return F.back() + f.back() * (v - hi);
-            else if (v <= lo) return F.front() + f.front() * (v - lo);
-            const double t = (v - lo) / h;
-            const int i = juce::jlimit (0, size - 2, (int) t);
-            const double u = t - i;
-            // cubic Hermite with the curve itself as the derivative
-            const double u2 = u * u, u3 = u2 * u;
-            return (2 * u3 - 3 * u2 + 1) * F[(size_t) i] + (u3 - 2 * u2 + u) * h * f[(size_t) i]
-                 + (-2 * u3 + 3 * u2) * F[(size_t) i + 1] + (u3 - u2) * h * f[(size_t) i + 1];
-        }
-    };
+    /** ADAA table of the fixed modes and the X-Shaper (+-16; see AdaaTable.h). */
+    using AdaaTable = BasicAdaaTable<64>;
+    /** ADAA table of a custom curve (+-1 in the drawn domain). */
+    using UnitAdaaTable = BasicAdaaTable<4>;
 
     static bool isPeriodicMode (int m) noexcept { return m == SineFold || m == TriFold; }
 
@@ -353,6 +310,24 @@ public:
         }
     }
 
+    /** Wet transfer of a custom curve for one input sample (the GUI display's counterpart of transfer()). */
+    static float transferCustom (const FreeCurveShape& shape, int mode, float x, float driveGain, float offset, float character) noexcept
+    {
+        if (mode == Downsample) driveGain = 1.0f;
+        return harden (shape.evalV (x * driveGain + offset) - shape.evalV (offset), character);
+    }
+
+    /** Hands a custom curve (nullptr = none) to the audio thread. Any non-audio thread; compiles the curve here. */
+    void publishCustomCurve (const FreeCurve* c) { customBank.publish (c); }
+    /** True while the unit plays a custom curve (tests and GUI). */
+    bool isCustomActive() const noexcept { return customActiveFlag.load (std::memory_order_relaxed); }
+    /** The slot the audio thread plays (tests only: read it while no audio is being processed). */
+    const CustomCurveSlot& activeCustomSlot() const noexcept { return customBank.slot (curFront); }
+    /** Tests only: length of the crossfade when the playing curve changes (0 = switch instantly). */
+    void setCustomFadeMs (float ms) noexcept { customFadeMs = ms; }
+    /** Tests only: one of the four preallocated curve slots. */
+    const CustomCurveSlot& customSlotForTesting (int i) const noexcept { return customBank.slot (i); }
+
     /** Peak levels since the last call (for the GUI meters). */
     float getAndResetInputPeak()  { return inPeak.exchange (0.0f); }
     float getAndResetOutputPeak() { return outPeak.exchange (0.0f); }
@@ -426,6 +401,7 @@ private:
             designFilters (rate);
             lastFilterRate = rate;
         }
+        const bool legacyReanchored = s.mode != mode || tableChanged;   // the legacy block below re-anchors the ADAA history
         if (s.mode != mode || tableChanged)
         {
             // keep the ADAA history consistent with the new curve (no click when switching modes)
@@ -433,8 +409,41 @@ private:
             for (int ch = 0; ch < 2; ++ch) adaaPrevF[(size_t) ch] = tbl.eval (adaaPrev[(size_t) ch]);
             tableChanged = false;
         }
+        applyCustomCurve (s, force, legacyReanchored);
         mode = s.mode;
     }
+
+    /** Custom curve: takes a newly published curve, starts a short crossfade on any change of the playing curve and
+        keeps the ADAA history of every source consistent. Runs after the legacy re-anchor and overrides it while a
+        custom curve plays. Audio thread: one atomic exchange at most, no allocation, no locks. */
+    void applyCustomCurve (const Settings& s, bool force, bool legacyReanchored) noexcept
+    {
+        const Src before { customActive, curFront };
+        bool swapped = false;
+        if (fadeLeft == 0 || force) swapped = customBank.tryAcquire (curFront, curPrev);
+        const bool nowCustom = s.custom && customBank.slot (curFront).valid;
+        const bool transition = nowCustom != customActive || (swapped && nowCustom);
+        auto legacyF = [this, &s] (double v) { return legacyTable (s.mode).eval (v); };
+        if (transition && ! force && (customActive || nowCustom))
+        {
+            fadeFrom = before;
+            if (swapped && before.custom) fadeFrom.slot = curPrev;
+            for (int ch = 0; ch < 2; ++ch)   // history of the outgoing source, recomputed (exact, whatever ran above)
+                adaaPrevFOld[(size_t) ch] = fadeFrom.custom ? customBank.slot (fadeFrom.slot).Fv (adaaPrev[(size_t) ch]) : legacyF (adaaPrev[(size_t) ch]);
+            fadeLen = fadeLeft = juce::jmax (1, (int) (customFadeMs * 0.001 * curRate));
+        }
+        if (force) fadeLeft = 0;
+        customActive = nowCustom;
+        customActiveFlag.store (nowCustom, std::memory_order_relaxed);
+        if (customActive && (transition || legacyReanchored || force))
+            for (int ch = 0; ch < 2; ++ch) adaaPrevF[(size_t) ch] = customBank.slot (curFront).Fv (adaaPrev[(size_t) ch]);   // overrides the legacy re-anchor
+        if (! customActive && transition)
+            for (int ch = 0; ch < 2; ++ch) adaaPrevF[(size_t) ch] = legacyF (adaaPrev[(size_t) ch]);   // back to the mode's curve
+        if (fadeLeft > 0 && ! fadeFrom.custom && legacyReanchored && ! transition)   // legacy table rebuilt mid-fade
+            for (int ch = 0; ch < 2; ++ch) adaaPrevFOld[(size_t) ch] = legacyF (adaaPrev[(size_t) ch]);
+    }
+
+    const AdaaTable& legacyTable (int m) const noexcept { return (m == XShaper || m == XShaperAsym) ? curveTable : fixedTable (m); }
 
     /** Moves the wet filters a step towards their targets (every 16 samples while gliding) and redesigns them. */
     void glideFilters() noexcept
@@ -524,6 +533,7 @@ private:
 
     void processSamples (float* l, float* r, int n) noexcept
     {
+        if (customActive || fadeLeft > 0) { processSamplesCustom (l, r, n); return; }
         float* chans[] = { l, r };
         // mode and curve only change in applySettings (between calls)
         const AdaaTable* adaaTable = (mode == XShaper || mode == XShaperAsym) ? &curveTable : &fixedTable (mode);
@@ -592,6 +602,116 @@ private:
             }
         }
     }
+
+    struct Src { bool custom = false; int slot = 0; };
+
+    /** One shaped sample from a source (the custom curve in a slot, or the mode's own curve). v history is shared by
+        both sources of a crossfade (adaaPrev); each source keeps its own antiderivative history (prevF). */
+    inline float shapeSrc (Src src, int ch, float w, float chDrive, float chOffset, float chr, bool adaa, std::array<double, 2>& prevF) noexcept
+    {
+        const float g = mode == Downsample ? 1.0f : chDrive;
+        const double v = (double) w * g + chOffset;
+        const double vPrev = adaaPrev[(size_t) ch];
+        if (src.custom)
+        {
+            const auto& sl = customBank.slot (src.slot);
+            const double Fv = sl.Fv (v);
+            float y;
+            if (! adaa)
+                y = sl.shapeV ((float) v);
+            else
+            {
+                const double dv = v - vPrev;
+                y = std::abs (dv) > 1.0e-4 ? (float) ((Fv - prevF[(size_t) ch]) / dv) : sl.shapeV ((float) (0.5 * (v + vPrev)));
+            }
+            prevF[(size_t) ch] = Fv;
+            return harden (y - sl.shapeV (chOffset), chr);
+        }
+        // the mode's own curve: exactly the expressions of processSamples
+        const AdaaTable& tbl = legacyTable (mode);
+        if (! adaa)
+        {
+            prevF[(size_t) ch] = tbl.eval (v);
+            return transfer (mode, w, chDrive, chOffset, chr, &curve);
+        }
+        const double dv = v - vPrev;
+        const double Fv = tbl.eval (v);
+        float y;
+        if (std::abs (dv) > 1.0e-4)
+            y = (float) ((Fv - prevF[(size_t) ch]) / dv);
+        else
+            y = midShape[(size_t) ch].get (mode, (float) (0.5 * (v + vPrev)), &curve, shapeVersion);
+        prevF[(size_t) ch] = Fv;
+        return harden (y - offShape[(size_t) ch].get (mode, chOffset, &curve, shapeVersion), chr);
+    }
+
+    /** processSamples with a custom curve playing or a crossfade running. Keep in sync with processSamples: only the
+        shaping step differs (the dry path, Downsample hold, filters, mix and gain are the same). */
+    void processSamplesCustom (float* l, float* r, int n) noexcept
+    {
+        float* chans[] = { l, r };
+        const bool adaa = mode != Downsample && mode != Bitcrush && ! rawMode;
+        const Src now { customActive, curFront };
+        if (filterPos != 0) updateFilterCoefficients (filterCutoff.getCurrentValue());
+        for (int i = 0; i < n; ++i)
+        {
+            if ((i & 15) == 0) glideFilters();
+            const float d = drive.getNextValue() * (tailActive ? tailMul[(size_t) (i / osFactor)] : 1.0f);
+            const float off = offset.getNextValue(), chr = character.getNextValue();
+            const float sp = spatial.getNextValue(), m = mix.getNextValue(), og = outGain.getNextValue();
+            if (filterPos != 0 && filterCutoff.isSmoothing()) updateFilterCoefficients (filterCutoff.getNextValue());
+
+            const float driveSpread = 1.0f + 0.6f * sp, offsetSpread = 0.3f * sp;
+            const float fadeGain = fadeLeft > 0 ? 1.0f - (float) fadeLeft / (float) fadeLen : 1.0f;
+            for (int ch = 0; ch < 2; ++ch)
+            {
+                const float in = chans[ch][i];
+                const float chDrive  = ch == 0 ? d * driveSpread : d / driveSpread;
+                const float chOffset = ch == 0 ? off + offsetSpread : off - offsetSpread;
+                auto& pm = phase[ch];
+                float dry = in;
+                if (settings.enabled)
+                {
+                    if (loActive) dry = pm.allpassLo (dry);
+                    if (hiActive) dry = pm.allpassHi (dry);
+                    if (adaa)     dry = pm.halfSample (dry);
+                }
+                float w = loActive ? pm.lowPassLR2 (in) : in;
+                if (filterPos == 1) w = runFilter (ch, w);
+                if (mode == Downsample)
+                {
+                    if (--holdCount[(size_t) ch] <= 0)
+                    {
+                        holdValue[(size_t) ch] = w;
+                        holdCount[(size_t) ch] = juce::jmax (1, (int) (downsampleHold * (ch == 0 ? 1.0f : 1.0f + 0.15f * sp)));
+                    }
+                    w = holdValue[(size_t) ch];
+                }
+                float y = shapeSrc (now, ch, w, chDrive, chOffset, chr, adaa, adaaPrevF);
+                if (fadeLeft > 0)
+                {
+                    const float yOld = shapeSrc (fadeFrom, ch, w, chDrive, chOffset, chr, adaa, adaaPrevFOld);
+                    y = yOld + (y - yOld) * fadeGain;
+                }
+                adaaPrev[(size_t) ch] = (double) w * (mode == Downsample ? 1.0f : chDrive) + chOffset;
+                w = y;
+                if (filterPos == 2) w = runFilter (ch, w);
+                if (hiActive)    w = pm.highPassLR2 (w);
+                if (shelfActive) w = shelf[ch].process (w);
+                chans[ch][i] = (dry + m * (w - dry)) * og;
+            }
+            if (fadeLeft > 0) --fadeLeft;
+        }
+    }
+
+    CustomCurveBank customBank;
+    int curFront = 0, curPrev = 1;
+    bool customActive = false;
+    std::atomic<bool> customActiveFlag { false };
+    Src fadeFrom;
+    int fadeLeft = 0, fadeLen = 1;
+    float customFadeMs = 5.0f;
+    std::array<double, 2> adaaPrevFOld { 0.0, 0.0 };
 
     double baseRate = 44100.0;
     std::array<std::unique_ptr<StereoOversampling>, 4> oversamplers;

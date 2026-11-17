@@ -160,7 +160,7 @@ static void writeWav (const juce::AudioBuffer<float>& b, const juce::File& f)
 }
 
 static void snapshot (CodexProcessor& proc, const juce::AudioBuffer<float>& audio, const juce::File& png, int tab = 0, int overlay = 0,
-                      float windowScale = 1.0f, float pixelScale = 2.0f)
+                      float windowScale = 1.0f, float pixelScale = 2.0f, std::function<void (juce::Component&)> prepare = {})
 {
     std::unique_ptr<juce::AudioProcessorEditor> editor (proc.createEditor());
     if (auto* hk = dynamic_cast<CodexEditor*> (editor.get()))
@@ -172,6 +172,7 @@ static void snapshot (CodexProcessor& proc, const juce::AudioBuffer<float>& audi
         if (overlay == 3) hk->getView().openBrowser();
         if (overlay == 4) hk->getView().openGuide();
     }
+    if (prepare) prepare (*editor);
     // feed analyzer + tuner with the tail of a kick
     for (int i = 0; i < 6; ++i)
     {
@@ -187,6 +188,8 @@ static void snapshot (CodexProcessor& proc, const juce::AudioBuffer<float>& audi
     juce::FileOutputStream os (png);
     juce::PNGImageFormat().writeImageToStream (img, os);
 }
+
+#include "RenderCustomCurve.h"
 
 int main (int argc, char** argv)
 {
@@ -204,6 +207,12 @@ int main (int argc, char** argv)
     // Key Mode defaults to Follow MIDI; every check below plays MIDI note 60 and expects the selected key (F1)
     setParam (proc, ID::keyMode, 0.0f);
 
+    if (std::getenv ("CODEX_CURVE_ONLY") != nullptr)   // quick run: the custom curve maths and seeding only
+    {
+        const int bad = customCurveUnitTests();
+        std::cout << "\n" << (bad == 0 ? "CURVE CHECKS PASSED" : juce::String (bad) + " CURVE CHECK(S) FAILED") << "\n";
+        return bad == 0 ? 0 : 2;
+    }
     if (std::getenv ("CODEX_UI_SCALES") != nullptr)
     {
         // Screenshot mode: every tab and overlay at several window scales (and 100 % at 2x pixels) into outDir/scales
@@ -211,6 +220,13 @@ int main (int argc, char** argv)
         dir.createDirectory();
         proc.presets.loadPreset (10); // 909 Rawstyle
         setParam (proc, ID::cmp ("On"), 1.0f); setParam (proc, ID::sat ("On"), 1.0f); setParam (proc, ID::spc ("On"), 1.0f);
+        // Distortion 2 plays a custom curve (seed + starter), so every tab1 image shows the curve editor
+        {
+            auto c2 = CurveSeed::starter (CurveSeed::WarmTube, juce::jmax (2.0f, proc.seedCustomCurve (2).reach));
+            c2.setBend (1, 0.5f);
+            proc.getCustomCurves().set (2, &c2, nullptr);
+            setParam (proc, ID::clip (2, "Cust"), 1.0f);
+        }
         const auto audio = render (proc, 1);
         const std::pair<float, float> scales[] = { { 0.6f, 1.0f }, { 0.75f, 1.0f }, { 1.0f, 1.0f }, { 1.5f, 1.0f }, { 2.0f, 1.0f }, { 1.0f, 2.0f } };
         const char* overlays[] = { "about", "save", "browser", "guide" };
@@ -221,6 +237,12 @@ int main (int argc, char** argv)
                 snapshot (proc, audio, dir.getChildFile ("tab" + juce::String (tab) + suffix), tab, 0, s, px);
             for (int o = 0; o < 4; ++o)
                 snapshot (proc, audio, dir.getChildFile (overlays[o] + suffix), 0, o + 1, s, px);
+            // both units with custom curves (unit 1: bends and a hovered point)
+            juce::MemoryBlock keep;
+            proc.getStateInformation (keep);
+            setupCustomCurvesForScreenshots (proc);
+            snapshot (proc, audio, dir.getChildFile ("dist_custom" + suffix), 1, 0, s, px, [] (juce::Component& e) { hoverCustomPoint (e); });
+            proc.setStateInformation (keep.getData(), (int) keep.getSize());
         }
         std::cout << "UI scale screenshots written to " << dir.getFullPathName() << "\n";
         return 0;
@@ -1105,6 +1127,10 @@ int main (int argc, char** argv)
         }
         std::cout << "\nClick audit: " << tested << " parameters jumped mid-note, " << (int) clicky.size() << " clicked\n";
         failures += (int) clicky.size();
+        std::cout << "Click audit, custom distortion curves (mid-note):\n";
+        const int curveClicks = customCurveClickAudit (proc, setup, curvature);
+        std::cout << "Click audit, custom curves: " << curveClicks << " clicked\n";
+        failures += curveClicks;
         proc.presets.loadPreset (0);
     }
 
@@ -1846,6 +1872,11 @@ int main (int argc, char** argv)
         setParam (proc, ID::sat ("On"), 0.0f);
     }
 
+    // ---- Custom distortion curves ----
+    failures += customCurveUnitTests();
+    failures += customCurveProcessorTests (outDir);
+    failures += customCurveRealtimeTests();
+
     // ---- State round trip ----
     proc.presets.loadPreset (9);
     juce::MemoryBlock state;
@@ -1878,6 +1909,11 @@ int main (int argc, char** argv)
         }
     }
     snapshot (proc, render (proc, 1), outDir.getChildFile ("ui_distortion_filter_xshaper.png"), 1);
+    // custom curves: unit 1 symmetric with bends (a point hovered), unit 2 an asymmetric starter
+    proc.presets.loadPreset (10);
+    setupCustomCurvesForScreenshots (proc);
+    snapshot (proc, render (proc, 1), outDir.getChildFile ("ui_distortion_custom.png"), 1, 0, 1.0f, 2.0f, [] (juce::Component& e) { hoverCustomPoint (e); });
+    proc.presets.loadPreset (10);
     proc.presets.loadPreset (7);  // 909 Clean: both distortions bypassed
     snapshot (proc, render (proc, 1), outDir.getChildFile ("ui_distortion_bypassed.png"), 1);
     {
@@ -2038,11 +2074,16 @@ int main (int argc, char** argv)
         juce::StringArray offenders;
         auto report = [&] (juce::Component* c, const char* when)
         {
+            // The test window itself focused: X gives the window focus back when a popup menu window closes, and the
+            // policy hands it back asynchronously (as in a host). Only a focus that stays counts for the window.
+            if (focusedInEditor() == top) pump (40);
             if (auto* f = focusedInEditor())
             {
                 ++focusEvents;
                 if (offenders.size() < 6)
-                    offenders.add (juce::String (when) + " " + typeid (*c).name() + " -> focus on " + typeid (*f).name());
+                    offenders.add (juce::String (when) + " " + typeid (*c).name()
+                                   + (dynamic_cast<juce::Button*> (c) != nullptr ? " \"" + dynamic_cast<juce::Button*> (c)->getButtonText() + "\"" : juce::String())
+                                   + " -> focus on " + typeid (*f).name());
                 f->giveAwayKeyboardFocus();
             }
         };
@@ -2173,6 +2214,10 @@ int main (int argc, char** argv)
         resetKey (proc);
         failures += bad;
     }
+
+    // ---- Custom curve editor driven with the mouse (the keyboard-focus rules hold here too) ----
+    failures += customCurveGuiTest (proc);
+    resetKey (proc);
 
     {
         // Resized window (75 %)

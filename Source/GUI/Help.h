@@ -5,6 +5,19 @@
 /** Tooltip text for every parameter: "Title: explanation". */
 namespace Help
 {
+    /** Tooltip of the transfer display while it shows a custom curve. */
+    inline juce::String customCurveEditor()
+    {
+        return "Custom curve: drag points (Shift: fine), drag the diamonds / Alt-drag / wheel to bend, double-click to add or delete, "
+               "Ctrl-click or right-click for corners, right-click for shapes and Sym / Asym. Pencil: draw freehand.";
+    }
+    /** Tooltip of the transfer display while it shows the Type's own curve. */
+    inline juce::String customCurveStart()
+    {
+        return "Transfer curve of this unit. Drag on the curve, double-click or use the pencil to draw your own custom curve "
+               "(it starts from this Type's shape, so the sound only changes by what you draw). Right-click for starter shapes.";
+    }
+
     inline juce::String forParameter (const juce::String& id)
     {
         static const std::map<juce::String, juce::String> tips {
@@ -132,7 +145,8 @@ namespace Help
             const auto sfx = id.substring (2);
             static const std::map<juce::String, juce::String> dist {
                 { "On",     "Distortion On/Off: Bypass this distortion stage." },
-                { "Mode",   "Type: base distortion curve. Hard Clip, Fuzz and Diode 2 are aggressive, Soft Clip / Tanh / Overdrive are smoother, Tube and Diode are asymmetric, Folds and Rectify add extra harmonics, Zero-Square is hollow and gritty, Downsample reduces the sample rate (Drive sets the amount), X-Shaper lets you draw the curve (Asym: both halves separately)." },
+                { "Mode",   "Type: base distortion curve. Hard Clip, Fuzz and Diode 2 are aggressive, Soft Clip / Tanh / Overdrive are smoother, Tube and Diode are asymmetric, Folds and Rectify add extra harmonics, Zero-Square is hollow and gritty, Downsample reduces the sample rate (Drive sets the amount), X-Shaper lets you draw the curve (Asym: both halves separately). Draw on the display to turn any Type into a custom curve." },
+                { "Cust",   "Custom Curve: plays your drawn curve instead of the Type's shape (the Type still sets the Downsample / Bitcrush behaviour). Only this switch is automatable; the points are saved with the project and presets." },
                 { "Drive",  "Drive: How hard the signal hits the distortion curve." },
                 { "Boost",  "Boost: Extra input gain on both the dry and the distorted signal." },
                 { "Char",   "Characteristic: Morphs the curve from its normal shape (0 %) towards a square wave (100 %) for extreme distortion." },
@@ -157,7 +171,7 @@ namespace Help
             if (auto it = dist.find (sfx); it != dist.end())
                 return it->second;
             if (sfx.startsWith ("XP") || sfx.startsWith ("XN"))
-                return "X-Shaper point: one point of the drawable shaper curve (used by the X-Shaper modes). Drag the points on the transfer display.";
+                return "X-Shaper point (legacy, automatable): one of the 8 fixed points per half of the X-Shaper Types' curve. Drag them on the transfer display. Separate from the free custom curve, whose points are not parameters.";
         }
 
         if (id == "eqMode" || id == "eq2Mode")

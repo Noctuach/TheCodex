@@ -63,6 +63,9 @@ namespace ID
 
     // Clip stages: prefix "d1" / "d2" + suffix
     inline juce::String clip (int stage, const char* suffix) { return "d" + juce::String (stage) + suffix; }
+    // Custom distortion curves (not parameters): child "CURVES" of the state with one string property per stage ("c1", "c2")
+    inline const juce::Identifier curvesNode { "CURVES" };
+    inline juce::Identifier curveProp (int stage) { return stage == 1 ? juce::Identifier ("c1") : juce::Identifier ("c2"); }
     // EQ bands: "b1Freq" ... "b6Slope"
     inline juce::String band (int bandIndex, const char* suffix) { return "b" + juce::String (bandIndex + 1) + suffix; }
     // Two equalisers: EQ 1 (between the distortions) uses "b1Freq" ..., EQ 2 (post, before Space) uses "q1Freq" ...

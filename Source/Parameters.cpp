@@ -328,5 +328,10 @@ AudioProcessorValueTreeState::ParameterLayout Params::createLayout()
     addFloat (l, ID::clipCeiling, "Output Clipper Ceiling", { -12.0f, 0.0f, 0.01f }, -0.3f, dbText);
     addFloat (l, ID::clipSoft, "Output Clipper Softness", { 0.0f, 1.0f }, 0.3f, pctText);
 
+    // Custom distortion curves: appended last so every existing parameter keeps its index. Only the on/off switch is a
+    // parameter; the drawn points live in the plug-in state (see CustomCurveStore).
+    for (int stage = 1; stage <= 2; ++stage)
+        addBool (l, ID::clip (stage, "Cust"), "Dist " + String (stage) + " Custom Curve", false);
+
     return l;
 }

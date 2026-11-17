@@ -11,6 +11,7 @@ All notable changes to Codex. Versions follow [Semantic Versioning](https://semv
 - Module order: drag the chips in the tab bar to reorder Space, Distortion 1, EQ 1, Distortion 2, Saturation, Compressor and EQ 2 (click a chip to open it, right-click for Modern / Classic). Reordering fades for 6 ms so it never clicks, and the order is saved with sessions, presets, A/B and undo.
 - New default order (Modern): Space first, so the distortions build the reverb into the tail. Old sessions and user presets keep the Classic order (Space last) and sound unchanged.
 - Preset "Reverb-First Rawstyle".
+- Custom distortion curves: draw your own transfer curve in any distortion Type. Free points, bends, smooth and sharp corners, pencil, starter shapes, symmetric or asymmetric. The curve is seeded from the current Type, so it sounds the same until you change it. Saved with projects, presets, undo and A/B. 'Dist N Custom Curve' switches it and can be automated; curve edits mark the host project as modified. Edits while playing are crossfaded. Existing X-Shaper projects sound the same.
 
 ### Fixed
 - The DAW's computer keyboard (typing keyboard to MIDI, transport, shortcuts) keeps working after you click in Codex.
