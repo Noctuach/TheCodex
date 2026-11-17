@@ -162,6 +162,9 @@ namespace comp
         }
 
         int getLatencyInSamples() const { return settings.enabled ? lookSamples : 0; }
+        /** The Linkwitz-Riley (24 dB/oct) crossovers in the signal path now (for the sub layer's phase match). */
+        int getNumActiveCrossovers() const noexcept { return settings.enabled ? juce::jlimit (1, maxBands, settings.numBands) - 1 : 0; }
+        float getCrossover (int j) const noexcept { return lastXf[(size_t) j]; }
 
         void setSettings (const Settings& s)
         {

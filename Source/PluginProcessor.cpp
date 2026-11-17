@@ -109,6 +109,9 @@ void CodexProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     subDelay.assign ((size_t) (sampleRate * 1.6) + 1, 0.0f);
     subDelayPos = 0;
     subLp1.reset(); subLp2.reset();
+    subFrac.set (false, 0.0);
+    subFrac.reset();
+    subMatch.prepare (sampleRate);
     subGain.reset (sampleRate, 0.02);
     for (auto* v : { &left, &right, &mid, &sub, &hitTime, &hitTime2 })
         v->assign ((size_t) chunkSize, 0.0f);
@@ -163,18 +166,28 @@ void CodexProcessor::processModule (int module, float* l, float* r, int n, float
     }
 }
 
-int CodexProcessor::chainLatency() const
+float CodexProcessor::chainLatency() const
 {
-    return juce::roundToInt (clip1.getLatencyInSamples() + clip2.getLatencyInSamples() + saturator.getLatencyInSamples()
-                             + compressor.getLatencyInSamples() + equalisers[0].getLatencyInSamples() + equalisers[1].getLatencyInSamples());
+    return clip1.getLatencyInSamples() + clip2.getLatencyInSamples() + saturator.getLatencyInSamples()
+           + (float) compressor.getLatencyInSamples() + equalisers[0].getLatencyInSamples() + equalisers[1].getLatencyInSamples();
+}
+
+void CodexProcessor::updateSubPhaseMatch()
+{
+    using PM = subalign::PhaseMatch;
+    const int ns = saturator.getNumActiveCrossovers(), slope = saturator.getCrossoverSlope();
+    for (int j = 0; j < PM::satSections; ++j)
+        subMatch.setCrossover (j, j < ns, slope, saturator.getCrossover (j));
+    const int nc = compressor.getNumActiveCrossovers();
+    for (int j = 0; j < PM::compSections; ++j)
+        subMatch.setCrossover (PM::satSections + j, j < nc, 2, compressor.getCrossover (j));   // 24 dB/oct Linkwitz-Riley
+    subMatch.setDcFilter (PM::satDc, saturator.isEnabled());
 }
 
 void CodexProcessor::updateLatency()
 {
-    const int latency = juce::roundToInt (clip1.getLatencyInSamples() + clip2.getLatencyInSamples()
-                                          + saturator.getLatencyInSamples() + compressor.getLatencyInSamples()
-                                          + equalisers[0].getLatencyInSamples() + equalisers[1].getLatencyInSamples()
-                                          + clipper.getLatencyInSamples());
+    // every stage's latency is fractional (oversamplers): only the total is rounded for the host
+    const int latency = juce::roundToInt (chainLatency() + clipper.getLatencyInSamples());
     // The host is told on the message thread (setLatencySamples notifies listeners and can lock);
     // when this already runs on the message thread (offline renders, tests) it is applied at once.
     // Only posts a message when the latency really changes: an always-on timer kept the plug-in's message queue
@@ -575,14 +588,36 @@ void CodexProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiB
             }
         }
 
-        // Clean sub layer, low-passed and delayed by the chain latency, added in mono
+        // Clean sub layer, low-passed and delayed by the chain latency, added in mono. The latency's fraction (the
+        // oversamplers') goes through a Thiran all-pass, and the sub gets the phase of the chain's crossovers
+        // (multiband saturator / compressor) and of the saturator's DC filter, so it lines up with the processed kick
+        // at 30-120 Hz. With a whole-sample latency and neither module on, both are skipped (the sub is exactly as
+        // before); while the sub layer is off nothing extra runs.
         {
-            const int delay = juce::jlimit (0, (int) subDelay.size() - 1, chainLatency());
             const int len = (int) subDelay.size();
+            const float latency = juce::jlimit (0.0f, (float) (len - 3), chainLatency());
+            int delay = juce::roundToInt (latency);
+            if (std::abs (latency - (float) delay) > 1.0e-4f)
+            {
+                // whole samples from the ring buffer, 0.5 .. 1.5 samples in the all-pass (where it is most accurate)
+                delay = (int) std::floor (latency);
+                double d = (double) latency - (double) delay;
+                if (d < 0.5 && delay >= 1) { --delay; d += 1.0; }
+                subFrac.set (true, d);
+            }
+            else
+                subFrac.set (false, 0.0);
+            updateSubPhaseMatch();
+            const bool silent = ! subGain.isSmoothing() && subGain.getTargetValue() == 0.0f;
+            if (silent) { subFrac.reset(); subMatch.snapAndClear(); }   // nothing is heard: no need to filter
+            const bool frac = subFrac.active && ! silent, match = ! silent && subMatch.isActive();
             for (int i = 0; i < n; ++i)
             {
                 subDelay[(size_t) subDelayPos] = subLp2.lp (subLp1.lp (sub[(size_t) i]));
-                const float s = subDelay[(size_t) ((subDelayPos - delay + len) % len)] * subGain.getNextValue();
+                float v = subDelay[(size_t) ((subDelayPos - delay + len) % len)];
+                if (frac)  v = subFrac.process (v);
+                if (match) v = subMatch.process (v);
+                const float s = v * subGain.getNextValue();
                 subDelayPos = (subDelayPos + 1) % len;
                 l[i] += s;
                 r[i] += s;

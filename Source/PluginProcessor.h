@@ -9,6 +9,7 @@
 #include "DSP/Compressor.h"
 #include "DSP/EqEngine.h"
 #include "DSP/OutputClipper.h"
+#include "DSP/SubPhaseMatch.h"
 #include "DSP/Chain.h"
 #include "PresetManager.h"
 #include "CustomCurveStore.h"
@@ -191,14 +192,19 @@ private:
     OutputClipper clipper;
     std::atomic<float> *clipOnParam = nullptr, *clipCeilParam = nullptr, *clipSoftParam = nullptr;
     std::vector<float> left, right, mid, sub, hitTime, hitTime2;
-    // Clean sub layer: delayed by the effect chain's latency so it stays phase-aligned with the kick
+    // Clean sub layer: delayed by the effect chain's latency (whole samples in the ring buffer, the fraction in a
+    // Thiran all-pass) and given the phase of the chain's crossovers, so it stays phase-aligned with the kick
     std::vector<float> subDelay;
     int subDelayPos = 0;
+    subalign::FractionalDelay subFrac;
+    subalign::PhaseMatch subMatch;
     space::OnePole subLp1, subLp2;
     juce::SmoothedValue<float> subGain;
     std::atomic<float> *subOnParam = nullptr, *subLevelParam = nullptr, *subLpParam = nullptr, *subFadeParam = nullptr,
                        *subPhaseParam = nullptr, *velocityParam = nullptr;
-    int chainLatency() const;
+    /** Latency of the effect chain (before the sub layer is added), fractional; the clipper's comes after it. */
+    float chainLatency() const;
+    void updateSubPhaseMatch();
     void processModule (int module, float* l, float* r, int n, float& latencySoFar);
 
     // Module order: switched while the chain is faded out (a few ms), so reordering never clicks

@@ -377,6 +377,12 @@ namespace sat
             return os != nullptr ? os->getLatencyInSamples() : 0.0f;
         }
 
+        /** The crossovers in the signal path now (for the sub layer's phase match): count, slope and frequencies
+            (gliding values). The 10 Hz DC filter runs whenever the unit is enabled. */
+        int getNumActiveCrossovers() const noexcept { return settings.enabled ? juce::jlimit (1, maxBands, settings.numBands) - 1 : 0; }
+        int getCrossoverSlope() const noexcept { return settings.slope; }
+        float getCrossover (int j) const noexcept { return lastXf[(size_t) j]; }
+
         float getAndResetBandPeak (int b) { return bandPeaks[(size_t) b].exchange (0.0f); }
 
         void process (float* left, float* right, int numSamples) noexcept

@@ -26,7 +26,8 @@ public:
         knee = juce::jlimit (0.0f, 1.0f, softness);
     }
 
-    int getLatencyInSamples() const { return enabled && os != nullptr ? juce::roundToInt (os->getLatencyInSamples()) : 0; }
+    /** Fractional latency (base-rate samples): the processor rounds only the sum of every stage's latency. */
+    float getLatencyInSamples() const { return enabled && os != nullptr ? os->getLatencyInSamples() : 0.0f; }
 
     /** Static curve for a signal normalised to the ceiling (|x| = 1 at the ceiling). */
     static float curve (float x, float softness) noexcept

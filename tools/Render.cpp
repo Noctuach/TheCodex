@@ -192,6 +192,7 @@ static void snapshot (CodexProcessor& proc, const juce::AudioBuffer<float>& audi
 #include "RenderCustomCurve.h"
 #include "RenderDistFixes.h"
 #include "RenderCompFixes.h"
+#include "RenderSubAlign.h"
 
 int main (int argc, char** argv)
 {
@@ -213,6 +214,12 @@ int main (int argc, char** argv)
     {
         const int bad = compressorFeedbackMakeupTests();
         std::cout << "\n" << (bad == 0 ? "COMP CHECKS PASSED" : juce::String (bad) + " COMP CHECK(S) FAILED") << "\n";
+        return bad == 0 ? 0 : 2;
+    }
+    if (std::getenv ("CODEX_SUB_ONLY") != nullptr)   // quick run: the latency sum and sub-layer alignment checks only
+    {
+        const int bad = latencyAndSubAlignTests();
+        std::cout << "\n" << (bad == 0 ? "SUB CHECKS PASSED" : juce::String (bad) + " SUB CHECK(S) FAILED") << "\n";
         return bad == 0 ? 0 : 2;
     }
     if (std::getenv ("CODEX_CURVE_ONLY") != nullptr)   // quick run: the custom curve maths and seeding only
@@ -1346,6 +1353,13 @@ int main (int argc, char** argv)
         const int distBad = distortionFixTests() + processorDistOffTest();
         std::cout << "\nDistortion offset seeding / off-unit transparency: " << (distBad == 0 ? "OK" : "FAILED") << "\n";
         failures += distBad;
+    }
+
+    // ---- Latency = rounded sum of fractional stage latencies; sub layer phase-aligned with the chain (see RenderSubAlign.h) ----
+    {
+        const int subBad = latencyAndSubAlignTests();
+        std::cout << "\nLatency / sub-layer alignment: " << (subBad == 0 ? "OK" : "FAILED") << "\n";
+        failures += subBad;
     }
 
     // ---- Distortion engine: aliasing per oversampling, resonant pre/post filter, X-Shaper, new modes ----

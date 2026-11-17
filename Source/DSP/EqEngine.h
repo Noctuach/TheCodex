@@ -240,11 +240,13 @@ namespace eq
             }
         }
 
-        int getLatencyInSamples() const
+        /** Base-rate samples. Natural Phase uses JUCE's integer-latency compensation, so it is a whole number already
+            (returned unrounded: the processor rounds only the sum of every stage's latency). */
+        float getLatencyInSamples() const
         {
-            if (mode == 1 && os) return juce::roundToInt (os->getLatencyInSamples());
-            if (mode == 2) return linear.getLatency();
-            return 0;
+            if (mode == 1 && os) return os->getLatencyInSamples();
+            if (mode == 2) return (float) linear.getLatency();
+            return 0.0f;
         }
 
         void process (float* l, float* r, int n) noexcept
