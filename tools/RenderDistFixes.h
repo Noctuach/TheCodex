@@ -1,6 +1,7 @@
 // Distortion regression checks for CodexRender (included by Render.cpp after its helpers):
 //  - no step after prepare() / reset() when Offset (or Spatial) is not 0 (ADAA history seeded at the operating point)
 //  - a switched-off unit is transparent: its DC filter does not run, and toggling it stays click-free
+//  - with Auto Gain on, toggling On or Auto Gain stays click-free (the Auto Gain fades with the unit)
 #pragma once
 #include <complex>
 
@@ -176,6 +177,55 @@ static int distortionFixTests()
             const float step = maxStep (b, half - 2048);
             std::cout << "  " << (variant == 0 ? "OS Off, " : "OS 4x + filters, ") << juce::String (t.name).paddedRight (' ', 14) << " largest step " << step << " (input " << inStep << ")\n";
             check (step < 4.0f * inStep, juce::String (variant == 0 ? "OS Off " : "OS 4x + filters ") + t.name + ": click on toggle");
+        }
+    }
+
+    // ---- 4. Toggling On (or Auto Gain) with Auto Gain on stays click-free (the Auto Gain fades with the unit) ----
+    {
+        std::cout << "\nDistortion: On / Auto Gain toggles with Auto Gain on, Tanh 18 dB (largest sample step vs steady state)\n";
+        const int n = (int) (sr * 4.5);
+        const auto in = sine (sr, 40.0f, 0.5f, n);
+        auto maxStep = [] (const juce::AudioBuffer<float>& b, int from, int to)
+        {
+            float m = 0.0f;
+            for (int ch = 0; ch < 2; ++ch)
+                for (int i = from + 1; i < to; ++i) m = std::max (m, std::abs (b.getSample (ch, i) - b.getSample (ch, i - 1)));
+            return m;
+        };
+        // events at 3.0 s and 3.5 s (block boundaries); the Auto Gain has settled (well below 1) by then
+        const int t1 = ((int) (sr * 3.0) / 256) * 256, t2 = ((int) (sr * 3.5) / 256) * 256;
+        struct Seq { const char* name; bool on1, ag1, on2, ag2; };
+        const Seq seqs[] = { { "On -> Off -> On", false, true, true, true },
+                             { "Auto Gain off -> on", true, false, true, true } };
+        for (int os : { 0, 2 })
+        {
+            ClipDistortion::Settings st; st.mode = ClipDistortion::Tanh; st.driveDb = 18.0f; st.oversampling = os; st.autoGain = true;
+            auto render = [&] (const Seq* q, bool autoGain = true)
+            {
+                auto s0 = st; s0.autoGain = autoGain;
+                ClipDistortion d; d.prepare (sr, 256); d.setSettings (s0); d.reset(); d.setSettings (s0);
+                auto b = in;
+                for (int p = 0; p < n; p += 256)
+                {
+                    if (q != nullptr && p == t1) { s0.enabled = q->on1; s0.autoGain = q->ag1; d.setSettings (s0); }
+                    if (q != nullptr && p == t2) { s0.enabled = q->on2; s0.autoGain = q->ag2; d.setSettings (s0); }
+                    d.process (b.getWritePointer (0, p), b.getWritePointer (1, p), std::min (256, n - p));
+                }
+                return b;
+            };
+            const auto steady = render (nullptr);
+            const float onStep = maxStep (steady, (int) sr * 2, n);                        // On, Auto Gain on
+            const float noAgStep = maxStep (render (nullptr, false), (int) sr * 2, n);     // On, Auto Gain off (louder wet)
+            const float inStep = maxStep (in, 0, n);                                        // Off
+            for (const auto& q : seqs)
+            {
+                const auto b = render (&q);
+                const float step = maxStep (b, t1 - 2048, n);
+                const float limit = 1.5f * std::max ({ onStep, inStep, q.ag1 ? 0.0f : noAgStep });   // steady states it passes through
+                std::cout << "  OS " << ClipDistortion::oversamplingNames()[os] << ", " << juce::String (q.name).paddedRight (' ', 20)
+                          << " largest step " << step << " (limit " << limit << ")\n";
+                check (step < limit, juce::String ("Auto Gain, OS ") + ClipDistortion::oversamplingNames()[os] + ", " + q.name + ": click on toggle");
+            }
         }
     }
     return bad;

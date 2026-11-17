@@ -117,6 +117,7 @@ public:
         }
         dcR = (float) std::exp (-juce::MathConstants<double>::twoPi * 10.0 / sr);
         dcAmount.reset (sr, 0.02);   // the DC filter fades in / out over 20 ms when the unit (or its DC switch) toggles
+        agAmount.reset (sr, 0.02);   // Auto Gain fades in / out over 20 ms with the unit (or its Auto Gain switch)
         activeOs = -1;           // force (re)configuration
         applySettings (true);
         reset();
@@ -200,22 +201,30 @@ public:
 
         // Auto Gain: slow (about 1 s) mean-square trackers of the unit's input and output; the output is scaled so its
         // long-term level matches the input (times the Output knob). Slow enough not to squash the punch within a hit.
-        if (settings.autoGain && settings.enabled)
+        // Switching the unit or Auto Gain fades the gain in / out with the wet (20 ms); the trackers only run while
+        // both are on (a fading-out gain is frozen).
+        const bool agTrack = settings.autoGain && settings.enabled;
+        if (agTrack || agAmount.isSmoothing())
         {
             const float target = juce::Decibels::decibelsToGain (settings.outDb);
+            const bool fading = agAmount.isSmoothing();
             for (int i = 0; i < numSamples; ++i)
             {
-                const float inMs = 0.5f * (autoIn[(size_t) i] * autoIn[(size_t) i]);
-                const float outMs = 0.5f * (left[i] * left[i] + right[i] * right[i]) * 0.5f;
-                msIn += autoCoef * (inMs - msIn);
-                msOut += autoCoef * (outMs - msOut);
-                if (msIn > 1.0e-7f && msOut > 1.0e-9f)
+                if (agTrack)
                 {
-                    const float want = juce::jlimit (0.06f, 16.0f, std::sqrt (msIn / msOut) * target);
-                    autoGainNow += 0.0005f * (want - autoGainNow);
+                    const float inMs = 0.5f * (autoIn[(size_t) i] * autoIn[(size_t) i]);
+                    const float outMs = 0.5f * (left[i] * left[i] + right[i] * right[i]) * 0.5f;
+                    msIn += autoCoef * (inMs - msIn);
+                    msOut += autoCoef * (outMs - msOut);
+                    if (msIn > 1.0e-7f && msOut > 1.0e-9f)
+                    {
+                        const float want = juce::jlimit (0.06f, 16.0f, std::sqrt (msIn / msOut) * target);
+                        autoGainNow += 0.0005f * (want - autoGainNow);
+                    }
                 }
-                left[i] *= autoGainNow;
-                right[i] *= autoGainNow;
+                const float g = fading ? 1.0f + agAmount.getNextValue() * (autoGainNow - 1.0f) : autoGainNow;
+                left[i] *= g;
+                right[i] *= g;
             }
         }
         // DC filter: only while the unit is on and its DC switch is on, so a switched-off unit is transparent at low
@@ -407,6 +416,7 @@ private:
         setTarget (character, s.character, force || rateChanged);
         setTarget (spatial, s.spatial, force || rateChanged);
         setTarget (dcAmount, s.enabled && s.dcFilter ? 1.0f : 0.0f, force);   // runs at the base rate: an OS change does not snap it
+        setTarget (agAmount, s.enabled && s.autoGain ? 1.0f : 0.0f, force);   // base rate too
         if (force && ! (s.enabled && s.dcFilter)) { dcX = { 0.0f, 0.0f }; dcY = { 0.0f, 0.0f }; }
         setTarget (filterCutoff, juce::jlimit (20.0f, (float) (rate * 0.45), s.filterHz), force || rateChanged);
         filterPos = s.enabled || mix.isSmoothing() ? s.filterPos : 0;   // see process(): kept while the wet fades out
@@ -875,6 +885,7 @@ private:
 
     float dcR = 0.999f;
     std::array<float, 2> dcX { 0.0f, 0.0f }, dcY { 0.0f, 0.0f };
+    juce::SmoothedValue<float> agAmount { 0.0f };   // 1 = Auto Gain fully applied, 0 = unity (unit or Auto Gain off)
     juce::SmoothedValue<float> dcAmount { 1.0f };   // 1 = DC filter fully in, 0 = out (not running)
     std::atomic<float> inPeak { 0.0f }, outPeak { 0.0f };
 };
