@@ -26,6 +26,9 @@ public:
         knee = juce::jlimit (0.0f, 1.0f, softness);
     }
 
+    /** Fault recovery (audio thread, allocation-free): clears the oversampler's filter state. */
+    void clearState() noexcept { if (os != nullptr) os->reset(); }
+
     /** Fractional latency (base-rate samples): the processor rounds only the sum of every stage's latency. */
     float getLatencyInSamples() const { return enabled && os != nullptr ? os->getLatencyInSamples() : 0.0f; }
 

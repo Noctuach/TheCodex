@@ -34,6 +34,8 @@ public:
         if (b1 > 0) std::copy (buffer.begin() + s1, buffer.begin() + s1 + b1, dest);
         if (b2 > 0) std::copy (buffer.begin() + s2, buffer.begin() + s2 + b2, dest + b1);
         fifo.finishedRead (b1 + b2);
+        for (int i = 0; i < b1 + b2; ++i)   // reader side: a non-finite sample (cut by the output guard) must not stick in a display
+            if (! std::isfinite (dest[i])) dest[i] = 0.0f;
         return b1 + b2;
     }
 
@@ -84,6 +86,10 @@ public:
     double getCpuLoad() const { return loadMeasurer.getLoadAsProportion(); }
     OutputClipper& getClipper() { return clipper; }
     std::atomic<bool> safetyTripped { false };   // set if a non-finite sample was ever replaced (diagnostics)
+    std::atomic<int> safetyRecoveries { 0 };     // how often the guard reset the DSP state after a non-finite sample
+    /** Tests only: the next processed chunk gets a NaN at this sample of its voice signal (before every effect), as a
+        fault inside the chain would put one there (not called by the plug-in). */
+    void injectNonFiniteForTesting (int sampleInChunk) noexcept { nanTestSample.store (juce::jlimit (0, chunkSize - 1, sampleInChunk)); }
     /** True when every filter is ready (linear-phase EQ filters built and installed); used before offline renders. */
     bool isSettled() const { return equalisers[0].isLinearUpToDate() && equalisers[1].isLinearUpToDate(); }
 
@@ -149,6 +155,9 @@ public:
 
 private:
     void updateParameters();
+    /** Audio thread: a non-finite sample reached the output guard. Clears the DSP state of every module that can hold
+        it (allocation- and lock-free) and starts a short fade-in, so the plug-in plays on instead of staying silent. */
+    void recoverFromNonFinite() noexcept;
     void handleMidi (const juce::MidiMessage&, int positionInChunk);
     void startScope();
     void feedScope (float left, float right) noexcept;
@@ -158,6 +167,11 @@ private:
     std::atomic<int> lastFollowKey { -1 };   // key index of the last Follow MIDI note (audio thread writes, GUI reads); -1 = none yet
 
     static constexpr int chunkSize = 256;
+    // Non-finite guard: every parameter's raw value with a finite fallback (its default), checked once per block, so a
+    // NaN / inf a host or a damaged state sends never reaches the DSP. Built in the constructor (no audio-thread allocation).
+    std::vector<std::pair<std::atomic<float>*, float>> paramGuard;
+    float recoverFade = 1.0f;   // < 1: fading back in after a recovery
+    std::atomic<int> nanTestSample { -1 };
 
     KickVoice voice;
     ClipDistortion clip1, clip2;

@@ -94,6 +94,11 @@ CodexProcessor::CodexProcessor()
     }
 
     undoManager.clearUndoHistory(); // start with a clean history
+
+    for (auto* prm : getParameters())
+        if (auto* ranged = dynamic_cast<juce::RangedAudioParameter*> (prm))
+            if (auto* raw = apvts.getRawParameterValue (ranged->getParameterID()))
+                paramGuard.emplace_back (raw, ranged->convertFrom0to1 (ranged->getDefaultValue()));
 }
 
 bool CodexProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
@@ -113,6 +118,7 @@ void CodexProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     subFrac.reset();
     subMatch.prepare (sampleRate);
     subGain.reset (sampleRate, 0.02);
+    recoverFade = 1.0f;
     for (auto* v : { &left, &right, &mid, &sub, &hitTime, &hitTime2 })
         v->assign ((size_t) chunkSize, 0.0f);
     scopePos = -1;
@@ -164,6 +170,25 @@ void CodexProcessor::processModule (int module, float* l, float* r, int n, float
         }
         default: break;
     }
+}
+
+void CodexProcessor::recoverFromNonFinite() noexcept
+{
+    // every reset below only clears state (fills / assignments): no allocation, no lock
+    voice.recoverIfNonFinite();
+    clip1.clearState();
+    clip2.clearState();
+    for (auto& e : equalisers) e.clearState();
+    saturator.reset();
+    reverb.reset();
+    compressor.clearState();
+    clipper.clearState();
+    subLp1.reset(); subLp2.reset();
+    std::fill (subDelay.begin(), subDelay.end(), 0.0f);
+    subFrac.reset();
+    subMatch.clearState();
+    recoverFade = 0.0f;
+    safetyRecoveries.fetch_add (1, std::memory_order_relaxed);
 }
 
 float CodexProcessor::chainLatency() const
@@ -310,6 +335,11 @@ void CodexProcessor::beginCustomEdit (int stage, const juce::String& transaction
 
 void CodexProcessor::updateParameters()
 {
+    // a non-finite parameter value (from the host or a damaged state) falls back to the parameter's default
+    for (auto& [raw, fallback] : paramGuard)
+        if (! std::isfinite (raw->load (std::memory_order_relaxed)))
+            raw->store (fallback);
+
     KickVoice::Settings s;
     s.engine           = (int) engine->load();
     s.model909         = (int) model909->load();
@@ -552,6 +582,11 @@ void CodexProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiB
             voice.render (l + pos, next - pos);
             pos = next;
         }
+        if (nanTestSample.load (std::memory_order_relaxed) >= 0)   // tests only (injectNonFiniteForTesting)
+        {
+            const int at = nanTestSample.exchange (-1);
+            if (at >= 0 && at < n) l[at] = std::numeric_limits<float>::quiet_NaN();
+        }
         std::copy (l, l + n, r);
 
         // Effect modules in the user's order (Modern by default: Space -> Distortion 1 -> EQ 1 -> Distortion 2 ->
@@ -634,11 +669,31 @@ void CodexProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiB
 
         // Safety guard (always on, far above any musical level): never pass NaN / inf, never exceed +18 dBFS
         constexpr float safetyCeiling = 7.94f;
+        bool nonFinite = false;
         for (int i = 0; i < n; ++i)
         {
-            if (! std::isfinite (l[i]) || ! std::isfinite (r[i])) { l[i] = r[i] = 0.0f; safetyTripped.store (true); continue; }
+            if (! std::isfinite (l[i]) || ! std::isfinite (r[i])) { l[i] = r[i] = 0.0f; nonFinite = true; continue; }
             l[i] = juce::jlimit (-safetyCeiling, safetyCeiling, l[i]);
             r[i] = juce::jlimit (-safetyCeiling, safetyCeiling, r[i]);
+        }
+        // after a recovery: 10 ms raised-cosine fade-in (the cleared filters restart from silence without a click)
+        if (recoverFade < 1.0f)
+        {
+            const float step = (float) (1.0 / (0.010 * getSampleRate()));
+            for (int i = 0; i < n; ++i)
+            {
+                recoverFade = std::min (1.0f, recoverFade + step);
+                const float g = 0.5f - 0.5f * std::cos (juce::MathConstants<float>::pi * recoverFade);
+                l[i] *= g;
+                r[i] *= g;
+            }
+        }
+        // a non-finite sample means some state in the chain is non-finite and would stay so: clear it at the end of
+        // this chunk, so the next one plays again (fading in)
+        if (nonFinite)
+        {
+            safetyTripped.store (true);
+            recoverFromNonFinite();
         }
 
         for (int i = 0; i < n; ++i)

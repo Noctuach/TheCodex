@@ -136,6 +136,17 @@ public:
         fadeLeft = 0;
     }
 
+    /** Fault recovery (audio thread, allocation-free): reset() plus the Auto Gain trackers if they went non-finite
+        (finite ones are kept, so the unit's level does not jump) and the meters. Only clears state. */
+    void clearState() noexcept
+    {
+        reset();
+        if (! std::isfinite (msIn) || ! std::isfinite (msOut)) msIn = msOut = 0.0f;
+        if (! std::isfinite (autoGainNow)) autoGainNow = 1.0f;
+        inPeak.store (0.0f);
+        outPeak.store (0.0f);
+    }
+
     /** Latency in base-rate samples for the current oversampling setting. */
     float getLatencyInSamples() const
     {
@@ -402,7 +413,10 @@ private:
         filterType = s.filterType;
         // resonance 0..1 -> Q 0.5 .. 18 (quadratic, so most of the knob is musical)
         filterK = 1.0f / (0.5f + 17.5f * s.filterRes * s.filterRes);
-        // the resonant peak is Q (= 1/k); scale it so full resonance peaks around +12 dB
+        // Resonance compensation: the 12 dB low- / high-pass peaks at Q / sqrt (1 - 1 / (4 Q^2)) (about Q = 1/k for
+        // Q >> 1), and resComp = 1 / sqrt (max (1, Q) / 4 + 0.75) scales that down, so the peak is about
+        // Q / sqrt (Q / 4 + 0.75): +17.9 dB at full resonance (Q 18: 18.007 x 0.43644 = 7.859), +2.2 dB at the default
+        // resonance 0.2 (Q 1.2). The presets are tuned to this level (pinned by CodexRender; change it deliberately).
         resComp = 1.0f / std::sqrt (juce::jmax (1.0f, 1.0f / filterK) / 4.0f + 0.75f);
         if (! (s.curve == curve) || ! curveTableBuilt || s.mode != mode)
         {

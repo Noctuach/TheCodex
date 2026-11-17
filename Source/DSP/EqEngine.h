@@ -260,6 +260,14 @@ namespace eq
             os->processSamplesDown (block);
         }
 
+        /** Fault recovery (audio thread, allocation-free): clears every filter / oversampler / convolver history. */
+        void clearState() noexcept
+        {
+            zeroLatency.reset(); natural.reset();
+            if (os) os->reset();
+            linear.resetHistory();
+        }
+
         bool isLinearUpToDate() const { return mode != 2 || linear.isUpToDate(); }
         bool isLinearBuildReadyForTesting() const { return mode != 2 || linear.isBuildReadyForTesting(); }
         int getMode() const { return mode; }

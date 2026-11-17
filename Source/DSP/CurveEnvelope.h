@@ -39,6 +39,7 @@ public:
     }
 
     void reset() { stage = Stage::Idle; level = 0.0f; t = 0.0f; }
+    bool isFinite() const noexcept { return std::isfinite (level) && std::isfinite (startLevel) && std::isfinite (t); }
 
     bool isActive() const noexcept { return stage != Stage::Idle; }
     Stage getStage() const noexcept { return stage; }

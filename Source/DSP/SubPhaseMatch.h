@@ -104,6 +104,13 @@ namespace subalign
             }
         }
 
+        /** Fault recovery: forgets every section's filter history (fades and designs are kept). */
+        void clearState() noexcept
+        {
+            for (auto& s : sections)
+                for (auto& f : s.f) { f.s1 = f.s2 = 0.0; }
+        }
+
         inline float process (float x) noexcept
         {
             if (++glideCount >= glideEvery) { glideCount = 0; glide(); }

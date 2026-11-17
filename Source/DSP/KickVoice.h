@@ -79,6 +79,19 @@ public:
         currentNote = -1;
     }
 
+    /** Fault recovery (audio thread, allocation-free): if any running state went non-finite (a non-finite parameter
+        reached the oscillator, for example), reset the voice; a finite voice is left alone, so the kick plays on. */
+    void recoverIfNonFinite() noexcept
+    {
+        const bool finite = std::isfinite (phase) && std::isfinite (baseFreq) && std::isfinite (subTime) && std::isfinite (hitClock)
+                            && std::isfinite (noteGain) && std::isfinite (clickEnv) && std::isfinite (pulseEnv) && std::isfinite (env909)
+                            && std::isfinite (fast909) && std::isfinite (slow909) && std::isfinite (hpState) && std::isfinite (hpPrevIn)
+                            && std::isfinite (velocityGain) && pitchEnv.isFinite() && ampEnv.isFinite();
+        if (finite) return;
+        reset();
+        baseFreq = 55.0; subTime = 0.0f; hitClock = 1.0e6f; noteGain = 1.0f; velocityGain = 1.0f;
+    }
+
     void setSettings (const Settings& s)
     {
         settings = s;

@@ -161,6 +161,13 @@ namespace comp
             for (auto& g : currentGr) g.store (0.0f);
         }
 
+        /** Fault recovery (audio thread, allocation-free): reset() plus the display meter accumulators. */
+        void clearState() noexcept
+        {
+            reset();
+            frameIn = frameOut = 0.0f;
+        }
+
         int getLatencyInSamples() const { return settings.enabled ? lookSamples : 0; }
         /** The Linkwitz-Riley (24 dB/oct) crossovers in the signal path now (for the sub layer's phase match). */
         int getNumActiveCrossovers() const noexcept { return settings.enabled ? juce::jlimit (1, maxBands, settings.numBands) - 1 : 0; }

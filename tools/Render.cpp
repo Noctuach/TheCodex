@@ -194,6 +194,7 @@ static void snapshot (CodexProcessor& proc, const juce::AudioBuffer<float>& audi
 #include "RenderCompFixes.h"
 #include "RenderSubAlign.h"
 #include "RenderRevFixes.h"
+#include "RenderNanFixes.h"
 
 int main (int argc, char** argv)
 {
@@ -227,6 +228,12 @@ int main (int argc, char** argv)
     {
         const int bad = reverbFixTests();
         std::cout << "\n" << (bad == 0 ? "REV CHECKS PASSED" : juce::String (bad) + " REV CHECK(S) FAILED") << "\n";
+        return bad == 0 ? 0 : 2;
+    }
+    if (std::getenv ("CODEX_NAN_ONLY") != nullptr)   // quick run: the non-finite recovery and filter resonance checks only
+    {
+        const int bad = nanRecoveryTests() + svfResonancePeakTest();
+        std::cout << "\n" << (bad == 0 ? "NAN CHECKS PASSED" : juce::String (bad) + " NAN CHECK(S) FAILED") << "\n";
         return bad == 0 ? 0 : 2;
     }
     if (std::getenv ("CODEX_CURVE_ONLY") != nullptr)   // quick run: the custom curve maths and seeding only
@@ -1361,6 +1368,13 @@ int main (int argc, char** argv)
         const int distBad = distortionFixTests() + processorDistOffTest();
         std::cout << "\nDistortion offset seeding / off-unit transparency: " << (distBad == 0 ? "OK" : "FAILED") << "\n";
         failures += distBad;
+    }
+
+    // ---- One NaN no longer silences the plug-in; NaN parameters fall back; filter resonance pinned (see RenderNanFixes.h) ----
+    {
+        const int nanBad = nanRecoveryTests() + svfResonancePeakTest();
+        std::cout << "\nNon-finite recovery / filter resonance: " << (nanBad == 0 ? "OK" : "FAILED") << "\n";
+        failures += nanBad;
     }
 
     // ---- Latency = rounded sum of fractional stage latencies; sub layer phase-aligned with the chain (see RenderSubAlign.h) ----
