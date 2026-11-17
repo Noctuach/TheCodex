@@ -369,7 +369,10 @@ namespace comp
                             st.grCacheDb = st.gr;
                             st.grCacheValid = true;
                         }
-                        const float g = st.grCacheGain * makeupSmooth[(size_t) b].getNextValue();
+                        // the feedback detector (Classic, Vari-Mu) listens to the compressed band before its make-up /
+                        // band Gain: the Gain knob must not change the amount of gain reduction
+                        const float grGain = st.grCacheGain;
+                        const float g = grGain * makeupSmooth[(size_t) b].getNextValue();
                         for (int c = 0; c < 2; ++c)
                         {
                             auto& ch = channels[(size_t) c];
@@ -380,7 +383,7 @@ namespace comp
                             if (rd < 0) rd += len;
                             const float delayed = d[(size_t) rd];
                             float y = bs.bypass ? delayed : delayed * g;
-                            st.lastOut[(size_t) c] = y;
+                            st.lastOut[(size_t) c] = bs.bypass ? delayed : delayed * grGain;
                             if (bs.mute || (anySolo && ! bs.solo)) y = 0.0f;
                             out[(size_t) c] += y;
                         }

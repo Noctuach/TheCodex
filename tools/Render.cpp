@@ -191,6 +191,7 @@ static void snapshot (CodexProcessor& proc, const juce::AudioBuffer<float>& audi
 
 #include "RenderCustomCurve.h"
 #include "RenderDistFixes.h"
+#include "RenderCompFixes.h"
 
 int main (int argc, char** argv)
 {
@@ -208,6 +209,12 @@ int main (int argc, char** argv)
     // Key Mode defaults to Follow MIDI; every check below plays MIDI note 60 and expects the selected key (F1)
     setParam (proc, ID::keyMode, 0.0f);
 
+    if (std::getenv ("CODEX_COMP_ONLY") != nullptr)   // quick run: the compressor feedback / bit-exactness checks only
+    {
+        const int bad = compressorFeedbackMakeupTests();
+        std::cout << "\n" << (bad == 0 ? "COMP CHECKS PASSED" : juce::String (bad) + " COMP CHECK(S) FAILED") << "\n";
+        return bad == 0 ? 0 : 2;
+    }
     if (std::getenv ("CODEX_CURVE_ONLY") != nullptr)   // quick run: the custom curve maths and seeding only
     {
         const int bad = customCurveUnitTests();
@@ -565,6 +572,7 @@ int main (int argc, char** argv)
             if (! std::isfinite (pk) || pk > 2.0f || peakDb (b) > -6.0f) { ++bad; std::cout << "   style " << comp::styleNames()[st] << " peak " << peakDb (b) << "\n"; }
             if (cp.getLatencyInSamples() != (int) std::round (0.002 * sr)) ++bad;
         }
+        bad += compressorFeedbackMakeupTests();   // see RenderCompFixes.h
         std::cout << "Compressor checks: " << (bad == 0 ? "OK" : "FAILED") << "\n";
         failures += bad;
     }
