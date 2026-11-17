@@ -63,6 +63,9 @@ namespace ID
 
     // Clip stages: prefix "d1" / "d2" + suffix
     inline juce::String clip (int stage, const char* suffix) { return "d" + juce::String (stage) + suffix; }
+    // Custom distortion curves (not parameters): child "CURVES" of the state with one string property per stage ("c1", "c2")
+    inline const juce::Identifier curvesNode { "CURVES" };
+    inline juce::Identifier curveProp (int stage) { return stage == 1 ? juce::Identifier ("c1") : juce::Identifier ("c2"); }
     // EQ bands: "b1Freq" ... "b6Slope"
     inline juce::String band (int bandIndex, const char* suffix) { return "b" + juce::String (bandIndex + 1) + suffix; }
     // Two equalisers: EQ 1 (between the distortions) uses "b1Freq" ..., EQ 2 (post, before Space) uses "q1Freq" ...
@@ -88,4 +91,15 @@ namespace Params
     constexpr int keyBaseNote = 29;  // F1: key index 0 (F) .. 11 (E) -> F1 .. E2
     juce::StringArray keyNames();     // "F", "F#" ... "E"
     juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
+
+    /** Copies every parameter value that the state tree does not hold yet into the tree, now, through the given undo
+        manager. AudioProcessorValueTreeState only copies values set with setValueNotifyingHost into its tree on a timer
+        (up to about half a second later), and that late copy is recorded in whatever undo transaction is open when the
+        timer fires. Calling this right after a programmatic change (a preset load) records it in its own transaction;
+        the timer's later copy then finds equal values and records nothing. */
+    void flushToTree (juce::AudioProcessorValueTreeState&, juce::UndoManager*);
+
+    /** Opens a new undo transaction on the state's undo manager, after recording any parameter change still waiting
+        for the timer in the transaction it belongs to (the previous one), so it cannot join (and be undone with) this edit. */
+    void beginTransaction (juce::AudioProcessorValueTreeState&, const juce::String& name);
 }

@@ -634,7 +634,7 @@ bool EQDisplay::keyPressed (const KeyPress& k)
 {
     if ((k == KeyPress::deleteKey || k == KeyPress::backspaceKey) && present (selected))
     {
-        if (auto* um = apvts.undoManager) um->beginNewTransaction ("Delete EQ band");
+        Params::beginTransaction (apvts, "Delete EQ band");
         deleteBand (apvts, eqIdx, selected);
         return true;
     }
@@ -707,7 +707,7 @@ int EQDisplay::addBand (AudioProcessorValueTreeState& s, int eqIdx, eq::BandType
 {
     const int i = firstFreeBand (s, eqIdx);
     if (i < 0) return -1;
-    if (auto* um = s.undoManager) um->beginNewTransaction ("Add EQ band");
+    Params::beginTransaction (s, "Add EQ band");
     resetBand (s, eqIdx, i);
     setGesture (s, eqIdx, i, "Type", (float) t);
     setGesture (s, eqIdx, i, "Freq", freq);
@@ -733,7 +733,7 @@ void EQDisplay::splitBand (AudioProcessorValueTreeState& s, int eqIdx, int from,
     const int target = firstFreeBand (s, eqIdx, from);
     if (target < 0) return;
 
-    if (auto* um = s.undoManager) um->beginNewTransaction ("Split EQ band");
+    Params::beginTransaction (s, "Split EQ band");
     for (auto* sfx : { "Type", "Freq", "Gain", "Q", "Slope", "Used", "On" })
         if (auto* p = s.getParameter (ID::eqBand (eqIdx, target, sfx)))
         {
@@ -803,7 +803,7 @@ void EQDisplay::showBandMenu (int b)
         }
         else if (result == 33)
         {
-            if (auto* um = d.apvts.undoManager) um->beginNewTransaction ("Delete EQ band");
+            Params::beginTransaction (d.apvts, "Delete EQ band");
             deleteBand (d.apvts, d.eqIdx, b);
         }
     });
@@ -831,7 +831,7 @@ BandControls::BandControls (AudioProcessorValueTreeState& s, int eqIndex) : eqId
     deleteButton.setTooltip ("Delete band: removes the selected band (also in the node's right-click menu)");
     deleteButton.onClick = [this]
     {
-        if (auto* um = apvts.undoManager) um->beginNewTransaction ("Delete EQ band");
+        Params::beginTransaction (apvts, "Delete EQ band");
         EQDisplay::deleteBand (apvts, eqIdx, band);
         step (1);
     };
@@ -842,7 +842,7 @@ BandControls::BandControls (AudioProcessorValueTreeState& s, int eqIndex) : eqId
     resetButton.onClick = [this]
     {
         const float f = apvts.getRawParameterValue (ID::eqBand (eqIdx, band, "Freq"))->load();
-        if (auto* um = apvts.undoManager) um->beginNewTransaction ("Reset EQ band");
+        Params::beginTransaction (apvts, "Reset EQ band");
         EQDisplay::resetBand (apvts, eqIdx, band);
         if (auto* p = apvts.getParameter (ID::eqBand (eqIdx, band, "Freq"))) p->setValueNotifyingHost (p->convertTo0to1 (f));
         if (auto* p = apvts.getParameter (ID::eqBand (eqIdx, band, "Type"))) p->setValueNotifyingHost (p->convertTo0to1 ((float) eq::BandType::Bell));

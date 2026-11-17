@@ -44,7 +44,7 @@ namespace satBands
     {
         const int nb = count (s);
         if (nb >= sat::maxBands) return;
-        if (auto* um = s.undoManager) um->beginNewTransaction ("Add saturation band");
+        Params::beginTransaction (s, "Add saturation band");
         for (int k = nb - 1; k > b; --k) copyBand (s, k, k + 1);   // shift bands up
         copyBand (s, b, b + 1);
         for (int j = nb - 2; j >= b; --j) set (s, xId (j + 1), get (s, xId (j)));   // shift crossovers up
@@ -58,7 +58,7 @@ namespace satBands
     {
         const int nb = count (s);
         if (nb <= 1) return;
-        if (auto* um = s.undoManager) um->beginNewTransaction ("Remove saturation band");
+        Params::beginTransaction (s, "Remove saturation band");
         for (int k = b; k < nb - 1; ++k) copyBand (s, k + 1, k);   // shift bands down
         const int removedX = b == nb - 1 ? b - 1 : b;
         for (int j = removedX; j < nb - 2; ++j) set (s, xId (j), get (s, xId (j + 1)));
@@ -277,7 +277,7 @@ public:
                 {
                     const char* sfx = k == 0 ? "Mute" : k == 1 ? "Solo" : "Bypass";
                     const bool on = value (ID::satBand (b, sfx)) > 0.5f;
-                    if (auto* um = apvts.undoManager) um->beginNewTransaction ("Band toggle");
+                    Params::beginTransaction (apvts, "Band toggle");
                     if (e.mods.isCommandDown() && k < 2)   // Ctrl/Cmd-click: exclusive solo / mute
                         for (int o = 0; o < nb; ++o)
                             satBands::set (apvts, ID::satBand (o, sfx), o == b ? 1.0f : 0.0f);

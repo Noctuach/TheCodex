@@ -163,7 +163,7 @@ private:
     {
         const int index = chain::encode (o);
         if (index == currentIndex()) return;
-        if (auto* um = apvts.undoManager) um->beginNewTransaction ("Change module order");
+        Params::beginTransaction (apvts, "Change module order");
         param->beginChangeGesture();
         param->setValueNotifyingHost (param->convertTo0to1 ((float) index));
         param->endChangeGesture();

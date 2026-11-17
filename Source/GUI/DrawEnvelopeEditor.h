@@ -168,7 +168,7 @@ public:
     {
         auto s = shape();
         const int h = hitPoint (s, e.position);
-        if (auto* um = apvts.undoManager) um->beginNewTransaction (h >= 0 ? "Delete envelope point" : "Add envelope point");
+        Params::beginTransaction (apvts, h >= 0 ? "Delete envelope point" : "Add envelope point");
         if (h > 0 && s.count > 2)
         {
             for (int i = h; i < s.count - 1; ++i) s.points[(size_t) i] = s.points[(size_t) i + 1];
@@ -263,7 +263,7 @@ private:
                 default: pts ({ { 0, 1.0f, 0.0f }, { 1000, 0.0f, 0 } }); break;
             }
         }
-        if (auto* um = apvts.undoManager) um->beginNewTransaction ("Envelope shape");
+        Params::beginTransaction (apvts, "Envelope shape");
         write (DrawEnvelope::sanitise (s));
     }
 

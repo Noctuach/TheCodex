@@ -2,17 +2,22 @@
 #include "Widgets.h"
 #include "PresetBar.h"
 #include "../PluginProcessor.h"
+#include "CurveEditor.h"
 
 /**
     Live transfer curve (input -> output) of one distortion stage, with the current input level marked.
     In the X-Shaper modes it shows the drawable curve itself: drag the points (Shift: fine), double-click a point
     to reset it, right-click for curve presets.
+    In every Type the curve can also be drawn freely (custom curve, see CurveEditLogic): drag on the curve,
+    double-click, or use the pencil. The CURVE pill switches the unit between its Type and the drawn curve.
 */
 class TransferDisplay : public juce::Component, public juce::SettableTooltipClient
 {
 public:
-    TransferDisplay (juce::AudioProcessorValueTreeState& s, int stageNumber) : apvts (s), stage (stageNumber)
+    TransferDisplay (CodexProcessor& processor, int stageNumber)
+        : proc (processor), apvts (processor.apvts), stage (stageNumber), editor (processor, stageNumber, *this)
     {
+        auto& s = apvts;
         auto p = [&] (const char* sfx) { return s.getRawParameterValue (ID::clip (stage, sfx)); };
         mode = p ("Mode"); drive = p ("Drive"); boost = p ("Boost"); offset = p ("Bias"); chr = p ("Char"); on = p ("On");
         tailDrv = p ("TailDrv");
@@ -21,12 +26,54 @@ public:
             xp[(size_t) k] = s.getParameter (ID::clip (stage, ("XP" + juce::String (k + 1)).toRawUTF8()));
             xn[(size_t) k] = s.getParameter (ID::clip (stage, ("XN" + juce::String (k + 1)).toRawUTF8()));
         }
+        editor.legacyCurveY = [this] (float x) { return legacyY (x); };
+        editor.legacyGain = [this] { return isShaper() ? 1.0f : juce::Decibels::decibelsToGain (drive->load() + boost->load()); };
+        editor.legacyOffset = [this] { return isShaper() ? 0.0f : offset->load(); };
+
+        // toolbar: CURVE (custom on/off) | SYM ASYM, pencil, shapes menu. Plain buttons: they never take the keyboard.
+        curveButton.setComponentID ("pill");
+        curveButton.setClickingTogglesState (false);
+        curveButton.setTooltip (Help::forParameter (ID::clip (stage, "Cust")));
+        curveButton.onClick = [this]
+        {
+            if (editor.isActive()) editor.turnOff();
+            else proc.beginCustomEdit (stage, "Custom curve on");
+            editor.sync();
+            refreshButtons();
+            repaint();
+        };
+        pencilButton.setClickingTogglesState (true);
+        pencilButton.setTooltip ("Pencil: draw the curve freehand. The stroke replaces the points under it (one undo step).");
+        pencilButton.onClick = [this] { editor.pencil = pencilButton.getToggleState(); repaint(); };
+        shapesButton.setTooltip ("Curve menu: starter shapes, re-seed from the Type, symmetry, flip, reset.");
+        shapesButton.onClick = [this] { showCurveMenu ({}, true); };
+        symButton.setComponentID ("seg");
+        asymButton.setComponentID ("seg");
+        symButton.setConnectedEdges (juce::Button::ConnectedOnRight);
+        asymButton.setConnectedEdges (juce::Button::ConnectedOnLeft);
+        symButton.setTooltip ("Symmetric: draw the positive half, the negative half mirrors it.");
+        asymButton.setTooltip ("Asymmetric: draw both halves independently (even harmonics).");
+        symButton.onClick = [this] { editor.setSymmetric (true); refreshButtons(); };
+        asymButton.onClick = [this] { editor.setSymmetric (false); refreshButtons(); };
+        for (auto* b : std::initializer_list<juce::Component*> { &curveButton, &pencilButton, &shapesButton })
+            addAndMakeVisible (b);
+        addChildComponent (symButton);
+        addChildComponent (asymButton);
+        refreshButtons();
     }
 
     void setInputLevel (float linear) { level = linear > level ? linear : level * 0.88f; repaint(); }
 
+    /** Called by the unit's timer: follows undo / redo, presets and A/B. */
+    void tick()
+    {
+        if (editor.sync()) repaint();
+        refreshButtons();
+    }
+
     bool isShaper() const { const int m = (int) mode->load(); return m == ClipDistortion::XShaper || m == ClipDistortion::XShaperAsym; }
     bool isAsym() const { return (int) mode->load() == ClipDistortion::XShaperAsym; }
+    bool isCustom() const { return editor.isActive(); }
 
     ClipDistortion::Curve curve() const
     {
@@ -39,6 +86,26 @@ public:
         return c;
     }
 
+    // tests
+    CurveEditLogic& logic() { return editor; }
+    int getStage() const { return stage; }
+    juce::Point<float> plotToScreen (float u, float y) const { return editor.toScreen (u, y); }
+    juce::Button& getPencilButton() { return pencilButton; }
+    juce::Button& getCurveButton() { return curveButton; }
+
+    void resized() override
+    {
+        auto band = getLocalBounds().reduced (10, 0).withTrimmedTop (5).withHeight (18);
+        curveButton.setBounds (band.removeFromLeft (54));
+        shapesButton.setBounds (band.removeFromRight (20).withSizeKeepingCentre (20, 20));
+        band.removeFromRight (4);
+        pencilButton.setBounds (band.removeFromRight (20).withSizeKeepingCentre (20, 20));
+        band.removeFromRight (6);
+        asymButton.setBounds (band.removeFromRight (40));
+        symButton.setBounds (band.removeFromRight (36));
+        updatePlot();
+    }
+
     void paint (juce::Graphics& g) override
     {
         using namespace juce;
@@ -49,9 +116,8 @@ public:
         g.setColour (Colours_::outline);
         px.border (r, 5.0f);
 
-        plot = r.reduced (12.0f);
-        const float size = jmin (plot.getWidth(), plot.getHeight());
-        plot = plot.withSizeKeepingCentre (size, size);
+        updatePlot();
+        const float size = plot.getWidth();
 
         // grid
         g.setColour (Colours_::grid);
@@ -75,6 +141,125 @@ public:
         g.fillPath (diag);
 
         const bool enabled = on->load() > 0.5f;
+        const auto col = enabled ? Colours_::accent : Colours_::textDim;
+        if (editor.isActive())
+        {
+            CurveEditLogic::PaintInfo info;
+            info.colour = col;
+            info.enabled = enabled;
+            info.driveGain = (int) mode->load() == ClipDistortion::Downsample ? 1.0f : Decibels::decibelsToGain (drive->load() + boost->load());
+            info.offset = offset->load();
+            info.inputLevel = level / jmax (1.0e-6f, Decibels::decibelsToGain (boost->load()));
+            editor.paint (g, info);
+        }
+        else
+            paintLegacy (g, col, enabled);
+
+        g.setFont (Fonts::label (Fonts::Size::micro, 0.1f));
+        g.setColour (Colours_::textDim);
+        auto pl = plot;
+        g.drawText ("IN", pl.removeFromBottom (14.0f).removeFromRight (22.0f), Justification::centredRight);
+        g.drawText ("OUT", Rectangle<float> (plot.getX() + 4.0f, plot.getY(), 32.0f, 14.0f), Justification::centredLeft);
+    }
+
+    // ---- mouse: legacy X-Shaper handles first (Custom off), then the free curve editor ----
+    void mouseMove (const juce::MouseEvent& e) override
+    {
+        const int h = ! editor.isActive() && isShaper() ? hitPoint (e.position) : -1;
+        if (h != hover) { hover = h; repaint(); }
+        hovering = true;
+        editor.mouseMove (e.position);
+        setMouseCursor (h >= 0 ? juce::MouseCursor::UpDownResizeCursor : editor.cursor());
+    }
+    void mouseExit (const juce::MouseEvent&) override { hover = -1; hovering = false; editor.mouseExit(); repaint(); }
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        dragging = -1;
+        if (e.mods.isPopupMenu())
+        {
+            const auto h = editor.isActive() ? editor.hitTest (e.position) : CurveEditLogic::Handle {};
+            showCurveMenu (h, false);
+            return;
+        }
+        if (! editor.isActive() && isShaper() && ! editor.pencil)
+        {
+            dragging = hitPoint (e.position);
+            if (dragging >= 0) { param (dragging)->beginChangeGesture(); lastY = e.position.y; return; }
+        }
+        editor.mouseDown (e);
+    }
+    void mouseDrag (const juce::MouseEvent& e) override
+    {
+        if (dragging < 0) { editor.mouseDrag (e); return; }
+        auto* p = param (dragging);
+        const bool negHalf = dragging >= ClipDistortion::numCurvePoints;
+        const float fine = e.mods.isShiftDown() ? 0.15f : 1.0f;
+        const float dy = -(e.position.y - lastY) / (plot.getHeight() * 0.5f) * fine * (negHalf ? -1.0f : 1.0f);
+        lastY = e.position.y;
+        const float v = juce::jlimit (-1.0f, 1.0f, p->convertFrom0to1 (p->getValue()) + dy);
+        p->setValueNotifyingHost (p->convertTo0to1 (v));
+        repaint();
+    }
+    void mouseUp (const juce::MouseEvent& e) override
+    {
+        if (dragging >= 0) param (dragging)->endChangeGesture();
+        else editor.mouseUp (e);
+        dragging = -1;
+        refreshButtons();
+    }
+    void mouseDoubleClick (const juce::MouseEvent& e) override
+    {
+        if (! editor.isActive() && isShaper())
+        {
+            if (const int h = hitPoint (e.position); h >= 0)
+            {
+                auto* p = param (h);
+                p->beginChangeGesture(); p->setValueNotifyingHost (p->getDefaultValue()); p->endChangeGesture();
+                return;
+            }
+        }
+        editor.mouseDoubleClick (e);
+        refreshButtons();
+    }
+    void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& w) override
+    {
+        if (! editor.mouseWheel (e.position, w.deltaY))
+            juce::Component::mouseWheelMove (e, w);
+    }
+
+private:
+    void updatePlot()
+    {
+        plot = getLocalBounds().toFloat().reduced (12.0f).withTrimmedTop (16.0f);
+        const float size = juce::jmin (plot.getWidth(), plot.getHeight());
+        plot = plot.withSizeKeepingCentre (size, size);
+        editor.plot = plot;
+    }
+
+    void refreshButtons()
+    {
+        const bool active = editor.isActive();
+        curveButton.setToggleState (proc.isCustomEnabled (stage) && editor.hasStoredCurve(), juce::dontSendNotification);
+        symButton.setVisible (active);
+        asymButton.setVisible (active);
+        symButton.setToggleState (active && editor.getCurve().symmetric, juce::dontSendNotification);
+        asymButton.setToggleState (active && ! editor.getCurve().symmetric, juce::dontSendNotification);
+        if (pencilButton.getToggleState() != editor.pencil) pencilButton.setToggleState (editor.pencil, juce::dontSendNotification);
+    }
+
+    /** The shown legacy curve (Custom off) at display x. */
+    float legacyY (float x) const
+    {
+        const bool enabled = on->load() > 0.5f, shaper = isShaper();
+        const float gain = shaper ? 1.0f : juce::Decibels::decibelsToGain (drive->load() + boost->load());
+        const float off = shaper ? 0.0f : offset->load(), c = shaper ? 0.0f : chr->load();
+        const auto cv = curve();
+        return enabled || shaper ? ClipDistortion::transfer ((int) mode->load(), x, gain, off, c, &cv) : x;
+    }
+
+    void paintLegacy (juce::Graphics& g, juce::Colour col, bool enabled)
+    {
+        using namespace juce;
         const int m = (int) mode->load();
         const bool shaper = isShaper();
         // X-Shaper: show the drawn curve over its own input range; otherwise the full curve including drive
@@ -83,14 +268,13 @@ public:
         const auto cv = curve();
 
         Path curvePath;
-        const int steps = (int) size * 2;
+        const int steps = (int) plot.getWidth() * 2;
         for (int i = 0; i <= steps; ++i)
         {
             const float x = -1.0f + 2.0f * (float) i / (float) steps;
             const auto pt = toPoint (x, enabled || shaper ? ClipDistortion::transfer (m, x, gain, off, c, &cv) : x);
             if (i == 0) curvePath.startNewSubPath (pt); else curvePath.lineTo (pt);
         }
-        const auto col = enabled ? Colours_::accent : Colours_::textDim;
         // the tail's curve (Tail Drive), dashed, behind the punch curve
         if (enabled && ! shaper && std::abs (tailDrv->load()) > 0.05f)
         {
@@ -111,6 +295,9 @@ public:
         }
         Colours_::strokeGlow (g, curvePath, col, 2.0f);
 
+        g.setFont (Fonts::label (Fonts::Size::micro, 0.06f));
+        g.setColour (Colours_::textMuted);
+        const auto hintArea = Rectangle<float> (plot.getX() + 4.0f, plot.getY() + 16.0f, plot.getWidth() * 0.6f, 14.0f);
         if (shaper)
         {
             for (int k = 0; k < ClipDistortion::numCurvePoints * 2; ++k)
@@ -127,9 +314,10 @@ public:
             g.setFont (Fonts::label (Fonts::Size::micro, 0.06f));
             g.setColour (Colours_::textMuted);
             // upper-left quadrant: the one area a drawn curve never reaches
-            g.drawText (isAsym() ? "DRAW BOTH HALVES" : "DRAW CURVE  (MIRRORED)",
-                        Rectangle<float> (plot.getX() + 4.0f, plot.getY() + 16.0f, plot.getWidth() * 0.45f, 14.0f), Justification::centredLeft);
+            g.drawText (isAsym() ? "DRAW BOTH HALVES" : "DRAW CURVE  (MIRRORED)", hintArea, Justification::centredLeft);
         }
+        else if (hovering)
+            g.drawText (CurveEditLogic::drawHint(), hintArea, Justification::centredLeft);
 
         // current input level (pre-drive, with boost) marked on both sides of the curve
         const float lv = jlimit (0.0f, 1.0f, level);
@@ -146,56 +334,8 @@ public:
                 g.fillEllipse (Rectangle<float> (6.0f, 6.0f).withCentre (pt));
             }
         }
-
-        g.setFont (Fonts::label (Fonts::Size::micro, 0.1f));
-        g.setColour (Colours_::textDim);
-        auto pl = plot;
-        g.drawText ("IN", pl.removeFromBottom (14.0f).removeFromRight (22.0f), Justification::centredRight);
-        g.drawText ("OUT", Rectangle<float> (plot.getX() + 4.0f, plot.getY(), 32.0f, 14.0f), Justification::centredLeft);
     }
 
-    // ---- X-Shaper editing ----
-    void mouseMove (const juce::MouseEvent& e) override
-    {
-        const int h = isShaper() ? hitPoint (e.position) : -1;
-        if (h != hover) { hover = h; repaint(); }
-        setMouseCursor (h >= 0 ? juce::MouseCursor::UpDownResizeCursor : juce::MouseCursor::NormalCursor);
-    }
-    void mouseExit (const juce::MouseEvent&) override { hover = -1; repaint(); }
-    void mouseDown (const juce::MouseEvent& e) override
-    {
-        if (! isShaper()) return;
-        if (e.mods.isPopupMenu()) { showPresetMenu(); return; }
-        dragging = hitPoint (e.position);
-        if (dragging >= 0) { param (dragging)->beginChangeGesture(); lastY = e.position.y; }
-    }
-    void mouseDrag (const juce::MouseEvent& e) override
-    {
-        if (dragging < 0) return;
-        auto* p = param (dragging);
-        const bool negHalf = dragging >= ClipDistortion::numCurvePoints;
-        const float fine = e.mods.isShiftDown() ? 0.15f : 1.0f;
-        const float dy = -(e.position.y - lastY) / (plot.getHeight() * 0.5f) * fine * (negHalf ? -1.0f : 1.0f);
-        lastY = e.position.y;
-        const float v = juce::jlimit (-1.0f, 1.0f, p->convertFrom0to1 (p->getValue()) + dy);
-        p->setValueNotifyingHost (p->convertTo0to1 (v));
-        repaint();
-    }
-    void mouseUp (const juce::MouseEvent&) override
-    {
-        if (dragging >= 0) param (dragging)->endChangeGesture();
-        dragging = -1;
-    }
-    void mouseDoubleClick (const juce::MouseEvent& e) override
-    {
-        if (! isShaper()) return;
-        const int h = hitPoint (e.position);
-        if (h < 0) return;
-        auto* p = param (h);
-        p->beginChangeGesture(); p->setValueNotifyingHost (p->getDefaultValue()); p->endChangeGesture();
-    }
-
-private:
     juce::Point<float> toPoint (float x, float y) const
     {
         return { juce::jmap (x, -1.0f, 1.0f, plot.getX(), plot.getRight()),
@@ -224,17 +364,34 @@ private:
         return best;
     }
 
-    void showPresetMenu()
+    /** Right-click / shapes button: point or segment menu over a handle, otherwise the curve menu (in the X-Shaper
+        Types with the X-Shaper presets first while the custom curve is off). */
+    void showCurveMenu (CurveEditLogic::Handle h, bool fromButton)
     {
         juce::PopupMenu m;
-        m.addSectionHeader ("X-Shaper curve");
-        const char* names[] = { "Linear", "Soft Saturation", "Hard Knee", "Expander (Punch)", "Fold", "Steps", "Mirror to Negative Half" };
-        for (int i = 0; i < 7; ++i) m.addItem (i + 1, names[i], i < 6 || isAsym());
+        const bool legacySection = ! editor.isActive() && isShaper() && h.kind == CurveEditLogic::Handle::None;
+        if (h.kind == CurveEditLogic::Handle::Point) editor.fillPointMenu (m, h.index);
+        else if (h.kind == CurveEditLogic::Handle::Diamond) editor.fillDiamondMenu (m);
+        else
+        {
+            if (legacySection)
+            {
+                m.addSectionHeader ("X-Shaper curve");
+                const char* names[] = { "Linear", "Soft Saturation", "Hard Knee", "Expander (Punch)", "Fold", "Steps", "Mirror to Negative Half" };
+                for (int i = 0; i < 7; ++i) m.addItem (i + 1, names[i], i < 6 || isAsym());
+            }
+            editor.fillCurveMenu (m);
+        }
         juce::Component::SafePointer<TransferDisplay> safe (this);
-        m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition(), [safe] (int r)
+        auto opts = juce::PopupMenu::Options().withTargetComponent (fromButton ? static_cast<juce::Component*> (&shapesButton) : this);
+        if (! fromButton) opts = opts.withMousePosition();
+        m.showMenuAsync (opts, [safe, h] (int r)
         {
             if (safe == nullptr || r == 0) return;
-            safe->applyPreset (r - 1);
+            if (r < 100) safe->applyPreset (r - 1);
+            else safe->editor.handleMenu (r, h);
+            safe->refreshButtons();
+            safe->repaint();
         });
     }
 
@@ -245,7 +402,7 @@ private:
         {
             p->beginChangeGesture(); p->setValueNotifyingHost (p->convertTo0to1 (juce::jlimit (-1.0f, 1.0f, v))); p->endChangeGesture();
         };
-        if (auto* um = apvts.undoManager) um->beginNewTransaction ("X-Shaper curve");
+        Params::beginTransaction (apvts, "X-Shaper curve");
         for (int k = 0; k < n; ++k)
         {
             const float x = (float) (k + 1) / (float) n;
@@ -265,13 +422,74 @@ private:
         }
     }
 
+    CodexProcessor& proc;
     juce::AudioProcessorValueTreeState& apvts;
     int stage;
+    CurveEditLogic editor;
     std::atomic<float> *mode, *drive, *boost, *offset, *chr, *on, *tailDrv;
     std::array<juce::RangedAudioParameter*, ClipDistortion::numCurvePoints> xp {}, xn {};
     juce::Rectangle<float> plot;
     float level = 0.0f, lastY = 0.0f;
     int hover = -1, dragging = -1;
+    bool hovering = false;
+    juce::TextButton curveButton { "CURVE" }, symButton { "SYM" }, asymButton { "ASYM" };
+    IconButton pencilButton { "Pencil", Icons::pencil() }, shapesButton { "Curve menu", Icons::menu() };
+};
+
+/** Type menu of a distortion unit. Remembers that the user opened it (or turned the wheel over it), so a Type the user
+    picks can switch the custom curve off, while preset loads, undo and automation never do. */
+class ArmedComboBox : public juce::ComboBox
+{
+public:
+    void showPopup() override { arm(); juce::ComboBox::showPopup(); }
+    void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& w) override
+    {
+        arm();   // expires shortly after if the wheel changed nothing
+        juce::ComboBox::mouseWheelMove (e, w);
+    }
+    void arm() { armed = true; armedAt = juce::Time::getMillisecondCounter(); }
+    /** Called by the owner's timer: the arm expires shortly after the popup closes. */
+    void expire()
+    {
+        if (armed && ! isPopupActive() && juce::Time::getMillisecondCounter() - armedAt > 300) armed = false;
+    }
+    bool armed = false;
+    juce::uint32 armedAt = 0;
+};
+
+/** ChoiceBox with an ArmedComboBox (the distortion Type). */
+class TypeChoiceBox : public juce::Component
+{
+public:
+    explicit TypeChoiceBox (const juce::String& caption)
+    {
+        label.setText (caption.toUpperCase(), juce::dontSendNotification);
+        label.getProperties().set ("caption", true);
+        label.setJustificationType (juce::Justification::centredLeft);
+        label.setColour (juce::Label::textColourId, Colours_::textDim);
+        label.setInterceptsMouseClicks (false, false);
+        addAndMakeVisible (label);
+        addAndMakeVisible (box);
+    }
+    void attach (juce::AudioProcessorValueTreeState& s, const juce::String& id)
+    {
+        attachment.reset();
+        if (box.getNumItems() == 0)
+            if (auto* c = dynamic_cast<juce::AudioParameterChoice*> (s.getParameter (id)))
+                box.addItemList (c->choices, 1);
+        attachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (s, id, box);
+        box.setTooltip (Help::forParameter (id));
+    }
+    void resized() override
+    {
+        auto r = getLocalBounds();
+        label.setBounds (r.removeFromTop (16).withTrimmedLeft (1));
+        r.removeFromTop (2);
+        box.setBounds (r.removeFromTop (juce::jmin (28, r.getHeight())));
+    }
+    juce::Label label;
+    ArmedComboBox box;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> attachment;
 };
 
 /**
@@ -390,7 +608,7 @@ class DistortionUnit : public juce::Component, private juce::Timer
 {
 public:
     DistortionUnit (CodexProcessor& p, int stageNumber, const juce::String& panelTitle)
-        : proc (p), stage (stageNumber), title (panelTitle), transfer (p.apvts, stageNumber), filterStrip (p.apvts, stageNumber),
+        : proc (p), stage (stageNumber), title (panelTitle), transfer (p, stageNumber), filterStrip (p.apvts, stageNumber),
           filterPos (*p.apvts.getParameter (ID::clip (stageNumber, "FltPos")), { "OFF", "PRE", "POST" }, Help::forParameter (ID::clip (stageNumber, "FltPos")))
     {
         auto& s = p.apvts;
@@ -406,6 +624,16 @@ public:
         power.setTooltip (Help::forParameter (ID::clip (stage, "On")));
 
         type.attach (s, ID::clip (stage, "Mode"));
+        // a Type the user picks plays that Type: the custom curve switches off (kept, the CURVE pill brings it back)
+        type.box.onChange = [this]
+        {
+            if (type.box.armed && proc.isCustomEnabled (stage))
+            {
+                Params::beginTransaction (proc.apvts, "Change distortion type");
+                proc.setCustomEnabled (stage, false);
+            }
+            type.box.armed = false;
+        };
         oversampling.attach (s, ID::clip (stage, "OS"));
         filterType.attach (s, ID::clip (stage, "FltType"));
         drive.attach (s, ID::clip (stage, "Drive"));
@@ -543,12 +771,15 @@ private:
         inMeter.setLevel (in);
         outMeter.setLevel (clip.getAndResetOutputPeak());
         transfer.setInputLevel (in);
-        const bool shaper = transfer.isShaper();
-        if (shaper != lastShaper)
+        transfer.tick();
+        type.box.expire();
+        const int tipState = transfer.isCustom() ? 2 : transfer.isShaper() ? 1 : 0;
+        if (tipState != lastTipState)
         {
-            lastShaper = shaper;
-            transfer.setTooltip (shaper ? "X-Shaper: drag the points to draw the curve (Shift: fine), double-click a point to reset it, right-click for preset curves."
-                                        : juce::String());
+            lastTipState = tipState;
+            transfer.setTooltip (tipState == 2 ? Help::customCurveEditor()
+                                 : tipState == 1 ? juce::String ("X-Shaper: drag the points to draw the curve (Shift: fine), double-click a point to reset it, right-click for preset curves. Drag elsewhere on the curve, double-click empty space or use the pencil to draw a free custom curve.")
+                                                 : Help::customCurveStart());
         }
 
         const bool off = onParam->load() < 0.5f;
@@ -568,7 +799,8 @@ private:
 
     PowerButton power;
     juce::TextButton dcButton { "DC" }, autoGainButton { "AUTO" };
-    ChoiceBox type { "Type" }, oversampling { "Oversampling" }, filterType { "Filter Type" };
+    TypeChoiceBox type { "Type" };
+    ChoiceBox oversampling { "Oversampling" }, filterType { "Filter Type" };
     TransferDisplay transfer;
     DistortionFilterStrip filterStrip;
     SegmentedChoice filterPos;
@@ -581,5 +813,6 @@ private:
     juce::Rectangle<int> shapeCaption, filterCaption, outputCaption;
     BypassNotice bypassNotice;
     std::atomic<float>* onParam = nullptr;
-    bool bypassed = false, lastShaper = false;
+    bool bypassed = false;
+    int lastTipState = -1;
 };

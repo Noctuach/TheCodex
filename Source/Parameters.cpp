@@ -328,5 +328,34 @@ AudioProcessorValueTreeState::ParameterLayout Params::createLayout()
     addFloat (l, ID::clipCeiling, "Output Clipper Ceiling", { -12.0f, 0.0f, 0.01f }, -0.3f, dbText);
     addFloat (l, ID::clipSoft, "Output Clipper Softness", { 0.0f, 1.0f }, 0.3f, pctText);
 
+    // Custom distortion curves: appended last so every existing parameter keeps its index. Only the on/off switch is a
+    // parameter; the drawn points live in the plug-in state (see CustomCurveStore).
+    for (int stage = 1; stage <= 2; ++stage)
+        addBool (l, ID::clip (stage, "Cust"), "Dist " + String (stage) + " Custom Curve", false);
+
     return l;
+}
+
+void Params::flushToTree (AudioProcessorValueTreeState& apvts, UndoManager* um)
+{
+    // One pass over the tree's PARAM children (the tree is small, the parameter lookup is a hash map).
+    // The value written is the one the APVTS timer would write (its raw unnormalised value), so its own later
+    // copy compares equal and changes nothing.
+    for (auto child : apvts.state)
+    {
+        if (! child.hasProperty ("id")) continue;
+        const auto id = child.getProperty ("id").toString();
+        auto* raw = apvts.getRawParameterValue (id);
+        if (raw == nullptr) continue;
+        const float value = raw->load();
+        if (! child.hasProperty ("value") || ! approximatelyEqual ((float) child.getProperty ("value"), value))
+            child.setProperty ("value", value, um);
+    }
+}
+
+void Params::beginTransaction (AudioProcessorValueTreeState& apvts, const String& name)
+{
+    flushToTree (apvts, apvts.undoManager);
+    if (auto* um = apvts.undoManager)
+        um->beginNewTransaction (name);
 }

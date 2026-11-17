@@ -1,10 +1,14 @@
 #include "PluginProcessor.h"
 #include "GUI/PluginEditor.h"
+#include "DSP/CurveSeed.h"
 
 CodexProcessor::CodexProcessor()
     : AudioProcessor (BusesProperties().withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
       apvts (*this, &undoManager, "CodexState", Params::createLayout())
 {
+    presets.setCustomCurves (&customCurves);
+    // the curves are not parameters: tell the host whenever one changes, so the project counts as modified
+    customCurves.onStoredCurveChanged = [this] { if (! restoringState) curveChangeNotifier.changed(); };
     engine = p (ID::engine); model909 = p (ID::model909); tune909 = p (ID::tune909);
     attack909 = p (ID::attack909); decay909 = p (ID::decay909);
     tuneTime909 = p (ID::tuneTime909); accent909 = p (ID::accent909); overload909 = p (ID::overload909); hold909 = p (ID::hold909);
@@ -31,7 +35,7 @@ CodexProcessor::CodexProcessor()
         auto c = [&] (const char* sfx) { return p (ID::clip (s + 1, sfx)); };
         clipParams[s] = { c ("On"), c ("Mode"), c ("Drive"), c ("Boost"), c ("Char"), c ("Bias"), c ("LoFilt"), c ("HiFilt"),
                           c ("ShelfF"), c ("ShelfG"), c ("Mix"), c ("Out"), c ("DC"), c ("OS"), c ("Spatial"),
-                          c ("FltPos"), c ("FltType"), c ("FltFreq"), c ("FltRes"), c ("TailDrv"), c ("Split"), c ("AutoGain") };
+                          c ("FltPos"), c ("FltType"), c ("FltFreq"), c ("FltRes"), c ("TailDrv"), c ("Split"), c ("AutoGain"), c ("Cust") };
         for (int k = 0; k < ClipDistortion::numCurvePoints; ++k)
         {
             clipParams[s].xp[(size_t) k] = c (("XP" + juce::String (k + 1)).toRawUTF8());
@@ -112,6 +116,7 @@ void CodexProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 
     voice.prepare (sampleRate);
     updateParameters();
+    customCurves.rebuildAll();   // idempotent: publishing an unchanged curve is a no-op
     clip1.prepare (sampleRate, chunkSize);
     clip2.prepare (sampleRate, chunkSize);
     for (auto& e : equalisers) e.prepare (sampleRate, chunkSize);
@@ -207,6 +212,89 @@ int CodexProcessor::getPlayedNote() const
     return getKeyNote();
 }
 
+ClipDistortion::Settings CodexProcessor::buildClipSettings (int stage) const
+{
+    const float mDirt = macros[1]->load() - 0.5f, mWidth = macros[3]->load() - 0.5f;
+    const auto& c = clipParams[juce::jlimit (0, 1, stage - 1)];
+    ClipDistortion::Settings cs;
+    cs.enabled      = c.on->load() > 0.5f;
+    cs.mode         = (int) c.mode->load();
+    cs.driveDb      = juce::jlimit (0.0f, 48.0f, c.drive->load() + mDirt * 24.0f);   // Dirt macro: +-12 dB drive
+    cs.boostDb      = c.boost->load();
+    cs.character    = c.chr->load();
+    cs.offset       = c.bias->load();
+    cs.loFilterHz   = c.loFilt->load();
+    cs.hiFilterHz   = c.hiFilt->load();
+    cs.shelfHz      = c.shelfF->load();
+    cs.shelfDb      = c.shelfG->load();
+    cs.mix          = c.mix->load();
+    cs.outDb        = c.out->load();
+    cs.dcFilter     = c.dc->load() > 0.5f;
+    cs.oversampling = (int) c.os->load();
+    // Width macro: right adds stereo distortion, left narrows it back to mono
+    cs.spatial      = juce::jlimit (0.0f, 1.0f, c.spatial->load() * (1.0f + juce::jmin (0.0f, mWidth) * 2.0f) + juce::jmax (0.0f, mWidth) * 0.8f);
+    cs.filterPos    = (int) c.fltPos->load();
+    cs.filterType   = (int) c.fltType->load();
+    cs.filterHz     = c.fltFreq->load();
+    cs.filterRes    = c.fltRes->load();
+    cs.tailDriveDb  = c.tailDrv->load();
+    cs.splitMs      = c.split->load();
+    cs.autoGain     = c.autoGain->load() > 0.5f;
+    for (int k = 0; k < ClipDistortion::numCurvePoints; ++k)
+    {
+        cs.curve.pos[(size_t) k] = c.xp[(size_t) k]->load();
+        cs.curve.neg[(size_t) k] = c.xn[(size_t) k]->load();
+    }
+    cs.custom       = c.cust->load() > 0.5f;
+    return cs;
+}
+
+FreeCurve CodexProcessor::seedCustomCurve (int stage) const
+{
+    const auto s = buildClipSettings (stage);
+    const float reach = CurveSeed::reachFor (s.mode, s.curve, juce::Decibels::decibelsToGain (s.driveDb), juce::Decibels::decibelsToGain (s.boostDb),
+                                             s.tailDriveDb, s.spatial, s.offset);
+    return CurveSeed::fromMode (s.mode, s.curve, reach).curve;
+}
+
+bool CodexProcessor::isCustomEnabled (int stage) const
+{
+    return clipParams[juce::jlimit (0, 1, stage - 1)].cust->load() > 0.5f;
+}
+
+void CodexProcessor::setCustomEnabled (int stage, bool on)
+{
+    auto* prm = apvts.getParameter (ID::clip (stage, "Cust"));
+    if (prm == nullptr) return;
+    prm->beginChangeGesture();
+    // through the tree with the undo manager: the switch joins the open transaction (APVTS pushes it into the parameter)
+    auto child = apvts.state.getChildWithProperty ("id", prm->paramID);
+    if (child.isValid())
+    {
+        // the tree may still hold an older value (APVTS copies parameter changes into it on a timer): bring it up to
+        // date first, so the undoable write below always records the real change
+        const float current = prm->getValue() > 0.5f ? 1.0f : 0.0f;
+        if (! juce::approximatelyEqual ((float) child.getProperty ("value"), current))
+            child.setProperty ("value", current, nullptr);
+        child.setProperty ("value", on ? 1.0f : 0.0f, &undoManager);
+    }
+    if ((prm->getValue() > 0.5f) != on)
+        prm->setValueNotifyingHost (on ? 1.0f : 0.0f);
+    prm->endChangeGesture();
+}
+
+void CodexProcessor::beginCustomEdit (int stage, const juce::String& transactionName, bool reseed)
+{
+    Params::beginTransaction (apvts, transactionName);
+    if (reseed || ! customCurves.has (stage))
+    {
+        const auto c = seedCustomCurve (stage);
+        customCurves.set (stage, &c, &undoManager);
+    }
+    if (! isCustomEnabled (stage))
+        setCustomEnabled (stage, true);
+}
+
 void CodexProcessor::updateParameters()
 {
     KickVoice::Settings s;
@@ -223,7 +311,7 @@ void CodexProcessor::updateParameters()
     s.tuneSemis        = tune->load();
     s.startPhaseDeg    = phase->load();
     // Macros (0.5 = neutral): applied on top of the parameters, so the preset itself stays untouched
-    const float mPunch = macros[0]->load() - 0.5f, mDirt = macros[1]->load() - 0.5f, mTail = macros[2]->load() - 0.5f, mWidth = macros[3]->load() - 0.5f;
+    const float mPunch = macros[0]->load() - 0.5f, mTail = macros[2]->load() - 0.5f, mWidth = macros[3]->load() - 0.5f;
     const float punchAmount = std::exp2 (mPunch * 1.0f);          // pitch sweep depth x0.7 .. x1.4
     const float punchSpeed  = std::exp2 (-mPunch * 1.2f);         // faster sweep with more punch
     const float tailMul     = std::exp2 (mTail * 2.0f);           // decay / release x0.5 .. x2
@@ -256,39 +344,7 @@ void CodexProcessor::updateParameters()
 
     ClipDistortion* clips[] = { &clip1, &clip2 };
     for (int i = 0; i < 2; ++i)
-    {
-        const auto& c = clipParams[i];
-        ClipDistortion::Settings cs;
-        cs.enabled      = c.on->load() > 0.5f;
-        cs.mode         = (int) c.mode->load();
-        cs.driveDb      = juce::jlimit (0.0f, 48.0f, c.drive->load() + mDirt * 24.0f);   // Dirt macro: +-12 dB drive
-        cs.boostDb      = c.boost->load();
-        cs.character    = c.chr->load();
-        cs.offset       = c.bias->load();
-        cs.loFilterHz   = c.loFilt->load();
-        cs.hiFilterHz   = c.hiFilt->load();
-        cs.shelfHz      = c.shelfF->load();
-        cs.shelfDb      = c.shelfG->load();
-        cs.mix          = c.mix->load();
-        cs.outDb        = c.out->load();
-        cs.dcFilter     = c.dc->load() > 0.5f;
-        cs.oversampling = (int) c.os->load();
-        // Width macro: right adds stereo distortion, left narrows it back to mono
-        cs.spatial      = juce::jlimit (0.0f, 1.0f, c.spatial->load() * (1.0f + juce::jmin (0.0f, mWidth) * 2.0f) + juce::jmax (0.0f, mWidth) * 0.8f);
-        cs.filterPos    = (int) c.fltPos->load();
-        cs.filterType   = (int) c.fltType->load();
-        cs.filterHz     = c.fltFreq->load();
-        cs.filterRes    = c.fltRes->load();
-        cs.tailDriveDb  = c.tailDrv->load();
-        cs.splitMs      = c.split->load();
-        cs.autoGain     = c.autoGain->load() > 0.5f;
-        for (int k = 0; k < ClipDistortion::numCurvePoints; ++k)
-        {
-            cs.curve.pos[(size_t) k] = c.xp[(size_t) k]->load();
-            cs.curve.neg[(size_t) k] = c.xn[(size_t) k]->load();
-        }
-        clips[i]->setSettings (cs);
-    }
+        clips[i]->setSettings (buildClipSettings (i + 1));
 
     for (int e = 0; e < ID::numEqs; ++e)
     for (int b = 0; b < Params::numBands; ++b)
@@ -610,7 +666,18 @@ void CodexProcessor::setStateInformation (const void* data, int sizeInBytes)
                 param.setProperty ("value", 0.0f, nullptr);
                 tree.appendChild (param, nullptr);
             }
+            // Sessions saved before the custom curves existed: Custom Curve off (replaceState would keep the current value)
+            for (int stage = 1; stage <= 2; ++stage)
+                if (! tree.getChildWithProperty ("id", ID::clip (stage, "Cust")).isValid())
+                {
+                    juce::ValueTree param ("PARAM");
+                    param.setProperty ("id", ID::clip (stage, "Cust"), nullptr);
+                    param.setProperty ("value", 0.0f, nullptr);
+                    tree.appendChild (param, nullptr);
+                }
+            const juce::ScopedValueSetter<bool> restoring (restoringState, true);   // the host set this state itself
             apvts.replaceState (tree);
+            customCurves.rebuildAll();   // the stored curves (or none, for older sessions) reach the DSP before any render
             // replaceState() only updates a parameter when its stored (unnormalised) value differs from the cached one,
             // so a switch left at an in-between normalised value (hosts may send any 0..1) would not be reset.
             // Push every stored value explicitly so the restored state is exact.

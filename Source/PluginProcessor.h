@@ -11,6 +11,7 @@
 #include "DSP/OutputClipper.h"
 #include "DSP/Chain.h"
 #include "PresetManager.h"
+#include "CustomCurveStore.h"
 
 /** Lock-free single-producer/single-consumer sample FIFO feeding the spectrum analyzer. */
 class AnalyzerFifo
@@ -129,6 +130,22 @@ public:
     /** Exact root the kick is tuned to, including the Tune parameter (fractional MIDI note). */
     float getTargetNote() const { return (float) getPlayedNote() + tune->load(); }
 
+    //==========================================================================
+    // Custom distortion curves (message thread; see CustomCurveStore)
+    CustomCurveStore& getCustomCurves() { return customCurves; }
+    /** Tests: host notices sent for curve edits so far (pending ones are sent first). */
+    int flushCurveChangeNoticesForTesting() { if (curveChangeNotifier.isPending()) curveChangeNotifier.flushForTesting(); return curveChangeNotifier.notices; }
+    /** The distortion settings the unit (1 or 2) gets from the parameters and macros right now. */
+    ClipDistortion::Settings buildClipSettings (int stage) const;
+    /** A custom curve that reproduces the unit's current Type at its current settings. */
+    FreeCurve seedCustomCurve (int stage) const;
+    bool isCustomEnabled (int stage) const;
+    /** Switches "Dist N Custom Curve" through the state tree, so it joins the open undo transaction. */
+    void setCustomEnabled (int stage, bool on);
+    /** Starts an edit of the unit's curve (one undo step): seeds a curve from the Type when there is none (or always,
+        with reseed) and switches the custom curve on. */
+    void beginCustomEdit (int stage, const juce::String& transactionName, bool reseed = false);
+
 private:
     void updateParameters();
     void handleMidi (const juce::MidiMessage&, int positionInChunk);
@@ -143,6 +160,29 @@ private:
 
     KickVoice voice;
     ClipDistortion clip1, clip2;
+    CustomCurveStore customCurves { apvts, { &clip1, &clip2 } };
+    /** Tells the host that the plug-in state changed outside its parameters (a custom curve edit), so the project is
+        marked modified. Message thread only for the host call; a whole drag or pencil stroke coalesces into one notice. */
+    struct CurveChangeNotifier : private juce::AsyncUpdater, private juce::Timer
+    {
+        explicit CurveChangeNotifier (juce::AudioProcessor& p) : processor (p) {}
+        ~CurveChangeNotifier() override { cancelPendingUpdate(); stopTimer(); }
+        void changed() { triggerAsyncUpdate(); }   // any thread
+        void cancel() { cancelPendingUpdate(); if (juce::MessageManager::existsAndIsCurrentThread()) stopTimer(); }
+        bool isPending() const { return isUpdatePending() || isTimerRunning(); }
+        void flushForTesting() { cancelPendingUpdate(); stopTimer(); notify(); }
+        int notices = 0;   // tests
+    private:
+        void handleAsyncUpdate() override { startTimer (250); }   // restarted by every change of a drag
+        void timerCallback() override { stopTimer(); notify(); }
+        void notify()
+        {
+            ++notices;
+            processor.updateHostDisplay (juce::AudioProcessorListener::ChangeDetails().withNonParameterStateChanged (true));
+        }
+        juce::AudioProcessor& processor;
+    } curveChangeNotifier { *this };
+    bool restoringState = false;   // setStateInformation: the host itself set the state, no change notice
     std::array<eq::EqEngine, ID::numEqs> equalisers;   // [0] between the distortions, [1] post (before Space)
     sat::MultibandSaturator saturator;
     space::SpaceReverb reverb;
@@ -176,7 +216,7 @@ private:
 
     struct BandParams { std::atomic<float>* on, * type, * freq, * gain, * q, * slope, * place; };
     struct ClipParams { std::atomic<float> *on, *mode, *drive, *boost, *chr, *bias, *loFilt, *hiFilt, *shelfF, *shelfG, *mix, *out, *dc, *os, *spatial,
-                               *fltPos, *fltType, *fltFreq, *fltRes, *tailDrv, *split, *autoGain;
+                               *fltPos, *fltType, *fltFreq, *fltRes, *tailDrv, *split, *autoGain, *cust;
                         std::array<std::atomic<float>*, ClipDistortion::numCurvePoints> xp {}, xn {}; };
     struct SatBandParams { std::atomic<float> *style, *drive, *mix, *fb, *fbFreq, *dyn, *bass, *midT, *treble, *pres, *drivePan, *levelPan, *level, *mute, *solo, *bypass; };
 

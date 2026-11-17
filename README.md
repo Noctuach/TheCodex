@@ -115,14 +115,29 @@ Two full distortion units, one **before** and one **after** the EQ:
 
 | Group | Controls |
 |---|---|
-| Type | 17 curves: Hard Clip, Soft Clip, Tanh, Overdrive, Tube, Diode, Diode 2, Fuzz, Sine Fold, Tri Fold, Rectify, Bitcrush, Asym Clip, Zero-Square, Downsample, X-Shaper, X-Shaper (Asym). The display shows the live transfer curve and the current input level. |
+| Type | 17 curves: Hard Clip, Soft Clip, Tanh, Overdrive, Tube, Diode, Diode 2, Fuzz, Sine Fold, Tri Fold, Rectify, Bitcrush, Asym Clip, Zero-Square, Downsample, X-Shaper, X-Shaper (Asym). The display shows the live transfer curve and the current input level. Draw on it to turn any Type into a custom curve (below). |
 | Shape | *Drive*, *Boost* (input gain on dry and wet), *Character* (morphs any curve towards a square wave), *Offset* (asymmetry), *Spatial* (distorts left and right differently for stereo width). |
 | Wet filters / tone | *Lo Filter* (low-pass before the distortion), *Hi Filter* (high-pass after it), *Shelf Freq/Gain*. |
 | Output | *Mix* (dry/wet), *Output*. |
 | Punch / tail | *Tail Drive* (±24 dB) changes the drive for the tail relative to the punch; *Split* sets how long after each hit the tail setting is reached. Raw tail with a clean punch, or a hard punch with a smooth tail, without layering. |
 | Filter | Resonant *Pre* / *Post* filter on the distorted path (Low Pass 12/24, Band Pass, High Pass 12/24, Notch). Drag the response strip under the transfer display: left/right = frequency, up/down = resonance. A resonant band-pass *Pre* focuses the distortion on one part of the kick. |
-| X-Shaper | In the *X-Shaper* modes, drag the points on the transfer display to draw your own curve (*Asym*: both halves separately); right-click for preset curves. |
+| X-Shaper | In the *X-Shaper* modes, drag the 8 fixed points per half on the transfer display (*Asym*: both halves separately); right-click for preset curves. Kept unchanged for compatibility: its points are automatable parameters. |
+| Custom curve | Draw your own transfer curve in any Type, see below. |
 | Options | *Oversampling* (Off/2x/4x/8x/16x, or *Raw*: no anti-aliasing for a gritty digital edge), *DC Filter* and *AUTO* gain (Drive changes the character, not the level). Every curve also uses antiderivative anti-aliasing, so 4x already keeps audible aliasing around -64 dB on a hard-clipped 5 kHz tone. |
+
+#### Custom curve
+Each unit can play a freely drawn transfer curve instead of its Type's shape.
+
+- **Start drawing** on the display in any Type: drag on the curve, double-click, draw with the pencil, pick a starter shape (right-click or the menu button), or press **CURVE**. The curve is first seeded from the current Type at the current settings (sampled and reduced to a few points), so the sound only changes by what you draw.
+- **Points**: drag in x and y (Shift: fine; the end points move in y only). Double-click empty space to add a point, double-click a point to delete it (or right-click > Delete point). Ctrl/Cmd-click or right-click > Sharp corner switches a point between smooth and a sharp corner. Up to 64 points.
+- **Bends**: drag the diamond in the middle of a segment (or Alt-drag anywhere on a segment, or use the mouse wheel over the diamond), as in the drawable envelopes. Double-click a diamond for a straight segment.
+- **Pencil**: draws a stroke that replaces the points under it (one undo step).
+- **SYM / ASYM**: draw the positive half and mirror it, or both halves independently (even harmonics). Switching to ASYM keeps the sound.
+- **Menu**: starter shapes (Soft Knee, Hard Wall, Warm Tube, Double Fold, Staircase, S-Curve, Inverted Knee, Half-Wave Crush), re-seed from the Type, *Fit range to Drive*, flip, mirror, smooth / sharpen all corners, straight line, and *Back to <Type>*.
+- **Range**: the drawn x axis covers the input range the Drive reached when the curve was seeded (shown as *IN ±R*); beyond it the curve is held flat. The dashed DRIVE lines show where the current Drive reaches; *Fit range to Drive* re-fits the range (this changes the sound).
+- The Type still decides the Downsample hold and whether Bitcrush / Downsample / Raw skip anti-aliasing; Character, Offset, Tail Drive and Spatial work as usual. Picking a Type in the menu switches the custom curve off (the curve is kept; CURVE brings it back).
+- **Stored where**: the points are saved in the project, in user presets, follow A/B and undo, but are not host parameters. Only **Dist N Custom Curve** (on/off) is automatable. Every curve edit (and its undo / redo) still tells the host that the project changed, so it asks to save before closing. Factory presets have no custom curve. Edits while playing are crossfaded (5 ms), so they do not click.
+- **Limits**: at most 64 points; folds at extreme drive and Bitcrush steps are approximated by the seed (within a few percent); the curve is flat beyond its range. Existing X-Shaper projects and presets sound exactly as before.
 
 A bypassed unit is dimmed and shows an **ENABLE** card, so a switched-off stage cannot go unnoticed (the *909 Clean* preset
 bypasses both units on purpose; every other preset switches them back on).
