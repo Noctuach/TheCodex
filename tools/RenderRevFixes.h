@@ -5,8 +5,11 @@
 //  - Bass Xover above High Xover no longer lifts the loop gain (decay stays at the set value)
 //  - the dry / wet glides land exactly on their targets
 //  - stable at the parameter extremes at every sample rate
+//  - above 8 kHz: the modulated all-pass read's spurious energy vs the linear read's (a pinned trade-off)
+//  - Late Size / Mode stepped during a long tail: the tail keeps decaying (linear read while a length glides fast)
 #pragma once
 #include <complex>
+#include <tuple>
 
 namespace revfix
 {
@@ -188,6 +191,61 @@ static int reverbFixTests()
         }
     }
 
+    // ---- 2b. Above ~8 kHz the modulated all-pass read is noisier than a linear read (a measured trade-off). Each
+    //          half-integer crossing switches (i, frac 1.5, a -0.2) -> (i + 1, frac 0.5, a 1/3); a first-order all-pass
+    //          always delays Nyquist by a whole sample, so the high-frequency delay steps by up to a sample at each
+    //          crossing. The linear read is continuous in d but is a low-pass that varies with frac (down to -6 dB at
+    //          16 kHz / 48 kHz): amplitude modulation instead, plus a loss that compounds in the loop (the decay bug the
+    //          all-pass read fixed). Removing the step needs a second, pre-warmed all-pass per line whose crossfade with
+    //          the first notches the highs in the loop again, so the all-pass figures are pinned (measured + 1 dB) to
+    //          keep the trade-off from drifting. In the plug-in the wet High Cut (default 8 kHz) and the high-band decay
+    //          (High Mult x mode damping) sit on top. Metric: output energy in the bins where the ideal moving delay has
+    //          none (< -70 dB of its peak; Hann, 32768 points), re the total. Same sweep as check 2. ----
+    {
+        std::cout << "\nSpace modulated read above 8 kHz: spurious energy (outside the ideal moving delay's spectrum), all-pass vs linear\n";
+        const struct { double rate, f, maxAp; } cases[] = {
+            { 48000.0, 4000.0, -41.0 }, { 48000.0, 8000.0, -24.5 }, { 48000.0, 12000.0, -15.4 }, { 48000.0, 16000.0, -9.6 },
+            { 44100.0, 8000.0, -22.6 }, { 44100.0, 12000.0, -13.5 }, { 44100.0, 16000.0, -8.1 } };
+        constexpr int order = 15, N = 1 << order;
+        juce::dsp::FFT fft (order);
+        for (const auto& c : cases)
+        {
+            space::Delay d;
+            d.prepare (2048);
+            float z1 = 0.0f;
+            std::vector<float> ap ((size_t) 2 * N, 0.0f), lin ((size_t) 2 * N, 0.0f), ideal ((size_t) 2 * N, 0.0f);
+            for (int i = -1024; i < N; ++i)
+            {
+                const double D = 300.3 + 46.0 * (1.0 + std::sin (2.0 * pi * 8.0 * i / c.rate));
+                const float yAp = d.readAllpass ((float) D, z1), yLin = d.read ((float) D);
+                d.push ((float) std::sin (2.0 * pi * std::fmod ((double) i * c.f / c.rate, 1.0)));
+                if (i < 0) continue;
+                const float w = (float) (0.5 - 0.5 * std::cos (2.0 * pi * i / N));
+                ap[(size_t) i] = yAp * w; lin[(size_t) i] = yLin * w;
+                ideal[(size_t) i] = (float) std::sin (2.0 * pi * c.f * (i - D) / c.rate) * w;
+            }
+            for (auto* v : { &ap, &lin, &ideal }) fft.performFrequencyOnlyForwardTransform (v->data());
+            float peak = 0.0f;
+            for (int k = 0; k <= N / 2; ++k) peak = std::max (peak, ideal[(size_t) k]);
+            auto spur = [&] (const std::vector<float>& m)
+            {
+                double out = 0.0, tot = 0.0;
+                for (int k = 1; k <= N / 2; ++k)
+                {
+                    const double e = (double) m[(size_t) k] * m[(size_t) k];
+                    tot += e;
+                    if (ideal[(size_t) k] < peak * 3.16e-4f) out += e;
+                }
+                return 10.0 * std::log10 (std::max (out, 1e-30) / tot);
+            };
+            const double apDb = spur (ap), linDb = spur (lin);
+            std::cout << "   " << juce::String ((int) c.rate).paddedLeft (' ', 6) << " Hz, " << juce::String (c.f, 0).paddedLeft (' ', 5)
+                      << " Hz: all-pass " << juce::String (apDb, 1) << " dB, linear " << juce::String (linDb, 1) << " dB\n";
+            check (apDb <= c.maxAp, "modulated all-pass read at " + juce::String (c.f) + " Hz / " + juce::String (c.rate) + ": "
+                                    + juce::String (apDb, 1) + " dB");
+        }
+    }
+
     // ---- 3. Bass Xover above High Xover: decay stays at the set value (no loop-gain overshoot between them) ----
     {
         std::cout << "\nSpace Bass Xover > High Xover (Large Room, decay 10 s x bass / high mult 2 = 20 s everywhere); tolerance +-10 %\n";
@@ -287,6 +345,62 @@ static int reverbFixTests()
         std::cout << "   non-finite samples " << nonFinite << ", worst tail growth (peak 4-5 s after vs 0-1 s after the burst) "
                   << juce::String (worstGrowth, 2) << " dB\n";
         check (nonFinite == 0, "non-finite reverb output");
+    }
+
+    // ---- 6. Late Size / Mode stepped during a long tail: the tail keeps decaying. A step glides the line lengths at
+    //         up to ~20 samples per sample; the all-pass read's state then belongs to another part of the line and the
+    //         read could add energy (tail grew +6 dB at T60 80 s). The read is linear while a length moves fast. ----
+    {
+        std::cout << "\nSpace Late Size / Mode stepped every 150 / 500 ms during the tail (0.1 s noise, then 6 s): level change "
+                     "5-6 s vs 0.5-1.5 s, and design\n";
+        for (double rate : { 48000.0, 192000.0 })
+            for (const auto& c : { std::make_tuple (20.0f, 1.0f, 0.15, false), std::make_tuple (20.0f, 4.0f, 0.15, false),
+                                   std::make_tuple (20.0f, 4.0f, 0.5, false), std::make_tuple (5.0f, 1.0f, 0.15, false),
+                                   std::make_tuple (20.0f, 4.0f, 0.15, true) })
+            {
+                const float decay = std::get<0> (c), mult = std::get<1> (c);
+                const double period = std::get<2> (c);
+                const bool modeSteps = std::get<3> (c);
+                auto s = lateOnly (5, decay);
+                s.bassMult = mult; s.highMult = mult; s.lModDepth = 1.0f; s.lModRate = 1.0f; s.lSize = 1.0f;
+                space::SpaceReverb rv; rv.prepare (rate); rv.setSettings (s);
+                const int total = (int) (6.1 * rate), noise = (int) (0.1 * rate), step = (int) (period * rate);
+                juce::AudioBuffer<float> b (2, total);
+                b.clear();
+                juce::Random rnd (99);
+                for (int i = 0; i < noise; ++i)
+                    for (int ch = 0; ch < 2; ++ch) b.setSample (ch, i, 2.0f * rnd.nextFloat() - 1.0f);
+                for (int p = 0, k = 0; p < total; p += step, ++k)
+                {
+                    if (p >= noise)
+                    {
+                        if (modeSteps) { s.mode = (k & 1) ? 0 : 5; s.lSize = (k & 1) ? 0.0f : 1.0f; }
+                        else s.lSize = (k & 1) ? 0.0f : 1.0f;
+                        rv.setSettings (s);
+                    }
+                    for (int q = p; q < std::min (total, p + step); q += 512)
+                        rv.process (b.getWritePointer (0, q), b.getWritePointer (1, q), std::min ({ 512, total - q, p + step - q }));
+                }
+                auto rmsDb = [&] (double t0, double t1)
+                {
+                    const int i0 = (int) (t0 * rate), i1 = (int) (t1 * rate);
+                    double e = 0.0;
+                    for (int ch = 0; ch < 2; ++ch) for (int i = i0; i < i1; ++i) e += (double) b.getSample (ch, i) * b.getSample (ch, i);
+                    return 10.0 * std::log10 (std::max (e / (2.0 * (i1 - i0)), 1e-300));
+                };
+                const double change = rmsDb (5.1, 6.1) - rmsDb (0.6, 1.6);
+                // design: the slowest band's T60 (Warehouse damping 0.75 on the highs), 4.5 s apart
+                const double slowT60 = (double) std::min (20.0f, decay) * mult, designDb = -60.0 * 4.5 / slowT60;
+                bool finite = true;
+                for (int ch = 0; ch < 2; ++ch) for (int i = 0; i < total; ++i) finite = finite && std::isfinite (b.getSample (ch, i));
+                std::cout << "   " << juce::String ((int) rate).paddedLeft (' ', 6) << " Hz T60 " << juce::String (slowT60, 0).paddedLeft (' ', 3)
+                          << " s, " << (modeSteps ? "Mode+Size" : "Size     ") << " every " << juce::String ((int) (period * 1000.0)).paddedLeft (' ', 3)
+                          << " ms: " << juce::String (change, 1).paddedLeft (' ', 6) << " dB (design slowest band " << juce::String (designDb, 1) << " dB)\n";
+                // must decay at least as fast as the slowest band (the steps only add Doppler loss)
+                check (finite && change <= designDb + 1.0, "stepped Late Size: " + juce::String (rate) + " Hz T60 " + juce::String (slowT60)
+                                                            + " period " + juce::String (period) + ": " + juce::String (change, 2) + " dB vs design "
+                                                            + juce::String (designDb, 2));
+            }
     }
 
     std::cout << "Space reverb decay / crossover / glide fixes: " << (bad == 0 ? "OK" : "FAILED") << "\n";

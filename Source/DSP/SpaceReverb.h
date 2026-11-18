@@ -301,9 +301,22 @@ namespace space
                 std::array<float, numLines> x;
                 for (int i = 0; i < numLines; ++i)
                 {
+                    const float prevLen = curLen[(size_t) i];
                     curLen[(size_t) i] += (targetLen[(size_t) i] - curLen[(size_t) i]) * 0.0005f;
                     const float mod = lDepth * (1.0f + std::sin (lPhase + (float) i * 0.785398f));
-                    float v = lines[(size_t) i].readAllpass (juce::jmax (2.0f, curLen[(size_t) i] + mod), apState[(size_t) i]);
+                    const float dl = juce::jmax (2.0f, curLen[(size_t) i] + mod);
+                    // While the length glides fast (a Late Size / Mode change: up to ~20 samples per sample) the
+                    // all-pass state belongs to another part of the line and the read can add energy (gain up to
+                    // 1 + 2|a|), so the tail could grow. Read linearly then (a convex blend: gain <= 1) and keep the
+                    // state seeded with that read, so the all-pass takes over smoothly once the glide slows down.
+                    float v;
+                    if (std::abs (curLen[(size_t) i] - prevLen) > fastGlide)
+                    {
+                        v = lines[(size_t) i].read (dl);
+                        apState[(size_t) i] = v;
+                    }
+                    else
+                        v = lines[(size_t) i].readAllpass (dl, apState[(size_t) i]);
                     // 3-band decay: bass / mid / high decay at their own rate
                     const float low  = bassF[(size_t) i].lp (v);
                     const float high = trebleF[(size_t) i].hp (v);
@@ -343,6 +356,9 @@ namespace space
             const float n = x + (t - x) * k;
             x = juce::exactlyEqual (n, x) ? t : n;
         }
+
+        /** Length change per sample above which the late lines read linearly instead of through the all-pass. */
+        static constexpr float fastGlide = 0.5f;
 
         static void hadamard (std::array<float, numLines>& v) noexcept
         {
