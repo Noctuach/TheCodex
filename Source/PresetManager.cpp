@@ -237,7 +237,7 @@ PresetManager::PresetManager (AudioProcessorValueTreeState& s) : apvts (s)
     // of F, with peaks below -1 dBFS; presets with spiky transients use the output clipper instead of turning down.
     const std::map<String, float> outputLevels {
         { "Oldskool Raw", -0.1f }, { "Euphoric Tail", -3.3f }, { "Early Hardstyle", -0.3f }, { "Punchy Tok", -1.8f },
-        { "Zaag Kick", -1.6f }, { "Rotterdam Gabber", -0.5f }, { "909 Clean", -1.7f }, { "909 Oldskool Hardstyle", 1.6f },
+        { "Zaag Kick", -1.6f }, { "Rotterdam Gabber", -0.5f }, { "909 Clean", -2.0f }, { "909 Oldskool Hardstyle", 1.6f },
         { "909 Euphoric", -1.2f }, { "909 Rawstyle", 5.1f }, { "909 Gabber Overdrive", 0.3f }, { "909 Tok", -0.3f },
         { "909 Boom Tail", 0.4f }, { "909 Fuzz Box", 1.8f }, { "909 Bitcrushed", 1.2f }, { "909 Hard Attack Raw", 1.2f },
         { "909 Wide Rawstyle", 3.0f }, { "Saturated Euphoric", -3.1f },

@@ -236,6 +236,12 @@ int main (int argc, char** argv)
         std::cout << "\n" << (bad == 0 ? "NAN CHECKS PASSED" : juce::String (bad) + " NAN CHECK(S) FAILED") << "\n";
         return bad == 0 ? 0 : 2;
     }
+    if (std::getenv ("CODEX_DIST_ONLY") != nullptr)   // quick run: the distortion offset / off-unit / toggle checks only
+    {
+        const int bad = distortionFixTests() + processorDistOffTest();
+        std::cout << "\n" << (bad == 0 ? "DIST CHECKS PASSED" : juce::String (bad) + " DIST CHECK(S) FAILED") << "\n";
+        return bad == 0 ? 0 : 2;
+    }
     if (std::getenv ("CODEX_CURVE_ONLY") != nullptr)   // quick run: the custom curve maths and seeding only
     {
         const int bad = customCurveUnitTests();
@@ -308,6 +314,9 @@ int main (int argc, char** argv)
         }
         return (float) (-0.691 + 10.0 * std::log10 (best + 1.0e-12));   // LUFS-style short-term value
     };
+    CodexProcessor probe;   // the seeded headroom renders below (kept apart so `proc`'s random click noise is untouched)
+    probe.setPlayConfigDetails (0, 2, sr, block);
+    setParam (probe, ID::keyMode, 0.0f);
     for (int i = 0; i < proc.presets.getNumFactory(); ++i)
     {
         proc.presets.loadPreset (i);
@@ -320,13 +329,35 @@ int main (int argc, char** argv)
         if (std::getenv ("CODEX_FFT_PITCH") != nullptr)
             std::cout << "        FFT fundamental " << juce::String (fftFundamental (audio, 0.15, 0.17), 2) << " Hz ("
                       << juce::String (1200.0f * std::log2 (fftFundamental (audio, 0.15, 0.17) / targetHz), 1) << " c)\n";
-        const bool ok = finite && pk < 1.0f && pk > -30.0f && hz > 0 && std::abs (cents) < 25.0f;
+        // Level-match rule (PresetManager.cpp outputLevels, CODEX_LEVEL_MATCH below): a preset without the output
+        // clipper keeps its peaks 1 dB below full scale (0.05 dB slack for the table's 0.1 dB steps). The 909 click
+        // noise is seeded randomly, which moves a single hit's peak by up to 2.9 dB, so the rule is checked on the
+        // median peak over nine fixed seeds (deterministic; the level match below uses the same value).
+        const bool clipper = proc.apvts.getRawParameterValue (ID::clipOn)->load() > 0.5f;
+        float headPk = pk;
+        if (! clipper)
+        {
+            std::array<float, 9> seeded {};
+            for (size_t seed = 0; seed < seeded.size(); ++seed)
+            {
+                probe.presets.loadPreset (i);
+                probe.seedNoiseForTesting ((juce::int64) seed + 1);
+                auto a = render (probe, 2);
+                seeded[seed] = juce::Decibels::gainToDecibels (a.getMagnitude (0, 0, a.getNumSamples()));
+            }
+            std::sort (seeded.begin(), seeded.end());
+            headPk = seeded[seeded.size() / 2];
+        }
+        const bool headroomOk = clipper || headPk <= -0.95f;
+        const bool ok = finite && pk < 1.0f && pk > -30.0f && hz > 0 && std::abs (cents) < 25.0f && headroomOk;
         failures += ok ? 0 : 1;
         const float loud = hitLoudness (audio);
-        presetLevels.push_back ({ loud, pk });
+        presetLevels.push_back ({ loud, headPk });
         std::cout << proc.presets.getFactoryNames()[i].paddedRight (' ', 26) << juce::String (pk, 1).paddedLeft (' ', 9)
                   << juce::String (hz, 2).paddedLeft (' ', 10) << " Hz" << juce::String (cents, 1).paddedLeft (' ', 8)
-                  << juce::String (loud, 1).paddedLeft (' ', 11) << (ok ? "" : "   <-- CHECK") << "\n";
+                  << juce::String (loud, 1).paddedLeft (' ', 11) << (ok ? "" : headroomOk ? "   <-- CHECK"
+                                                                                   : "   <-- CHECK (no output clipper: median peak " + juce::String (headPk, 2)
+                                                                                         + " dBFS, must stay <= -1)") << "\n";
         writeWav (audio, outDir.getChildFile (juce::File::createLegalFileName (proc.presets.getFactoryNames()[i]) + ".wav"));
     }
 

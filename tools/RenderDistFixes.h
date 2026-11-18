@@ -2,6 +2,7 @@
 //  - no step after prepare() / reset() when Offset (or Spatial) is not 0 (ADAA history seeded at the operating point)
 //  - a switched-off unit is transparent: its DC filter does not run, and toggling it stays click-free
 //  - with Auto Gain on, toggling On or Auto Gain stays click-free (the Auto Gain fades with the unit)
+//  - the pre / post filter starts from a cleared state when it comes back in (no stale resonant ring in silence)
 #pragma once
 #include <complex>
 
@@ -226,6 +227,35 @@ static int distortionFixTests()
                           << " largest step " << step << " (limit " << limit << ")\n";
                 check (step < limit, juce::String ("Auto Gain, OS ") + ClipDistortion::oversamplingNames()[os] + ", " + q.name + ": click on toggle");
             }
+        }
+    }
+
+    // ---- 5. The pre / post filter comes back in from a cleared state (no ring of a stale, frozen state) ----
+    {
+        std::cout << "\nDistortion: pre filter (LP 12, 200 Hz, Res 1.0) back in during silence (peak of the silent output)\n";
+        const int n = (int) (sr * 1.4);
+        auto in = sine (sr, 200.0f, 0.5f, n);
+        const int stopAt = ((int) (sr * 0.8) / 256) * 256, offAt = ((int) (sr * 0.5) / 256) * 256, backAt = ((int) (sr * 1.0) / 256) * 256;
+        for (int ch = 0; ch < 2; ++ch) in.clear (ch, stopAt, n - stopAt);   // silence from 0.8 s
+        struct Case { const char* name; bool unitToggle; };
+        for (const Case c : { Case { "unit On -> Off -> On", true }, Case { "filter Pre -> Off -> Pre", false } })
+        for (int os : { 0, 2 })
+        {
+            ClipDistortion::Settings st; st.mode = ClipDistortion::Tanh; st.driveDb = 0.0f; st.oversampling = os;
+            st.filterPos = 1; st.filterType = ClipDistortion::LowPass12; st.filterHz = 200.0f; st.filterRes = 1.0f;
+            ClipDistortion d; d.prepare (sr, 256); d.setSettings (st); d.reset(); d.setSettings (st);
+            auto b = in;
+            for (int p = 0; p < n; p += 256)
+            {
+                if (p == offAt)  { if (c.unitToggle) st.enabled = false; else st.filterPos = 0; d.setSettings (st); }
+                if (p == backAt) { if (c.unitToggle) st.enabled = true; else st.filterPos = 1; d.setSettings (st); }
+                d.process (b.getWritePointer (0, p), b.getWritePointer (1, p), std::min (256, n - p));
+            }
+            // the input has been silent for 0.2 s when the filter comes back; the dry path's filters have died out
+            const float pk = b.getMagnitude (backAt, n - backAt);
+            std::cout << "  OS " << ClipDistortion::oversamplingNames()[os] << ", " << juce::String (c.name).paddedRight (' ', 26)
+                      << " peak after it is back " << pk << " (limit 1e-4)\n";
+            check (pk < 1.0e-4f, juce::String ("filter state, OS ") + ClipDistortion::oversamplingNames()[os] + ", " + c.name + ": stale ring");
         }
     }
     return bad;

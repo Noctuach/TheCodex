@@ -185,6 +185,12 @@ public:
 
         // a switched-off unit drops its pre / post filter only once the wet has faded out (no step in the fading wet)
         filterPos = settings.enabled || mix.isSmoothing() ? settings.filterPos : 0;
+        // The filter does not run while it is out, so its state froze when it went out. When it comes back in (the unit
+        // switched On, or the filter Off -> Pre / Post) it starts from a cleared state: a frozen state rang at the
+        // filter's resonance in silence (up to 0.97 FS at Res 1.0). An off unit's wet is at mix 0 then, so this cannot step.
+        if (filterPos != 0 && filterRanLast == 0)
+            for (auto& f : svf) f.reset();
+        filterRanLast = filterPos;
 
         if (activeOs >= 0)
         {
@@ -804,6 +810,7 @@ private:
     juce::SmoothedValue<float, juce::ValueSmoothingTypes::Multiplicative> filterCutoff { 1000.0f };
     std::array<Svf, 4> svf;   // [channel * 2 + stage]
     int filterPos = 0, filterType = 0;
+    int filterRanLast = 0;   // filterPos in the last process() call (0: the filter was out and its state is stale)
     float filterK = 1.0f, fa1 = 0.0f, fa2 = 0.0f, fa3 = 0.0f, fb1 = 0.0f, fb2 = 0.0f, fb3 = 0.0f, resComp = 1.0f;
     Curve curve;
     AdaaTable curveTable;
