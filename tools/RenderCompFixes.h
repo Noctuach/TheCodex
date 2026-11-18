@@ -1,7 +1,11 @@
 // Compressor regression checks for CodexRender (included by Render.cpp after its helpers):
 //  - feedback-detector styles (Classic, Vari-Mu): the band Gain / make-up sits outside the feedback loop, so the
 //    gain reduction does not depend on it
-//  - every other style (and the feedback styles at 0 dB make-up) is bit-exact to the code before that fix
+//  - every style: the band Gain is a pure output scale (output with +G dB == output at 0 dB times G, within float
+//    rounding), compared in-process, so the check does not depend on the toolchain's libm or code generation
+//  - opt-in (CODEX_COMP_HASH_CHECK=1): every other style (and the feedback styles at 0 dB make-up) is bit-exact to
+//    the code before that fix. The hashes are raw float bits from one toolchain (GCC 13 / glibc 2.39, Release), so
+//    they are not part of the default (CI) run
 #pragma once
 
 namespace compfix
@@ -44,6 +48,54 @@ namespace compfix
         return juce::Decibels::gainToDecibels (b.getMagnitude (0, n - tail, tail)) - gainDb - (-6.0f);
     }
 
+    /** A decaying kick-like sweep plus a sine: crosses the threshold both ways. */
+    inline juce::AudioBuffer<float> kickSource (int n)
+    {
+        juce::AudioBuffer<float> src (2, n);
+        double ph = 0.0;
+        for (int i = 0; i < n; ++i)
+        {
+            const double t = i / sr, f = 45.0 + 400.0 * std::exp (-t * 30.0);
+            ph += f / sr;
+            const float v = (float) (0.9 * std::exp (-t * 6.0) * std::sin (juce::MathConstants<double>::twoPi * std::fmod (ph, 1.0))
+                                     + 0.1 * std::sin (juce::MathConstants<double>::twoPi * std::fmod (3000.0 * t, 1.0)));
+            src.setSample (0, i, v); src.setSample (1, i, 0.7f * v);
+        }
+        return src;
+    }
+
+    /** Worst |out(+gainDb) - g * out(0 dB)| relative to the output peak, over a 1-band and a 3-band (lookahead) layout,
+        every band at the same Gain, Auto Gain off. 0 (within float rounding) when the Gain does not reach the detector. */
+    inline float makeupScaleError (int style, float gainDb)
+    {
+        const int n = (int) (0.4 * sr);
+        const auto src = kickSource (n);
+        const float g = juce::Decibels::decibelsToGain (gainDb);
+        float worst = 0.0f;
+        for (int layout = 0; layout < 2; ++layout)
+        {
+            juce::AudioBuffer<float> outs[2];
+            for (int k = 0; k < 2; ++k)
+            {
+                comp::Settings s = settings (style, k == 0 ? 0.0f : gainDb, false);
+                if (layout == 1) { s.numBands = 3; s.lookahead = 2; }
+                comp::MultibandCompressor c; c.setSettings (s); c.prepare (sr);   // smoothers start at their targets
+                outs[k] = src;
+                run (c, outs[k], 128);
+            }
+            float peak = 0.0f, err = 0.0f;
+            for (int ch = 0; ch < 2; ++ch)
+                for (int i = 0; i < n; ++i)
+                {
+                    const float y = outs[1].getSample (ch, i);
+                    peak = std::max (peak, std::abs (y));
+                    err = std::max (err, std::abs (y - g * outs[0].getSample (ch, i)));
+                }
+            worst = std::max (worst, err / std::max (peak, 1.0e-9f));
+        }
+        return worst;
+    }
+
     /** FNV-1a over the float bits of a render: several band layouts / gains / switches for one style. */
     inline uint64_t styleHash (int style, bool includeMakeup)
     {
@@ -59,17 +111,7 @@ namespace compfix
                 }
         };
         const int n = (int) (0.4 * sr);
-        // a decaying kick-like sweep plus a sine: crosses the threshold both ways
-        juce::AudioBuffer<float> src (2, n);
-        double ph = 0.0;
-        for (int i = 0; i < n; ++i)
-        {
-            const double t = i / sr, f = 45.0 + 400.0 * std::exp (-t * 30.0);
-            ph += f / sr;
-            const float v = (float) (0.9 * std::exp (-t * 6.0) * std::sin (juce::MathConstants<double>::twoPi * std::fmod (ph, 1.0))
-                                     + 0.1 * std::sin (juce::MathConstants<double>::twoPi * std::fmod (3000.0 * t, 1.0)));
-            src.setSample (0, i, v); src.setSample (1, i, 0.7f * v);
-        }
+        const auto src = kickSource (n);
         for (int layout = 0; layout < 3; ++layout)
         {
             comp::Settings s = settings (style, 0.0f, false);
@@ -103,13 +145,29 @@ static int compressorFeedbackMakeupTests()
         if (! ok) ++bad;
     }
 
-    // bit-exactness: the hashes were taken from the code before the fix. Non-feedback styles are hashed with
+    // toolchain-independent: the band Gain only scales the output, for every style (compared in the same process)
+    std::cout << "  band Gain +9 dB is a pure output scale (max error re output peak, limit 1e-4):\n";
+    for (int style = 0; style < comp::numStyles; ++style)
+    {
+        const float e = compfix::makeupScaleError (style, 9.0f);
+        const bool ok = e <= 1.0e-4f;
+        std::cout << "    " << comp::styleNames()[style].paddedRight (' ', 9) << " " << juce::String (e, 7) << ": "
+                  << (ok ? "OK" : "FAILED") << "\n";
+        if (! ok) ++bad;
+    }
+
+    // opt-in bit-exactness (CODEX_COMP_HASH_CHECK=1): the hashes were taken from the code before the fix. Non-feedback styles are hashed with
     // band gains and auto make-up; the feedback styles only at 0 dB make-up (the case the fix leaves unchanged).
     static const uint64_t expected[comp::numStyles] = {
         0x4927fde18dd6f420ull, 0xa802491eef9461b0ull, 0x2fedb391bad5ec21ull, 0xa51da6ff89448772ull,
         0x58701bb08a4ae441ull, 0x9281a9a2eb2e518dull, 0x5775a5dd76dafbdull,  0x4de1009058a957b8ull,
         0x85d2681e68f76cull,   0xa99d4735815fe6ull,   0x2bcd17772ffa1392ull };
     const bool dump = std::getenv ("CODEX_COMP_HASH_DUMP") != nullptr;
+    if (! dump && std::getenv ("CODEX_COMP_HASH_CHECK") == nullptr)
+    {
+        std::cout << "  other styles bit-exact: skipped (toolchain-specific hashes; set CODEX_COMP_HASH_CHECK=1)\n";
+        return bad;
+    }
     int changed = 0;
     for (int style = 0; style < comp::numStyles; ++style)
     {
