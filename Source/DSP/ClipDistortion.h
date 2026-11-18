@@ -149,6 +149,9 @@ public:
     }
 
     /** Latency in base-rate samples for the current oversampling setting. */
+    /** True while the unit's 10 Hz DC filter is in (or fading in): the sub layer's phase match follows it. */
+    bool isDcFilterActive() const noexcept { return dcAmount.getTargetValue() > 0.0f; }
+
     float getLatencyInSamples() const
     {
         const int i = settings.oversampling == rawOversampling ? -1 : settings.oversampling - 1;

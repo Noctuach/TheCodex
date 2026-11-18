@@ -133,6 +133,9 @@ void CodexProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     reverb.prepare (sampleRate);
     compressor.prepare (sampleRate);
     updateParameters();
+    // the sub's phase match starts fully at the chain's state (the chain's crossovers / DC filters are in at once too)
+    updateSubPhaseMatch();
+    subMatch.snapAndClear();
 
     clipper.prepare (sampleRate, chunkSize);
     outGain.reset (sampleRate, 0.02);
@@ -202,11 +205,14 @@ void CodexProcessor::updateSubPhaseMatch()
     using PM = subalign::PhaseMatch;
     const int ns = saturator.getNumActiveCrossovers(), slope = saturator.getCrossoverSlope();
     for (int j = 0; j < PM::satSections; ++j)
-        subMatch.setCrossover (j, j < ns, slope, saturator.getCrossover (j));
+        subMatch.setCrossover (j, j < ns, slope, saturator.getCrossover (j), saturator.getProcessingRate());   // designed oversampled
     const int nc = compressor.getNumActiveCrossovers();
     for (int j = 0; j < PM::compSections; ++j)
         subMatch.setCrossover (PM::satSections + j, j < nc, 2, compressor.getCrossover (j));   // 24 dB/oct Linkwitz-Riley
     subMatch.setDcFilter (PM::satDc, saturator.isEnabled());
+    // the distortions' DC filters are the last stage of each unit: their phase reaches the output directly
+    subMatch.setDcFilter (PM::clip1Dc, clip1.isDcFilterActive());
+    subMatch.setDcFilter (PM::clip2Dc, clip2.isDcFilterActive());
 }
 
 void CodexProcessor::updateLatency()

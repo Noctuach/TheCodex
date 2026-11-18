@@ -1021,11 +1021,18 @@ int main (int argc, char** argv)
         setParam (proc, ID::subPhase, best);
         const auto aligned = render (proc, 1);
         const float lAligned = lowBandDb (aligned, 0.15, 0.33);
-        std::cout << "\nSub layer: ALIGN picked " << best << " degrees -> fundamental " << juce::String (lAligned, 1) << " dB";
+        setParam (proc, ID::subPhase, std::fmod (best + 180.0f, 360.0f));
+        const float lAnti = lowBandDb (render (proc, 1), 0.15, 0.33);
+        setParam (proc, ID::subPhase, best);
+        std::cout << "\nSub layer: ALIGN picked " << best << " degrees -> fundamental " << juce::String (lAligned, 1) << " dB ("
+                  << juce::String (lAnti, 1) << " dB at " << std::fmod (best + 180.0f, 360.0f) << " degrees)";
         if (lAligned < std::max (lOn, lInv) - 0.5f || lAligned < lOff + 3.0f) ++bad;
         std::cout << "\nSub layer: fundamental (< 80 Hz) " << juce::String (lOff, 1) << " dB off, " << juce::String (lOn, 1)
                   << " dB on, " << juce::String (lInv, 1) << " dB with 180 degrees (latency " << proc.getLatencySamples() << " samples)\n";
-        if (std::abs (lOn - lInv) < 3.0f) ++bad;   // the phase control must matter
+        // the phase control must matter: ALIGN's pick against its opposite. (Not 0 against 180 degrees: the sub follows the
+        // distortions' DC filters linearly, while this preset's hard clipping squares most of their phase away again, so
+        // the best phase here is ~330 degrees and 0 / 180 straddle it.)
+        if (lAligned - lAnti < 3.0f) ++bad;
 
         proc.presets.loadPreset (7);
         setParam (proc, ID::velocity, 1.0f);

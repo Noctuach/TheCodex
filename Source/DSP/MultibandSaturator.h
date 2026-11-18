@@ -382,6 +382,8 @@ namespace sat
         int getNumActiveCrossovers() const noexcept { return settings.enabled ? juce::jlimit (1, maxBands, settings.numBands) - 1 : 0; }
         int getCrossoverSlope() const noexcept { return settings.slope; }
         float getCrossover (int j) const noexcept { return lastXf[(size_t) j]; }
+        /** The rate the crossovers are designed and run at (the oversampled rate). */
+        double getProcessingRate() const noexcept { return rate; }
 
         float getAndResetBandPeak (int b) { return bandPeaks[(size_t) b].exchange (0.0f); }
 

@@ -2,9 +2,10 @@
 //  - the host latency is the rounded sum of every stage's fractional latency (not a sum of rounded stages), and the
 //    processed signal really arrives at the reported latency (within the rounding residual)
 //  - the sub layer carries the chain's fractional latency, the crossovers' all-pass phase (multiband saturator and
-//    compressor) and the saturator's DC filter: it stays in phase with the processed kick at 30-120 Hz; with a
-//    whole-sample latency and neither module on it is exactly the old integer delay; its phase-match sections
-//    switch and glide without clicks
+//    compressor, the saturator's pre-warped for its oversampled design) and the saturator's and distortions' DC
+//    filters: it stays in phase with the processed kick at 30-120 Hz; with a whole-sample latency and neither module
+//    on it is exactly the old integer delay; its phase-match sections switch and glide without clicks or level dips,
+//    and are already in place right after prepareToPlay
 #pragma once
 #include <complex>
 #include <memory>
@@ -195,7 +196,7 @@ static int latencyAndSubAlignTests()
     {
         std::cout << "\nSub layer: phase against the processed kick, relative to the all-off chain (degrees)\n";
         const double freqs[] = { 40.0, 52.0, 80.0, 120.0 };
-        struct Cfg { const char* name; std::function<void (CodexProcessor&)> set; bool checked; };
+        struct Cfg { const char* name; std::function<void (CodexProcessor&)> set; double limit; };   // degrees
         auto satAndComp = [] (CodexProcessor& p)
         {
             // Saturation at its defaults (3 bands, 24 dB/oct, 2x) with the bands bypassed, Compressor 3 bands at ratio 1:
@@ -207,13 +208,13 @@ static int latencyAndSubAlignTests()
         };
         const Cfg cfgs[] = {
             { "Sat 3 bands + Comp 3 bands (D1 / D2 off at 4x)", [satAndComp] (CodexProcessor& p)
-              { allOff (p); for (int st = 1; st <= 2; ++st) setParam (p, ID::clip (st, "OS"), 2); satAndComp (p); }, true },
+              { allOff (p); for (int st = 1; st <= 2; ++st) setParam (p, ID::clip (st, "OS"), 2); satAndComp (p); }, 2.0 },
             { "Sat 4 bands LR8 (X1 45 Hz, 4x) + Comp 3 bands, D1 16x", [satAndComp] (CodexProcessor& p)
               {
                   allOff (p); satAndComp (p);
                   setParam (p, ID::clip (1, "OS"), 4);
                   setParam (p, ID::sat ("Bands"), 4); setParam (p, ID::sat ("Slope"), 3); setParam (p, ID::sat ("OS"), 2); setParam (p, ID::sat ("X1"), 45.0f);
-              }, true },
+              }, 2.0 },
             { "Sat 3 bands LR2 (X1 70 Hz, 8x), D1 2x + D2 4x off", [] (CodexProcessor& p)
               {
                   allOff (p);
@@ -221,12 +222,27 @@ static int latencyAndSubAlignTests()
                   setParam (p, ID::sat ("OS"), 3);
                   setParam (p, ID::sat ("On"), 1); setParam (p, ID::sat ("Slope"), 1); setParam (p, ID::sat ("X1"), 70.0f);
                   for (int b = 0; b < sat::maxBands; ++b) setParam (p, ID::satBand (b, "Bypass"), 1);
-              }, true },
-            // information only: the default distortions (+18 dB / +6 dB drive) are on, with their 10 Hz DC filters, which
-            // the sub does not follow (see SubPhaseMatch.h: behind clipping they hardly move a real kick's fundamental;
-            // on a steady sine they turn it by up to ~22 degrees at 40 Hz)
-            { "factory defaults + Saturation + Compressor 3 bands (info)", [] (CodexProcessor& p)
-              { setParam (p, ID::sat ("On"), 1); setParam (p, ID::cmp ("On"), 1); setParam (p, ID::cmp ("Bands"), 3); }, false },
+              }, 2.0 },
+            // the saturator designs its crossovers at the oversampled rate: the sub's base-rate sections are pre-warped
+            // (high crossovers at 8x were up to 5 degrees off at 120 Hz without it)
+            { "Sat 6 bands LR8 8x, X1-X5 at 16 kHz", [] (CodexProcessor& p)
+              {
+                  allOff (p);
+                  setParam (p, ID::sat ("On"), 1); setParam (p, ID::sat ("Bands"), 6); setParam (p, ID::sat ("Slope"), 3); setParam (p, ID::sat ("OS"), 3);
+                  for (int j = 1; j <= 5; ++j) setParam (p, ID::sat (("X" + juce::String (j)).toRawUTF8()), 16000.0f);
+                  for (int b = 0; b < sat::maxBands; ++b) setParam (p, ID::satBand (b, "Bypass"), 1);
+              }, 2.0 },
+            // a driven distortion's DC filter is its last stage: its phase reaches the output, and the sub follows it
+            { "factory defaults, D2 off, + Saturation (bands bypassed) + Compressor 3 bands", [satAndComp] (CodexProcessor& p)
+              { setParam (p, ID::clip (2, "On"), 0); satAndComp (p); }, 2.0 },
+            { "factory defaults, D1 off, + Saturation (bands bypassed) + Compressor 3 bands", [satAndComp] (CodexProcessor& p)
+              { setParam (p, ID::clip (1, "On"), 0); satAndComp (p); }, 2.0 },
+            // the whole default chain: D1 (Tanh +18 dB) and its DC filter feed D2 (Hard Clip) and the driven saturator
+            // bands, which square the DC filter's tilt partly away again. That part is not linear (it depends on the
+            // level), so a linear phase match cannot follow it exactly: ~5.6 degrees at 40 Hz remain (-22.5 before the
+            // distortions' DC filters were matched)
+            { "factory defaults + Saturation + Compressor 3 bands", [] (CodexProcessor& p)
+              { setParam (p, ID::sat ("On"), 1); setParam (p, ID::cmp ("On"), 1); setParam (p, ID::cmp ("Bands"), 3); }, 7.0 },
         };
         double worst = 0.0;
         for (const auto& cfg : cfgs)
@@ -240,13 +256,14 @@ static int latencyAndSubAlignTests()
                 ds.push_back (d);
             }
             std::cout << "\n";
-            for (size_t k = 0; k < ds.size() && cfg.checked; ++k)
+            for (size_t k = 0; k < ds.size(); ++k)
             {
-                worst = std::max (worst, std::abs (ds[k]));
-                check (std::abs (ds[k]) < 2.0, juce::String (cfg.name) + " at " + juce::String (freqs[k]) + " Hz: sub within 2 degrees of the chain");
+                if (cfg.limit <= 2.0) worst = std::max (worst, std::abs (ds[k]));
+                check (std::abs (ds[k]) < cfg.limit, juce::String (cfg.name) + " at " + juce::String (freqs[k]) + " Hz: sub within "
+                                                          + juce::String (cfg.limit, 0) + " degrees of the chain");
             }
         }
-        std::cout << "   worst " << juce::String (worst, 2) << " degrees\n";
+        std::cout << "   worst " << juce::String (worst, 2) << " degrees (linear chains)\n";
     }
 
     // ---- 4. Whole-sample latency, no crossover / DC filter: the sub is exactly the old integer delay ----
@@ -305,6 +322,65 @@ static int latencyAndSubAlignTests()
         }
         std::cout << "   " << juce::String (worst / steady, 2) << " x the clean sine's\n";
         check (worst < 4.0 * steady, "phase-match switching / crossover moves stay click-free");
+    }
+    // ---- 6. Right after prepareToPlay the sub is already phase-matched (no 20 ms fade of the match at full sub level) ----
+    {
+        std::cout << "\nSub layer: level right after prepare, 120 Hz sine, Saturation 3 bands (X1 120 Hz) + Compressor 3 bands (linear)\n";
+        const double hz = 120.0;
+        auto make = [hz] (bool subOn)
+        {
+            auto p = std::make_unique<CodexProcessor>();
+            allOff (*p);
+            setParam (*p, ID::sat ("On"), 1);
+            for (int b = 0; b < sat::maxBands; ++b) setParam (*p, ID::satBand (b, "Bypass"), 1);
+            setParam (*p, ID::cmp ("On"), 1); setParam (*p, ID::cmp ("Bands"), 3); setParam (*p, ID::cmp ("Auto"), 0);
+            for (int b = 0; b < 3; ++b) setParam (*p, ID::cmpBand (b, "Ratio"), 1.0f);
+            steadySine (*p, hz);
+            setParam (*p, ID::subOn, subOn ? 1.0f : 0.0f);
+            return renderL (*p, (int) (1.2 * sr));
+        };
+        const auto a = make (false), b = make (true);
+        const int period = (int) std::ceil (sr / hz);
+        auto peak = [&] (int from)
+        {
+            double m = 0.0;
+            for (int i = from; i < from + period; ++i) m = std::max (m, (double) std::abs (b[(size_t) i] - a[(size_t) i]));
+            return m;
+        };
+        const double steady = peak ((int) (1.0 * sr));
+        double lowest = 1.0e9;
+        // from 10 ms on: the sine, its low-pass and the all-passes start from rest at sample 0 (a few ms of onset)
+        for (int from = (int) (0.010 * sr); from <= (int) (0.024 * sr); from += 24) lowest = std::min (lowest, peak (from) / steady);
+        std::cout << "   lowest one-cycle sub peak 10-32 ms after prepare: " << juce::String (juce::Decibels::gainToDecibels (lowest), 2) << " dB of the steady level\n";
+        check (lowest > juce::Decibels::decibelsToGain (-1.0), "sub at full level from the first cycle after prepare (match not fading in)");
+    }
+
+    // ---- 7. Switching a crossover section in / out / to another slope never dips the sub (no dry + all-pass cancellation) ----
+    {
+        std::cout << "\nSub layer: level while phase-match sections switch (80 Hz sine at its crossover frequency)\n";
+        using PM = subalign::PhaseMatch;
+        PM pm;
+        pm.prepare (sr);
+        const double hz = 80.0, w = juce::MathConstants<double>::twoPi * hz / sr;
+        const int len = (int) (1.2 * sr), chunk = 256, period = (int) std::ceil (sr / hz);
+        std::vector<float> y ((size_t) len);
+        for (int pos = 0; pos < len; pos += chunk)
+        {
+            const double t = pos / sr;
+            pm.setCrossover (0, t >= 0.1 && t < 0.7, t >= 0.4 ? 3 : 2, 80.0f);   // in, slope change while in, out
+            pm.setCrossover (PM::satSections, t >= 0.2 && t < 0.9, 2, 80.0f);
+            for (int i = pos; i < std::min (len, pos + chunk); ++i) y[(size_t) i] = pm.process (0.5f * (float) std::sin (w * i));
+        }
+        double lowest = 1.0e9;
+        for (int from = (int) (0.05 * sr); from + period <= len; from += 24)
+        {
+            double m = 0.0;
+            for (int i = from; i < from + period; ++i) m = std::max (m, (double) std::abs (y[(size_t) i]));
+            lowest = std::min (lowest, m / 0.5);
+        }
+        std::cout << "   lowest one-cycle peak: " << juce::String (juce::Decibels::gainToDecibels (lowest), 2) << " dB\n";
+        // what remains (~ -0.8 dB for a few ms) is the glide sweeping the section's phase through the sine's own frequency
+        check (lowest > juce::Decibels::decibelsToGain (-1.5), "phase-match fades keep the sub's level (no cancellation at the crossover)");
     }
     return bad;
 }
