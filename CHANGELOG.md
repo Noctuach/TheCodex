@@ -21,6 +21,35 @@ All notable changes to Codex. Versions follow [Semantic Versioning](https://semv
   the host when the button is released. Text fields (preset name, browser search, typing a knob value) still take the keyboard while you type and
   hand it back to the host on Return, Escape, a click elsewhere or closing the dialog. The preset browser no longer
   focuses its search field on open, so the typing keyboard can audition presets.
+- Fixes from a sine stress test. A new tool, CodexSineLab, sends tens of thousands of sines through every module and
+  checks them against the maths. Each fix below has a regression check in the test suite.
+  - **A switched-off distortion is now transparent.** Its 10 Hz DC filter kept running: two "off" units at factory
+    defaults cut 0.9 dB at 30 Hz and turned the phase at 50 Hz by 23°. Audible: a little more sub weight when the
+    distortions are off. The DC filter (and its DC switch) now fades in and out over 20 ms.
+  - **No click after loading or a sample-rate change when a distortion has Offset.** The first samples could jump by
+    up to half of full scale, and silence in gave a small step out. Silence in now gives exact silence out.
+  - **Click-free distortion On and Auto Gain toggles.** The Auto Gain level, the dry path's phase match and the
+    pre / post filter now fade with the unit. The filter no longer rings from an old state when it comes back in (up
+    to full scale at high Resonance). 909 Clean's output is 0.3 dB lower to keep its 1 dB headroom.
+  - **Compressor Gain no longer changes the compression** in Classic and Vari-Mu: +12 dB of make-up used to add
+    about 5 dB of gain reduction. Audible on those two styles whenever band Gain or Auto Gain is not at 0 dB; the
+    other nine styles are unchanged.
+  - **The sub layer stays in phase with the kick.** It now follows the phase of the saturator and compressor
+    crossovers, the distortion and saturator DC filters and the oversamplers' fractional delay. With multiband
+    saturation and compression it was up to 170° off at 40-120 Hz. Audible: a fuller low end where the sub meets the
+    kick, and Sub ALIGN may pick a different phase on some presets (909 Rawstyle: 330° instead of 0°). Switching
+    bands no longer dips the sub, and the sub is aligned from the first note.
+  - **The reported latency is exact** with the output clipper on. Some oversampling combinations reported one sample
+    too few (D1 16x + D2 8x + clipper: 14 instead of 15). Exported WAVs and Sub ALIGN follow.
+  - **Long reverb tails keep their highs.** At long Decay settings the tail above about 1 kHz died up to 30 % too
+    fast; every band now decays the way Decay says. Audible: longer, brighter tails at long decays. A Bass Xover above
+    the High Xover no longer makes the tail ring longer than set (up to 47 s at 20 s), changing Size or Mode during a tail no
+    longer makes it grow, and the Mix / Depth glides reach their exact value.
+  - **One bad sample no longer silences Codex** until playback restarts. After a NaN or infinite value every module
+    is cleared and the sound fades back in over 10 ms. Damaged parameter values in a session or from the host fall
+    back to the default.
+  - The distortion filter's documentation now gives the real resonance peak (+17.9 dB at full Resonance). The sound
+    is unchanged.
 
 ### Added
 - Menu → **Keyboard shortcuts in Codex** (off by default, saved in the user settings): brings back the plug-in's own
