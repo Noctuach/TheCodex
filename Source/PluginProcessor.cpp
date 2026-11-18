@@ -694,7 +694,7 @@ void CodexProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiB
             else
                 subFrac.set (false, 0.0);
             updateSubPhaseMatch();
-            const bool silent = ! subGain.isSmoothing() && subGain.getTargetValue() == 0.0f;
+            const bool silent = ! subGain.isSmoothing() && juce::exactlyEqual (subGain.getTargetValue(), 0.0f);
             if (silent) { subFrac.reset(); subMatch.snapAndClear(); }   // nothing is heard: no need to filter
             const bool frac = subFrac.active && ! silent, match = ! silent && subMatch.isActive();
             for (int i = 0; i < n; ++i)

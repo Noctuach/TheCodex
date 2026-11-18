@@ -116,7 +116,7 @@ static int distortionFixTests()
                     for (int i = (int) (0.1 * sr); i < n; ++i)   // after the 20 ms switch-off glide from the prepare() defaults
                         diff = std::max (diff, std::abs (b.getSample (ch, i) - in.getSample (ch, i)));
                 std::cout << "  " << (int) hz << " Hz, OS " << ClipDistortion::oversamplingNames()[os] << ", DC on: max |out - in| " << diff << " (from 100 ms)\n";
-                check (diff == 0.0f, juce::String ((int) hz) + " Hz OS " + ClipDistortion::oversamplingNames()[os] + ": off unit not bit-exact");
+                check (juce::exactlyEqual (diff, 0.0f), juce::String ((int) hz) + " Hz OS " + ClipDistortion::oversamplingNames()[os] + ": off unit not bit-exact");
             }
             // OS 4x (the default): gain 0 dB and phase 0 deg once the oversampler's latency is removed, and the DC switch
             // makes no difference at all
@@ -135,7 +135,7 @@ static int distortionFixTests()
                 std::cout << "  " << (int) hz << " Hz, OS 4x, DC on: " << juce::String (gainDb, 4) << " dB, " << juce::String (phaseDeg, 3)
                           << " deg (latency " << lat << " removed); DC on vs off max diff " << diff << "\n";
                 check (std::abs (gainDb) < 0.005 && std::abs (phaseDeg) < 0.1, juce::String ((int) hz) + " Hz OS 4x: off unit filters");
-                check (diff == 0.0f, juce::String ((int) hz) + " Hz OS 4x: DC switch changes an off unit");
+                check (juce::exactlyEqual (diff, 0.0f), juce::String ((int) hz) + " Hz OS 4x: DC switch changes an off unit");
             }
         }
     }
@@ -289,8 +289,8 @@ static int processorDistOffTest()
     // level of the low end (fundamental region) with the DC switches on vs off, 50-300 ms
     const float lvlOn = rmsDb (a, 0.05, 0.25), lvlOff = rmsDb (b, 0.05, 0.25);
     std::cout << "\nProcessor defaults, both distortions off: DC switches on vs off: max diff " << diff << " (repeat " << rep << "), level "
-              << juce::String (lvlOn - lvlOff, 3) << " dB: " << (diff == 0.0f && rep == 0.0f ? "OK" : "FAILED") << "\n";
-    if (rep != 0.0f) { ++bad; std::cout << "   FAILED: render not repeatable\n"; }
-    if (diff != 0.0f) { ++bad; std::cout << "   FAILED: switched-off distortions still filter the low end\n"; }
+              << juce::String (lvlOn - lvlOff, 3) << " dB: " << (juce::exactlyEqual (diff, 0.0f) && juce::exactlyEqual (rep, 0.0f) ? "OK" : "FAILED") << "\n";
+    if (! juce::exactlyEqual (rep, 0.0f)) { ++bad; std::cout << "   FAILED: render not repeatable\n"; }
+    if (! juce::exactlyEqual (diff, 0.0f)) { ++bad; std::cout << "   FAILED: switched-off distortions still filter the low end\n"; }
     return bad;
 }

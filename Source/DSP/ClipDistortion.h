@@ -255,7 +255,7 @@ public:
                     outPk = std::max (outPk, std::abs (v));
                 }
             }
-            if (! dcAmount.isSmoothing() && dcAmount.getTargetValue() == 0.0f) { dcX = { 0.0f, 0.0f }; dcY = { 0.0f, 0.0f }; }
+            if (! dcAmount.isSmoothing() && juce::exactlyEqual (dcAmount.getTargetValue(), 0.0f)) { dcX = { 0.0f, 0.0f }; dcY = { 0.0f, 0.0f }; }
         }
         else
         {

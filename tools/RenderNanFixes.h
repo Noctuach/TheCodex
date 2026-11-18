@@ -173,13 +173,13 @@ static int nanRecoveryTests()
                 {
                     const float v = out.getSample (ch, i);
                     if (! std::isfinite (v)) ++nonFinite;
-                    else if (v != 0.0f && std::abs (v) < FLT_MIN) ++denormals;
+                    else if (! juce::exactlyEqual (v, 0.0f) && std::abs (v) < FLT_MIN) ++denormals;
                 }
             // the guard mutes the non-finite samples (exact zeros where the clean render plays) and clears every state
             // at the end of that chunk
             int muted = nanAt;
-            while (muted < out.getNumSamples() && ! (out.getSample (0, muted) == 0.0f && out.getSample (1, muted) == 0.0f
-                                                     && ref.getSample (0, muted) != 0.0f)) ++muted;
+            while (muted < out.getNumSamples() && ! (juce::exactlyEqual (out.getSample (0, muted), 0.0f) && juce::exactlyEqual (out.getSample (1, muted), 0.0f)
+                                                     && ! juce::exactlyEqual (ref.getSample (0, muted), 0.0f))) ++muted;
             const int recoverAt = (muted / 256 + 1) * 256;
             // playing again two blocks after the recovery (it fades in over 10 ms), plus the chain's latency: a cleared
             // linear-phase EQ outputs its new input only after its latency, and its FIR needs about a block of the restarted
@@ -243,14 +243,14 @@ static int nanRecoveryTests()
             std::cout << "  " << id.paddedRight (' ', 12) << " NaN reached the raw value: " << (reached ? "yes" : "no")
                       << ", now " << raw << ", peak " << juce::String (out.getMagnitude (0, out.getNumSamples()), 3)
                       << ", max |diff| vs default " << maxDiff << ", guard tripped: " << (hurt->safetyTripped.load() ? "yes" : "no") << "\n";
-            check (maxDiff == 0.0f && ! hurt->safetyTripped.load() && std::isfinite (raw), id + ": a NaN parameter changed the output");
+            check (juce::exactlyEqual (maxDiff, 0.0f) && ! hurt->safetyTripped.load() && std::isfinite (raw), id + ": a NaN parameter changed the output");
             // the parameter itself (what the host and the GUI read) and the saved state are back at the default too
             auto* h = hurt->apvts.getParameter (id);
             const float value = h->getValue();
             const auto saved = hurt->apvts.copyState().getChildWithProperty ("id", id).getProperty ("value");
             std::cout << "  " << juce::String().paddedRight (' ', 12) << " parameter value now " << value << " (default "
                       << h->getDefaultValue() << "), saved state value " << saved.toString() << "\n";
-            check (value == h->getDefaultValue(), id + ": the parameter still reads a non-finite value");
+            check (juce::exactlyEqual (value, h->getDefaultValue()), id + ": the parameter still reads a non-finite value");
             check (std::isfinite ((float) saved) && juce::approximatelyEqual ((float) saved, h->convertFrom0to1 (h->getDefaultValue())),
                    id + ": the state tree still holds a non-finite value");
         }
@@ -282,7 +282,7 @@ static int nanRecoveryTests()
             const float raw = dst->apvts.getRawParameterValue (id)->load();
             std::cout << "  " << id.paddedRight (' ', 12) << " parameter " << h->getValue() << " (default " << h->getDefaultValue()
                       << "), raw " << raw << "\n";
-            check (h->getValue() == h->getDefaultValue() && juce::approximatelyEqual (raw, h->convertFrom0to1 (h->getDefaultValue())),
+            check (juce::exactlyEqual (h->getValue(), h->getDefaultValue()) && juce::approximatelyEqual (raw, h->convertFrom0to1 (h->getDefaultValue())),
                    id + ": a non-finite saved value did not load as the default");
         }
         std::cout << "  non-finite values in the state saved again: " << (savedNaN.isEmpty() ? juce::String ("none") : savedNaN) << "\n";

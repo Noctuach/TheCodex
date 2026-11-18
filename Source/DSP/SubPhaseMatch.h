@@ -80,11 +80,11 @@ namespace subalign
             if (s.on)
             {
                 s.slopeWant = slope;
-                if (fc != s.fcIn || designRate != s.rateIn)
+                if (! juce::exactlyEqual (fc, s.fcIn) || ! juce::exactlyEqual (designRate, s.rateIn))
                 {
                     s.fcIn = fc;
                     s.rateIn = designRate;
-                    s.fcWant = designRate == rate ? fc : warp (fc, designRate);
+                    s.fcWant = juce::exactlyEqual (designRate, rate) ? fc : warp (fc, designRate);
                 }
             }
             plan (s);
@@ -109,7 +109,7 @@ namespace subalign
                 if (s.isDc) s.amount = s.target;
                 else if (s.on)
                 {
-                    if (s.slope != s.slopeWant || s.fc != s.fcWant || s.rampLeft > 0) design (s, s.slopeWant, s.fcWant);
+                    if (s.slope != s.slopeWant || ! juce::exactlyEqual (s.fc, s.fcWant) || s.rampLeft > 0) design (s, s.slopeWant, s.fcWant);
                     s.amount = s.target = 1.0f;
                     s.fcGoal = s.fcWant;
                 }
@@ -140,7 +140,7 @@ namespace subalign
                 }
                 float y = x;
                 for (int k = 0; k < s.numFilters; ++k) y = s.f[(size_t) k].process (y);
-                if (s.amount == s.target) { x = y; continue; }   // fully in (amount 1)
+                if (juce::exactlyEqual (s.amount, s.target)) { x = y; continue; }   // fully in (amount 1)
                 s.amount = s.target > s.amount ? std::min (s.target, s.amount + step) : std::max (s.target, s.amount - step);
                 const float g = s.amount * s.amount * (3.0f - 2.0f * s.amount);   // smoothstep: no corner at either end
                 x += g * (y - x);
@@ -220,7 +220,7 @@ namespace subalign
             if (s.amount <= 0.0f)   // out: free to redesign
             {
                 if (! s.on) { s.target = 0.0f; return; }
-                if (s.slope != s.slopeWant || s.fc != park) design (s, s.slopeWant, park);
+                if (s.slope != s.slopeWant || ! juce::exactlyEqual (s.fc, park)) design (s, s.slopeWant, park);
                 s.fcGoal = park;
                 s.target = 1.0f;
                 return;
@@ -230,7 +230,7 @@ namespace subalign
             {
                 if (keep) { s.fcGoal = s.fcWant; return; }
                 s.fcGoal = park;                         // leaving: back to the park first, then fade out
-                if (s.fc == park) s.target = 0.0f;
+                if (juce::exactlyEqual (s.fc, park)) s.target = 0.0f;
                 return;
             }
             s.fcGoal = park;                             // fading (at the park)
@@ -244,8 +244,8 @@ namespace subalign
             {
                 if (s.isDc || (s.amount <= 0.0f && s.target <= 0.0f)) continue;
                 plan (s);
-                if (s.fc == s.fcGoal) continue;
-                if (s.goalFor != s.fcGoal) { s.goalFor = s.fcGoal; s.logGoal = std::log (s.fcGoal); }
+                if (juce::exactlyEqual (s.fc, s.fcGoal)) continue;
+                if (! juce::exactlyEqual (s.goalFor, s.fcGoal)) { s.goalFor = s.fcGoal; s.logGoal = std::log (s.fcGoal); }
                 // two one-pole stages in log frequency: the glide starts and ends without a corner in its speed
                 s.logMid += glideK * (s.logGoal - s.logMid);
                 const float lf = s.logFc + glideK * (s.logMid - s.logFc);
