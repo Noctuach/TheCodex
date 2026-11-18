@@ -98,7 +98,7 @@ CodexProcessor::CodexProcessor()
     for (auto* prm : getParameters())
         if (auto* ranged = dynamic_cast<juce::RangedAudioParameter*> (prm))
             if (auto* raw = apvts.getRawParameterValue (ranged->getParameterID()))
-                paramGuard.emplace_back (raw, ranged->convertFrom0to1 (ranged->getDefaultValue()));
+                paramGuard.push_back ({ raw, ranged->convertFrom0to1 (ranged->getDefaultValue()), ranged });
 }
 
 bool CodexProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
@@ -118,7 +118,7 @@ void CodexProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     subFrac.reset();
     subMatch.prepare (sampleRate);
     subGain.reset (sampleRate, 0.02);
-    recoverFade = 1.0f;
+    recoverFade = recoverInFade = 1.0f;
     for (auto* v : { &left, &right, &mid, &sub, &hitTime, &hitTime2 })
         v->assign ((size_t) chunkSize, 0.0f);
     scopePos = -1;
@@ -191,6 +191,7 @@ void CodexProcessor::recoverFromNonFinite() noexcept
     subFrac.reset();
     subMatch.clearState();
     recoverFade = 0.0f;
+    recoverInFade = 0.0f;
     safetyRecoveries.fetch_add (1, std::memory_order_relaxed);
 }
 
@@ -231,8 +232,27 @@ void CodexProcessor::updateLatency()
         triggerAsyncUpdate();
 }
 
+void CodexProcessor::repairNonFiniteParameters()
+{
+    paramRepairPending.store (false);
+    for (auto& g : paramGuard)
+        if (! std::isfinite (g.param->getValue()) || ! std::isfinite (g.raw->load()))
+            g.param->setValueNotifyingHost (g.param->getDefaultValue());   // parameter, state tree and host agree again
+}
+
+void CodexProcessor::sanitiseParameterState (juce::ValueTree& state) const
+{
+    for (auto child : state)
+        if (child.hasType ("PARAM") && child.hasProperty ("value"))
+            if (! std::isfinite ((float) child.getProperty ("value")))
+                if (auto* prm = apvts.getParameter (child.getProperty ("id").toString()))
+                    child.setProperty ("value", prm->convertFrom0to1 (prm->getDefaultValue()), nullptr);
+}
+
 void CodexProcessor::handleAsyncUpdate()
 {
+    if (paramRepairPending.load())
+        repairNonFiniteParameters();
     const int latency = latencyTarget.load();
     if (latency != getLatencySamples())
         setLatencySamples (latency);
@@ -342,9 +362,20 @@ void CodexProcessor::beginCustomEdit (int stage, const juce::String& transaction
 void CodexProcessor::updateParameters()
 {
     // a non-finite parameter value (from the host or a damaged state) falls back to the parameter's default
-    for (auto& [raw, fallback] : paramGuard)
-        if (! std::isfinite (raw->load (std::memory_order_relaxed)))
-            raw->store (fallback);
+    bool repaired = false;
+    for (auto& g : paramGuard)
+        if (! std::isfinite (g.raw->load (std::memory_order_relaxed)))
+        {
+            g.raw->store (g.fallback);
+            repaired = true;
+        }
+    if (repaired && ! paramRepairPending.exchange (true))
+    {
+        if (juce::MessageManager::existsAndIsCurrentThread())
+            repairNonFiniteParameters();
+        else
+            triggerAsyncUpdate();
+    }
 
     KickVoice::Settings s;
     s.engine           = (int) engine->load();
@@ -593,6 +624,20 @@ void CodexProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiB
             const int at = nanTestSample.exchange (-1);
             if (at >= 0 && at < n) l[at] = std::numeric_limits<float>::quiet_NaN();
         }
+        // after a recovery: the restart is faded in where it enters the chain (voice and sub layer), 10 ms raised
+        // cosine, so every cleared delay line (linear-phase EQ, lookahead, oversamplers, the sub's delay) passes on a
+        // smooth onset after its latency instead of a mid-kick step
+        if (recoverInFade < 1.0f)
+        {
+            const float step = (float) (1.0 / (0.010 * getSampleRate()));
+            for (int i = 0; i < n; ++i)
+            {
+                recoverInFade = std::min (1.0f, recoverInFade + step);
+                const float g = 0.5f - 0.5f * std::cos (juce::MathConstants<float>::pi * recoverInFade);
+                l[i] *= g;
+                sub[(size_t) i] *= g;
+            }
+        }
         std::copy (l, l + n, r);
 
         // Effect modules in the user's order (Modern by default: Space -> Distortion 1 -> EQ 1 -> Distortion 2 ->
@@ -735,7 +780,9 @@ void CodexProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiB
 
 void CodexProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
-    if (auto xml = apvts.copyState().createXml())
+    auto state = apvts.copyState();
+    sanitiseParameterState (state);   // a session never saves a NaN / inf parameter value
+    if (auto xml = state.createXml())
         copyXmlToBinary (*xml, destData);
 }
 
@@ -745,6 +792,7 @@ void CodexProcessor::setStateInformation (const void* data, int sizeInBytes)
         if (xml->hasTagName (apvts.state.getType()))
         {
             auto tree = juce::ValueTree::fromXml (*xml);
+            sanitiseParameterState (tree);   // a damaged session's NaN / inf values load as the defaults
             // Sessions saved before the module order existed ran the Classic order (reverb last): keep their sound
             if (! tree.getChildWithProperty ("id", ID::chainOrder).isValid())
             {

@@ -2,7 +2,10 @@
 //  - one NaN inside the effect chain no longer silences the plug-in until the next prepare: the output guard clears
 //    every module's state at the end of that chunk and fades back in, so the output is finite, free of denormals and
 //    playing again within two blocks, and the following hits match a clean render
-//  - a NaN parameter value (from a host or a damaged state) never reaches the DSP: it falls back to the default
+//  - the restart after a recovery is faded in at the chain's input, so it reaches the output without a step after any
+//    latency (linear-phase EQ, lookahead, sub delay): no larger sample-to-sample step than the clean render
+//  - a NaN parameter value (from a host or a damaged state) never reaches the DSP: it falls back to the default, and the
+//    parameter itself, the state tree and a saved / loaded session hold the default too
 //  - the distortion's resonant filter keeps its tuned level: LP12 at full resonance peaks at +17.9 dB (pinned +-0.1 dB)
 #pragma once
 #include <cfloat>
@@ -120,19 +123,48 @@ static int nanRecoveryTests()
     auto check = [&] (bool ok, const juce::String& what) { if (! ok) { ++bad; std::cout << "   FAILED: " << what << "\n"; } };
 
     // ---- 1. One NaN inside the chain: every module recovers, playing again within two blocks (+ the chain latency) ----
+    //  The restart is faded in where it enters the chain (voice and sub layer), so it reaches the output smoothly after
+    //  any latency: from the recovery to one block past the latency, the largest sample-to-sample step and the loudest
+    //  64-sample window must not exceed the clean render's (a cleared linear-phase EQ, lookahead line or sub delay used
+    //  to let the mid-kick restart through as an unfaded step once its latency had passed)
     {
         std::cout << "\nNon-finite recovery: one NaN into the chain (all modules on) vs a clean render\n"
-                  << "  EQ mode           recoveries  non-finite  denormals  blk+2 dB (clean)   hit 3 / hit 4 dB vs clean\n";
+                  << "  EQ mode / lookahead              recoveries  non-finite  denormals  blk+2 dB (clean)   hit 3 / hit 4 dB vs clean"
+                     "   onset max step (clean)   onset peak 64 dB (clean)\n";
         const int nanAt = 23 * block + 100;          // 0.25 s: in the first hit's tail, first chunk of its block
-        const int nanBlockEnd = 24 * block;           // end of the block that carries the NaN
         const int beat = (int) (hitEvery * sr);
-        for (int mode = 0; mode < 3; ++mode)
+        auto maxStep = [] (const juce::AudioBuffer<float>& b, int from, int to)
         {
+            float m = 0.0f;
+            for (int ch = 0; ch < 2; ++ch)
+                for (int i = from + 1; i < to; ++i) m = std::max (m, std::abs (b.getSample (ch, i) - b.getSample (ch, i - 1)));
+            return m;
+        };
+        auto peakWindowDb = [] (const juce::AudioBuffer<float>& b, int from, int to)
+        {
+            double m = -300.0;
+            for (int i = from; i + 64 <= to; i += 16) m = std::max (m, rmsDbOf (b, i, 64));
+            return m;
+        };
+        // look: compressor lookahead (choice index, 4 = 10 ms); comp false: compressor off. With the compressor on, the
+        // recovery clears its (non-finite) gain reduction, so the tail after it plays about 4 dB louder until the next
+        // hit (6 dB bound): the level bound is tight (1 dB) only without it
+        struct Case { int mode, look; bool comp; };
+        const Case cases[] = { { 0, 0, true }, { 1, 0, true }, { 2, 0, true }, { 0, 4, true }, { 0, 0, false }, { 2, 0, false } };
+        for (const auto& c : cases)
+        {
+            const int mode = c.mode;
+            auto setup = [&c, mode] (CodexProcessor& p)
+            {
+                everythingOn (p, mode);
+                setParam (p, ID::cmp ("Look"), (float) c.look);
+                setParam (p, ID::cmp ("On"), c.comp ? 1.0f : 0.0f);
+            };
             auto clean = std::make_unique<CodexProcessor>();
-            everythingOn (*clean, mode);
+            setup (*clean);
             const auto ref = renderHits (*clean, -1);
             auto hurt = std::make_unique<CodexProcessor>();
-            everythingOn (*hurt, mode);
+            setup (*hurt);
             const auto out = renderHits (*hurt, nanAt);
 
             int nonFinite = 0, denormals = 0;
@@ -143,23 +175,40 @@ static int nanRecoveryTests()
                     if (! std::isfinite (v)) ++nonFinite;
                     else if (v != 0.0f && std::abs (v) < FLT_MIN) ++denormals;
                 }
-            // the block after the NaN's block (the recovery fades in over 10 ms of it) must play: +2 blocks from the NaN,
-            // plus the chain's latency (a cleared linear-phase EQ outputs its new input only after its latency)
-            const int at = nanBlockEnd + block + hurt->getLatencySamples();
+            // the guard mutes the non-finite samples (exact zeros where the clean render plays) and clears every state
+            // at the end of that chunk
+            int muted = nanAt;
+            while (muted < out.getNumSamples() && ! (out.getSample (0, muted) == 0.0f && out.getSample (1, muted) == 0.0f
+                                                     && ref.getSample (0, muted) != 0.0f)) ++muted;
+            const int recoverAt = (muted / 256 + 1) * 256;
+            // playing again two blocks after the recovery (it fades in over 10 ms), plus the chain's latency: a cleared
+            // linear-phase EQ outputs its new input only after its latency, and its FIR needs about a block of the restarted
+            // signal on both sides of its centre before its output reaches the clean level
+            const int at = recoverAt + 2 * block + hurt->getLatencySamples();
             const double after = rmsDbOf (out, at, block), afterRef = rmsDbOf (ref, at, block);
+            // the onset: from the recovery to one block past the latency
+            const float step = maxStep (out, recoverAt, at + block), stepRef = maxStep (ref, recoverAt, at + block);
+            const double onset = peakWindowDb (out, recoverAt, at + block), onsetRef = peakWindowDb (ref, recoverAt, at + block);
             // later hits: the state cleared by the recovery (reverb tail, compressor memory) has died away
             const double h3 = rmsDbOf (out, 2 * beat, beat) - rmsDbOf (ref, 2 * beat, beat);
             const double h4 = rmsDbOf (out, 3 * beat, beat) - rmsDbOf (ref, 3 * beat, beat);
             const int rec = hurt->safetyRecoveries.load();
-            std::cout << "  " << juce::String (eq::processingModeNames()[mode]).paddedRight (' ', 18) << juce::String (rec).paddedLeft (' ', 10)
+            const juce::String m = juce::String (eq::processingModeNames()[mode]) + (c.look > 0 ? " / " + comp::lookaheadNames()[c.look] : juce::String())
+                                   + (c.comp ? juce::String() : juce::String (", comp off"));
+            const double levelMargin = c.comp ? 6.0 : 1.0;
+            std::cout << "  " << m.paddedRight (' ', 31) << juce::String (rec).paddedLeft (' ', 10)
                       << juce::String (nonFinite).paddedLeft (' ', 12) << juce::String (denormals).paddedLeft (' ', 11)
                       << juce::String (after, 1).paddedLeft (' ', 10) << " (" << juce::String (afterRef, 1) << ")"
-                      << juce::String (h3, 3).paddedLeft (' ', 14) << " / " << juce::String (h4, 3) << "\n";
-            const juce::String m (eq::processingModeNames()[mode]);
+                      << juce::String (h3, 3).paddedLeft (' ', 14) << " / " << juce::String (h4, 3)
+                      << juce::String (step, 4).paddedLeft (' ', 16) << " (" << juce::String (stepRef, 4) << ")"
+                      << juce::String (onset, 1).paddedLeft (' ', 18) << " (" << juce::String (onsetRef, 1) << ")\n";
             check (clean->safetyRecoveries.load() == 0 && ! clean->safetyTripped.load(), m + ": the clean render tripped the guard");
             check (rec == 1, m + ": recoveries " + juce::String (rec) + " (one reset must clear every non-finite state)");
             check (nonFinite == 0 && denormals == 0, m + ": non-finite or denormal output samples");
             check (after > afterRef - 6.0 && after > -60.0, m + ": not playing again two blocks after the NaN");
+            check (after < afterRef + levelMargin, m + ": louder than the clean render two blocks after the recovery");
+            check (step <= 1.1f * stepRef, m + ": the restart steps (clicks) after the chain latency");
+            check (onset < onsetRef + levelMargin, m + ": the restart overshoots the clean render's level");
             check (std::abs (h3) < 0.5 && std::abs (h4) < 0.1, m + ": later hits differ from the clean render");
         }
     }
@@ -195,7 +244,49 @@ static int nanRecoveryTests()
                       << ", now " << raw << ", peak " << juce::String (out.getMagnitude (0, out.getNumSamples()), 3)
                       << ", max |diff| vs default " << maxDiff << ", guard tripped: " << (hurt->safetyTripped.load() ? "yes" : "no") << "\n";
             check (maxDiff == 0.0f && ! hurt->safetyTripped.load() && std::isfinite (raw), id + ": a NaN parameter changed the output");
+            // the parameter itself (what the host and the GUI read) and the saved state are back at the default too
+            auto* h = hurt->apvts.getParameter (id);
+            const float value = h->getValue();
+            const auto saved = hurt->apvts.copyState().getChildWithProperty ("id", id).getProperty ("value");
+            std::cout << "  " << juce::String().paddedRight (' ', 12) << " parameter value now " << value << " (default "
+                      << h->getDefaultValue() << "), saved state value " << saved.toString() << "\n";
+            check (value == h->getDefaultValue(), id + ": the parameter still reads a non-finite value");
+            check (std::isfinite ((float) saved) && juce::approximatelyEqual ((float) saved, h->convertFrom0to1 (h->getDefaultValue())),
+                   id + ": the state tree still holds a non-finite value");
         }
+    }
+
+    // ---- 3. A damaged session with a NaN / inf value loads (and saves) the default ----
+    {
+        std::cout << "\nNon-finite state: a saved session with NaN in Tune and inf in Space Mix loads the defaults\n";
+        auto src = std::make_unique<CodexProcessor>();
+        auto tree = src->apvts.copyState();
+        tree.getChildWithProperty ("id", ID::tune).setProperty ("value", std::numeric_limits<double>::quiet_NaN(), nullptr);
+        tree.getChildWithProperty ("id", ID::spc ("Mix")).setProperty ("value", std::numeric_limits<double>::infinity(), nullptr);
+        juce::MemoryBlock blob;
+        if (auto xml = tree.createXml()) juce::AudioProcessor::copyXmlToBinary (*xml, blob);
+        auto dst = std::make_unique<CodexProcessor>();
+        dst->setStateInformation (blob.getData(), (int) blob.getSize());
+        juce::MemoryBlock again;
+        dst->getStateInformation (again);
+        juce::String savedNaN;
+        if (auto xml = juce::AudioProcessor::getXmlFromBinary (again.getData(), (int) again.getSize()))
+        {
+            const auto t = juce::ValueTree::fromXml (*xml);
+            for (auto child : t)
+                if (child.hasProperty ("value") && ! std::isfinite ((float) child.getProperty ("value"))) savedNaN << child.getProperty ("id").toString() << " ";
+        }
+        for (const auto& id : { ID::tune, ID::spc ("Mix") })
+        {
+            auto* h = dst->apvts.getParameter (id);
+            const float raw = dst->apvts.getRawParameterValue (id)->load();
+            std::cout << "  " << id.paddedRight (' ', 12) << " parameter " << h->getValue() << " (default " << h->getDefaultValue()
+                      << "), raw " << raw << "\n";
+            check (h->getValue() == h->getDefaultValue() && juce::approximatelyEqual (raw, h->convertFrom0to1 (h->getDefaultValue())),
+                   id + ": a non-finite saved value did not load as the default");
+        }
+        std::cout << "  non-finite values in the state saved again: " << (savedNaN.isEmpty() ? juce::String ("none") : savedNaN) << "\n";
+        check (savedNaN.isEmpty(), "the plug-in saved a non-finite parameter value: " + savedNaN);
     }
     return bad;
 }

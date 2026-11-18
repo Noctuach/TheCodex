@@ -169,8 +169,16 @@ private:
     static constexpr int chunkSize = 256;
     // Non-finite guard: every parameter's raw value with a finite fallback (its default), checked once per block, so a
     // NaN / inf a host or a damaged state sends never reaches the DSP. Built in the constructor (no audio-thread allocation).
-    std::vector<std::pair<std::atomic<float>*, float>> paramGuard;
-    float recoverFade = 1.0f;   // < 1: fading back in after a recovery
+    struct GuardedParam { std::atomic<float>* raw; float fallback; juce::RangedAudioParameter* param; };
+    std::vector<GuardedParam> paramGuard;
+    // the audio-thread guard only fixes the raw value: the parameter itself (what the host, the GUI and the saved state
+    // read) is set to its default on the message thread (at once when the guard runs there: offline renders, tests)
+    std::atomic<bool> paramRepairPending { false };
+    void repairNonFiniteParameters();
+    /** Message thread: every PARAM value in a state tree that is not finite becomes the parameter's default. */
+    void sanitiseParameterState (juce::ValueTree& state) const;
+    float recoverFade = 1.0f;     // < 1: the output fading back in after a recovery
+    float recoverInFade = 1.0f;   // < 1: the chain's input (voice and sub) fading back in after a recovery
     std::atomic<int> nanTestSample { -1 };
 
     KickVoice voice;
